@@ -3,6 +3,8 @@
 import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
+import { securityHeaders } from "./src/security/headers";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["pg-cloudflare"],
@@ -11,6 +13,7 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: [
+          ...securityHeaders,
           {
             key: "Link",
             value:

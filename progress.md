@@ -10,8 +10,8 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** 7
-- **Done:** 29 / 40
+- **Current phase:** 8
+- **Done:** 32 / 40
 
 ## Blockers
 B3 — The Vercel production rollout awaits the required shared-state confirmation. Phase 0 items 0.6–0.7 are parked at their remaining remote verification step while local implementation continues.
@@ -39,6 +39,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-27 | Search indexes the authoritative published database snapshot and reuses it only while a deterministic content signature is unchanged; anonymous misses use 1,024 daily sample slots with opportunistic cleanup beyond 30 days | Every isolate stays correct after publish, edit, unpublish, or restart; the cache remains optional, and public analytics writes and stored row count are bounded |
 | 2026-08-28 | One request-time publication projection and the explicit `OPAS_SITE_URL` origin drive HTML metadata, sitemap, JSON-LD, llms documents, and per-article Markdown | Every discovery surface applies the same workspace, category, slug, and published-state boundary, while canonical URLs remain exact on Docker, Workers, and the future Vercel target |
 | 2026-08-28 | Article readership and helpfulness use bounded 30-day samples with no cookies or persisted request metadata | Fixed daily slots bound stored rows, ephemeral admission gates bound per-process database attempts, Cloudflare adds a trusted per-requester window, and the report remains honest about collisions and opportunistic physical cleanup |
+| 2026-08-28 | Deployment seeds insert only records that are missing | First boot remains automatic while an administrator's edits survive container restarts and repeat D1 or Neon preparation |
+| 2026-08-28 | Cloudflare bootstrap requires one matching `opas-*` Worker/D1 pair on workers.dev and rejects custom routes | The deploy remains portable to an explicit account while the maintained shared-account workflow cannot reach `opas-landing`, protected domains, or unrelated resources |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -86,9 +88,9 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 6.3 Admin dashboard: views, helpful %, top zero-result queries. **Verify:** data flows end-to-end.
 
 ## Phase 7 — Deploy hardening (Priority 2)
-- [ ] 7.1 `docker compose up` from a clean clone: single `.env`, healthchecks, auto-migrate + seed on first boot. **Verify:** fresh clone → compose up → working seeded help center.
-- [ ] 7.2 CF Workers deploy script + docs (creates D1, migrates, seeds, deploys). **Verify:** clean deploy to workers.dev. May bind `mvp.opas.dev`; NEVER touch `opas.dev` root or `www`.
-- [ ] 7.3 Smoke-test script (curl of key routes incl. search, llms.txt, `.md`) runnable against any base URL.
+- [x] 7.1 `docker compose up` from a clean clone: single `.env`, healthchecks, auto-migrate + seed on first boot. **Verify:** fresh clone → compose up → working seeded help center.
+- [x] 7.2 CF Workers deploy script + docs (creates D1, migrates, seeds, deploys). **Verify:** clean deploy to workers.dev. May bind `mvp.opas.dev`; NEVER touch `opas.dev` root or `www`.
+- [x] 7.3 Smoke-test script (curl of key routes incl. search, `llms.txt`, `.md`) runnable against any base URL.
 - [ ] 7.4 Vercel + Neon verified deploy + docs.
 - [ ] 7.5 README quickstarts for all three targets, with live URLs.
 
@@ -110,6 +112,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-28 — 7.1–7.3 — made all deployment seeds preserve administrator edits, required complete Compose configuration, added a guarded create/migrate/seed/deploy Cloudflare workflow, aligned the stored-MDX URL policy with the documented workerd-compatible CSP, and added one portable read-only smoke suite — 65 tests, lint, typecheck, clean-source Docker build/first boot/non-root runtime/smoke, and cross-workspace seed preservation checks passed; an absent disposable `opas-*` Worker/D1 pair completed the bootstrap and smoke suite as version `e25a9167-8e7b-4b8e-9139-c73d7e521939` before both resources were deleted; final live `opas-mvp` version `0583f6b9-3a28-472a-a1a3-bd32d6a479d6` passed the build-first dry run, missing-only D1 seed, CSP headers, full smoke suite, and zero-row analytics check, following the clean browser MDX/CSP proof — this commit
 - 2026-08-28 — 6.1–6.3 — added the accessible anonymous helpfulness form, browser view beacon, strict bounded event APIs, salted Cloudflare requester and portable process admission gates, collision-bounded 30-day samples, cross-dialect aggregates, and the authenticated analytics report — 60 tests, lint, typecheck, Next/OpenNext/Docker builds, Docker browser/API/database/admin checks, limiter race tests, and exact cleanup passed; Worker `40d90ba4-f530-423e-88d6-3072f93a1296` rendered workerd MDX, persisted D1 view/feedback/miss samples, displayed them in the authenticated report with no browser errors, rejected invalid and draft events, and retained zero proof rows — this commit
 - 2026-08-28 — 5.1–5.4 — added one workspace-safe publication projection for SSR metadata and canonicals, dynamic sitemap, escaped Article and conditional FAQPage JSON-LD, DB-generated llms documents, and rewritten per-article Markdown with discovery and crawler headers — 44 tests, lint, typecheck, Next/OpenNext/Docker builds, and Docker live publish→draft checks passed; Worker `61d7ca6a-e7d7-406e-98ee-17512d4c1831` passed exact-origin curl checks across all surfaces, reflected a D1 FAQ publish and unpublish without rebuilding, rejected drafts and wrong-category Markdown, and retained no canary row — this commit
 - 2026-08-27 — 4.1–4.3 — added snapshot-aware Orama indexing over published Markdown, one Unicode query contract, a normalized no-store search route, accessible abortable as-you-type results with one-character typo tolerance, and bounded zero-result analytics — 38 tests, lint, typecheck, Next/OpenNext/Docker builds, Docker draft→publish→edit index refresh, responsive browser checks, and Docker/PostgreSQL retention and miss persistence passed; deployed Worker `251eed75-161e-4528-8cd3-2757d3d8c629` returned the D1 article for `runtme`, kept a one-code-point query out of D1, logged exactly one bounded-slot D1 miss in EEUR/FRA, removed the canary row, and passed the live browser/console check — this commit

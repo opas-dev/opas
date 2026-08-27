@@ -1,10 +1,11 @@
 // ABOUTME: Writes the deterministic OPAS demo content to a D1-compatible database.
-// ABOUTME: Accepts an injected Drizzle client so production and integration checks share seed logic.
+// ABOUTME: Restores missing seed records without replacing administrator edits on restart.
 import { demoContent, demoSeededAt } from "@/db/demo";
 import { getD1Database } from "@/db/sqlite/client";
 import { articles, categories, themes, workspaces } from "@/db/schema/sqlite";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { and, eq, inArray } from "drizzle-orm";
 
 type SqliteDatabase =
   | DrizzleD1Database<typeof import("@/db/schema/sqlite")>
@@ -20,16 +21,18 @@ export async function seedD1(database: SqliteDatabase = getD1Database()) {
       createdAt: seededAt,
       updatedAt: seededAt,
     })
-    .onConflictDoUpdate({
-      target: workspaces.id,
-      set: {
-        slug: demoContent.workspace.slug,
-        name: demoContent.workspace.name,
-        createdAt: seededAt,
-        updatedAt: seededAt,
-      },
-    })
+    .onConflictDoNothing()
     .execute();
+
+  const [workspace] = await database
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.id, demoContent.workspace.id))
+    .limit(1)
+    .execute();
+  if (!workspace) {
+    return;
+  }
 
   for (const category of demoContent.categories) {
     await database
@@ -39,22 +42,27 @@ export async function seedD1(database: SqliteDatabase = getD1Database()) {
         createdAt: seededAt,
         updatedAt: seededAt,
       })
-      .onConflictDoUpdate({
-        target: categories.id,
-        set: {
-          workspaceId: category.workspaceId,
-          slug: category.slug,
-          name: category.name,
-          description: category.description,
-          position: category.position,
-          createdAt: seededAt,
-          updatedAt: seededAt,
-        },
-      })
+      .onConflictDoNothing()
       .execute();
   }
 
+  const seededCategories = await database
+    .select()
+    .from(categories)
+    .where(
+      and(
+        eq(categories.workspaceId, demoContent.workspace.id),
+        inArray(categories.id, demoContent.categories.map(({ id }) => id)),
+      ),
+    )
+    .execute();
+  const seededCategoryIds = new Set(seededCategories.map(({ id }) => id));
+
   for (const article of demoContent.articles) {
+    if (!seededCategoryIds.has(article.categoryId)) {
+      continue;
+    }
+
     const publishedAt = article.publishedAt ? new Date(article.publishedAt) : null;
 
     await database
@@ -65,22 +73,7 @@ export async function seedD1(database: SqliteDatabase = getD1Database()) {
         createdAt: seededAt,
         updatedAt: seededAt,
       })
-      .onConflictDoUpdate({
-        target: articles.id,
-        set: {
-          workspaceId: article.workspaceId,
-          categoryId: article.categoryId,
-          slug: article.slug,
-          title: article.title,
-          mdx: article.mdx,
-          status: article.status,
-          isFaq: article.isFaq,
-          authorName: article.authorName,
-          publishedAt,
-          createdAt: seededAt,
-          updatedAt: seededAt,
-        },
-      })
+      .onConflictDoNothing()
       .execute();
   }
 
@@ -91,15 +84,6 @@ export async function seedD1(database: SqliteDatabase = getD1Database()) {
       createdAt: seededAt,
       updatedAt: seededAt,
     })
-    .onConflictDoUpdate({
-      target: themes.id,
-      set: {
-        workspaceId: demoContent.theme.workspaceId,
-        name: demoContent.theme.name,
-        config: demoContent.theme.config,
-        createdAt: seededAt,
-        updatedAt: seededAt,
-      },
-    })
+    .onConflictDoNothing()
     .execute();
 }

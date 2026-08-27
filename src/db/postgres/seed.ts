@@ -1,8 +1,9 @@
 // ABOUTME: Writes the deterministic OPAS demo content to a Postgres-compatible database.
-// ABOUTME: Upserts the same complete records so repeated preparation converges after edits.
+// ABOUTME: Restores missing seed records without replacing administrator edits on restart.
 import { getPostgresDatabase } from "@/db/postgres/client";
 import { demoContent, demoSeededAt } from "@/db/demo";
 import { articles, categories, themes, workspaces } from "@/db/schema/postgres";
+import { and, eq, inArray } from "drizzle-orm";
 
 export async function seedPostgres(database = getPostgresDatabase()) {
   const seededAt = new Date(demoSeededAt);
@@ -14,15 +15,16 @@ export async function seedPostgres(database = getPostgresDatabase()) {
       createdAt: seededAt,
       updatedAt: seededAt,
     })
-    .onConflictDoUpdate({
-      target: workspaces.id,
-      set: {
-        slug: demoContent.workspace.slug,
-        name: demoContent.workspace.name,
-        createdAt: seededAt,
-        updatedAt: seededAt,
-      },
-    });
+    .onConflictDoNothing();
+
+  const [workspace] = await database
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(eq(workspaces.id, demoContent.workspace.id))
+    .limit(1);
+  if (!workspace) {
+    return;
+  }
 
   for (const category of demoContent.categories) {
     await database
@@ -32,21 +34,25 @@ export async function seedPostgres(database = getPostgresDatabase()) {
         createdAt: seededAt,
         updatedAt: seededAt,
       })
-      .onConflictDoUpdate({
-        target: categories.id,
-        set: {
-          workspaceId: category.workspaceId,
-          slug: category.slug,
-          name: category.name,
-          description: category.description,
-          position: category.position,
-          createdAt: seededAt,
-          updatedAt: seededAt,
-        },
-      });
+      .onConflictDoNothing();
   }
 
+  const seededCategories = await database
+    .select({ id: categories.id })
+    .from(categories)
+    .where(
+      and(
+        eq(categories.workspaceId, demoContent.workspace.id),
+        inArray(categories.id, demoContent.categories.map(({ id }) => id)),
+      ),
+    );
+  const seededCategoryIds = new Set(seededCategories.map(({ id }) => id));
+
   for (const article of demoContent.articles) {
+    if (!seededCategoryIds.has(article.categoryId)) {
+      continue;
+    }
+
     const publishedAt = article.publishedAt ? new Date(article.publishedAt) : null;
 
     await database
@@ -57,22 +63,7 @@ export async function seedPostgres(database = getPostgresDatabase()) {
         createdAt: seededAt,
         updatedAt: seededAt,
       })
-      .onConflictDoUpdate({
-        target: articles.id,
-        set: {
-          workspaceId: article.workspaceId,
-          categoryId: article.categoryId,
-          slug: article.slug,
-          title: article.title,
-          mdx: article.mdx,
-          status: article.status,
-          isFaq: article.isFaq,
-          authorName: article.authorName,
-          publishedAt,
-          createdAt: seededAt,
-          updatedAt: seededAt,
-        },
-      });
+      .onConflictDoNothing();
   }
 
   await database
@@ -82,14 +73,5 @@ export async function seedPostgres(database = getPostgresDatabase()) {
       createdAt: seededAt,
       updatedAt: seededAt,
     })
-    .onConflictDoUpdate({
-      target: themes.id,
-      set: {
-        workspaceId: demoContent.theme.workspaceId,
-        name: demoContent.theme.name,
-        config: demoContent.theme.config,
-        createdAt: seededAt,
-        updatedAt: seededAt,
-      },
-    });
+    .onConflictDoNothing();
 }

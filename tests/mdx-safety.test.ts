@@ -71,8 +71,9 @@ test("the empty component allowlist rejects custom, intrinsic, and fragment JSX"
   }
 });
 
-test("links and images accept document URLs but reject executable protocols", async () => {
+test("links and images accept policy-compatible URLs and reject unsafe protocols", async () => {
   const safeSource = `See [recovery](/guides/recovery), [support](mailto:help@example.com),
+[local service](http://localhost:3000),
 and ![the OPAS mark](https://cdn.example.com/opas.png).`;
   assert.equal(await validateArticleMdx(safeSource), safeSource);
 
@@ -83,6 +84,9 @@ and ![the OPAS mark](https://cdn.example.com/opas.png).`;
     "![embedded payload](data:image/svg+xml,<svg></svg>)",
     "![embedded payload][payload]\n\n[payload]: data:image/svg+xml,<svg></svg>",
     "![embedded payload][payload]\n\n[payload]: mailto:help@example.com",
+    "![insecure image](http://cdn.example.com/opas.png)",
+    "![insecure image][payload]\n\n[payload]: http://cdn.example.com/opas.png",
+    "![origin-dependent image](//cdn.example.com/opas.png)",
   ]) {
     await rejectsArticleMdx(source, /protocol is not allowed/);
   }

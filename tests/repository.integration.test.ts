@@ -1,5 +1,5 @@
 // ABOUTME: Runs one repository contract against migrated Postgres and local SQLite databases.
-// ABOUTME: Verifies schema parity, deterministic seeds, constraints, reads, writes, and cascades.
+// ABOUTME: Verifies schema parity, preservation-safe seeds, constraints, reads, writes, and cascades.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -98,6 +98,185 @@ async function recordSearchSamples(
       createdAt,
     });
   }
+}
+
+async function exerciseSeedRerun(
+  harness: Harness,
+  seed: () => Promise<void>,
+  label: string,
+) {
+  const draft = await harness.repository.getArticle(
+    demoIds.workspace,
+    demoIds.draftArticle,
+  );
+  assert.ok(draft);
+  await harness.repository.updateArticle({
+    id: draft.id,
+    workspaceId: draft.workspaceId,
+    categoryId: draft.categoryId,
+    slug: draft.slug,
+    title: `${label} article edit`,
+    mdx: draft.mdx,
+    status: draft.status,
+    isFaq: draft.isFaq,
+    authorName: draft.authorName,
+    publishedAt: draft.publishedAt,
+  });
+
+  const theme = await harness.repository.getTheme(demoIds.workspace);
+  assert.ok(theme);
+  await harness.repository.updateTheme({
+    workspaceId: demoIds.workspace,
+    name: `${label} theme edit`,
+    config: theme.config,
+  });
+
+  await harness.repository.deleteArticle(demoIds.workspace, demoIds.publishedArticle);
+  assert.equal(
+    await harness.repository.deleteCategory(
+      demoIds.workspace,
+      demoIds.gettingStartedCategory,
+    ),
+    true,
+  );
+
+  await seed();
+
+  assert.equal(
+    (await harness.repository.getArticle(demoIds.workspace, demoIds.draftArticle))
+      ?.title,
+    `${label} article edit`,
+    `${harness.name} ${label} replaced an administrator article edit`,
+  );
+  assert.equal(
+    (await harness.repository.getTheme(demoIds.workspace))?.name,
+    `${label} theme edit`,
+    `${harness.name} ${label} replaced an administrator theme edit`,
+  );
+  assert.deepEqual(
+    (await harness.repository.listCategories(demoIds.workspace)).find(
+      (category) => category.id === demoIds.gettingStartedCategory,
+    ),
+    {
+      id: demoContent.categories[0].id,
+      workspaceId: demoContent.categories[0].workspaceId,
+      slug: demoContent.categories[0].slug,
+      name: demoContent.categories[0].name,
+      description: demoContent.categories[0].description,
+      position: demoContent.categories[0].position,
+    },
+    `${harness.name} ${label} did not restore a missing seed category`,
+  );
+
+  const restoredArticle = await harness.repository.getArticle(
+    demoIds.workspace,
+    demoIds.publishedArticle,
+  );
+  assert.ok(restoredArticle, `${harness.name} ${label} did not restore a missing seed article`);
+  assert.equal(restoredArticle.title, demoContent.articles[0].title);
+  assert.equal(restoredArticle.createdAt.toISOString(), demoSeededAt);
+}
+
+async function exerciseSeedSlugConflicts(
+  harness: Harness,
+  seed: () => Promise<void>,
+  label: string,
+) {
+  const replacementCategoryId = "category_seed_slug_replacement";
+  const replacementArticleId = "article_seed_slug_replacement";
+  const foreignWorkspaceId = `workspace_seed_parent_${label.replaceAll(" ", "_")}`;
+
+  await harness.repository.deleteArticle(demoIds.workspace, demoIds.publishedArticle);
+  assert.equal(
+    await harness.repository.deleteCategory(
+      demoIds.workspace,
+      demoIds.gettingStartedCategory,
+    ),
+    true,
+  );
+  await harness.repository.createCategory({
+    ...demoContent.categories[0],
+    id: replacementCategoryId,
+    name: `${label} replacement category`,
+  });
+
+  await seed();
+
+  assert.equal(
+    await harness.repository.getArticle(demoIds.workspace, demoIds.publishedArticle),
+    null,
+    `${harness.name} ${label} seeded an article without its fixed category parent`,
+  );
+
+  await harness.repository.createArticle({
+    ...demoContent.articles[0],
+    id: replacementArticleId,
+    categoryId: replacementCategoryId,
+    title: `${label} replacement article`,
+    publishedAt: new Date(demoContent.articles[0].publishedAt!),
+  });
+
+  await seed();
+
+  assert.equal(
+    await harness.repository.getArticle(demoIds.workspace, demoIds.publishedArticle),
+    null,
+    `${harness.name} ${label} restored an article whose slug belongs to another record`,
+  );
+  assert.equal(
+    (
+      await harness.repository.getArticle(demoIds.workspace, replacementArticleId)
+    )?.slug,
+    demoContent.articles[0].slug,
+  );
+  assert.equal(
+    (await harness.repository.listCategories(demoIds.workspace)).some(
+      (category) => category.id === demoIds.gettingStartedCategory,
+    ),
+    false,
+    `${harness.name} ${label} restored a category whose slug belongs to another record`,
+  );
+
+  await harness.repository.deleteArticle(demoIds.workspace, replacementArticleId);
+  assert.equal(
+    await harness.repository.deleteCategory(demoIds.workspace, replacementCategoryId),
+    true,
+  );
+  await seed();
+
+  await harness.repository.deleteArticle(demoIds.workspace, demoIds.publishedArticle);
+  assert.equal(
+    await harness.repository.deleteCategory(
+      demoIds.workspace,
+      demoIds.gettingStartedCategory,
+    ),
+    true,
+  );
+  await harness.createWorkspace({
+    id: foreignWorkspaceId,
+    slug: foreignWorkspaceId,
+    name: `${label} foreign workspace`,
+  });
+  await harness.repository.createCategory({
+    ...demoContent.categories[0],
+    workspaceId: foreignWorkspaceId,
+  });
+
+  await seed();
+
+  assert.equal(
+    await harness.repository.getArticle(demoIds.workspace, demoIds.publishedArticle),
+    null,
+    `${harness.name} ${label} seeded an article beneath another workspace's category`,
+  );
+  assert.equal(
+    await harness.repository.deleteCategory(
+      foreignWorkspaceId,
+      demoIds.gettingStartedCategory,
+    ),
+    true,
+  );
+  await seed();
 }
 
 async function exerciseRepository(harness: Harness) {
@@ -741,6 +920,13 @@ async function exerciseRepository(harness: Harness) {
     feedback: 0,
     views: 0,
   });
+
+  await exerciseSeedRerun(harness, harness.seed, "repository seed");
+  await exerciseSeedSlugConflicts(harness, harness.seed, "repository seed");
+  if (harness.deploymentSeed) {
+    await exerciseSeedRerun(harness, harness.deploymentSeed, "deployment seed");
+    await exerciseSeedSlugConflicts(harness, harness.deploymentSeed, "deployment seed");
+  }
 }
 
 async function createPostgresHarness(): Promise<Harness> {

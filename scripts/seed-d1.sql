@@ -1,12 +1,8 @@
 -- ABOUTME: Seeds Cloudflare D1 with the deterministic OPAS demo workspace, content, and theme.
--- ABOUTME: Upserts complete records so repeated local and remote preparation converges after edits.
+-- ABOUTME: Restores missing seed records without replacing administrator edits on redeploy.
 INSERT INTO workspaces (id, slug, name, created_at, updated_at)
 VALUES ('workspace_demo', 'demo', 'OPAS Demo', 1767225600000, 1767225600000)
-ON CONFLICT (id) DO UPDATE SET
-  slug = excluded.slug,
-  name = excluded.name,
-  created_at = excluded.created_at,
-  updated_at = excluded.updated_at;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO categories (
   id,
@@ -18,8 +14,7 @@ INSERT INTO categories (
   created_at,
   updated_at
 )
-VALUES
-  (
+SELECT
     'category_getting_started',
     'workspace_demo',
     'getting-started',
@@ -28,8 +23,9 @@ VALUES
     0,
     1767225600000,
     1767225600000
-  ),
-  (
+WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_demo')
+UNION ALL
+SELECT
     'category_customization',
     'workspace_demo',
     'customization',
@@ -38,15 +34,8 @@ VALUES
     1,
     1767225600000,
     1767225600000
-  )
-ON CONFLICT (id) DO UPDATE SET
-  workspace_id = excluded.workspace_id,
-  slug = excluded.slug,
-  name = excluded.name,
-  description = excluded.description,
-  position = excluded.position,
-  created_at = excluded.created_at,
-  updated_at = excluded.updated_at;
+WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_demo')
+ON CONFLICT DO NOTHING;
 
 INSERT INTO articles (
   id,
@@ -62,8 +51,7 @@ INSERT INTO articles (
   created_at,
   updated_at
 )
-VALUES
-  (
+SELECT
     'article_runtime_mdx',
     'workspace_demo',
     'category_getting_started',
@@ -79,8 +67,12 @@ VALUES
     1767225600000,
     1767225600000,
     1767225600000
-  ),
-  (
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_getting_started' AND workspace_id = 'workspace_demo'
+)
+UNION ALL
+SELECT
     'article_customize_help_center',
     'workspace_demo',
     'category_customization',
@@ -94,19 +86,11 @@ VALUES
     NULL,
     1767225600000,
     1767225600000
-  )
-ON CONFLICT (id) DO UPDATE SET
-  workspace_id = excluded.workspace_id,
-  category_id = excluded.category_id,
-  slug = excluded.slug,
-  title = excluded.title,
-  mdx = excluded.mdx,
-  status = excluded.status,
-  is_faq = excluded.is_faq,
-  author_name = excluded.author_name,
-  published_at = excluded.published_at,
-  created_at = excluded.created_at,
-  updated_at = excluded.updated_at;
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_customization' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
 
 INSERT INTO themes (
   id,
@@ -116,7 +100,7 @@ INSERT INTO themes (
   created_at,
   updated_at
 )
-VALUES (
+SELECT
   'theme_default',
   'workspace_demo',
   'OPAS Default',
@@ -181,10 +165,5 @@ VALUES (
   ),
   1767225600000,
   1767225600000
-)
-ON CONFLICT (id) DO UPDATE SET
-  workspace_id = excluded.workspace_id,
-  name = excluded.name,
-  config = excluded.config,
-  created_at = excluded.created_at,
-  updated_at = excluded.updated_at;
+WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_demo')
+ON CONFLICT DO NOTHING;
