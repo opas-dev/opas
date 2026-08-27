@@ -16,8 +16,9 @@
 ## Blockers
 | # | Blocked | Needs | Parked items |
 |---|---|---|---|
-| B1 | Vercel deploys | `VERCEL_TOKEN` in `.env` (Timo runs `vercel login` or drops a token) | 0.6, 7.4 |
 | B2 | Neon database | `NEON_DATABASE_URL` in `.env` | 0.6, 7.4 |
+
+Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27.
 
 ## Decisions
 | Date | Decision | Why |
@@ -32,7 +33,7 @@
 - [ ] 0.3 Minimal DB read: Drizzle + Postgres (docker) storing one article row; the page renders MDX from the DB. **Verify:** update the row via psql → refresh shows the change.
 - [ ] 0.4 Docker target: Dockerfile (standalone output) + `docker-compose.yml` (app + Postgres), single `.env`. **Verify:** `docker compose up` from a clean checkout serves the MDX page.
 - [ ] 0.5 Cloudflare target: `@opennextjs/cloudflare` (NOT `@cloudflare/next-on-pages`); create D1 database `opas-mvp` on the DevPlant account; Drizzle D1 dialect path for the same article read. **Verify:** deployed workers.dev URL renders D1-stored MDX; confirm MDX eval works on workerd and note CSP implications in `docs/notes.md`.
-- [ ] 0.6 Vercel target (B1, B2): deploy with the Neon serverless driver; reproduce/resolve the `@fumadocs/mdx-remote` "Connection closed" issue (Fumadocs discussion #1623). **Verify:** production URL renders Neon-stored MDX.
+- [ ] 0.6 Vercel target (B2): deploy with the Neon serverless driver; reproduce/resolve the `@fumadocs/mdx-remote` "Connection closed" issue (Fumadocs discussion #1623). **Verify:** production URL renders Neon-stored MDX.
 - [ ] 0.7 Write `docs/notes.md` with spike findings; adjust this plan if a target fails irrecoverably (brief fallback: CF drops to static-export-only — document honestly, don't ship a broken path).
 
 ## Phase 1 — Data layer & adapters
@@ -75,7 +76,7 @@
 - [ ] 7.1 `docker compose up` from a clean clone: single `.env`, healthchecks, auto-migrate + seed on first boot. **Verify:** fresh clone → compose up → working seeded help center.
 - [ ] 7.2 CF Workers deploy script + docs (creates D1, migrates, seeds, deploys). **Verify:** clean deploy to workers.dev. May bind `mvp.opas.dev`; NEVER touch `opas.dev` root or `www`.
 - [ ] 7.3 Smoke-test script (curl of key routes incl. search, llms.txt, `.md`) runnable against any base URL.
-- [ ] 7.4 Vercel + Neon verified deploy + docs (B1, B2).
+- [ ] 7.4 Vercel + Neon verified deploy + docs (B2).
 - [ ] 7.5 README quickstarts for all three targets, with live URLs.
 
 ## Phase 8 — Release
@@ -87,7 +88,7 @@
 ## Definition of done (v0.1)
 - [ ] `docker compose up` on a clean machine yields a seeded, themed, searchable help center.
 - [ ] Deployed and smoke-tested on Cloudflare Workers with D1 — live URL in README.
-- [ ] Deployed and smoke-tested on Vercel with Neon — live URL in README (parked on B1/B2 until credentials land).
+- [ ] Deployed and smoke-tested on Vercel with Neon — live URL in README (parked on B2 until the Neon connection string lands).
 - [ ] A theme change via admin re-skins the site with zero rebuild, on every target.
 - [ ] `llms.txt`, `llms-full.txt`, per-article `.md`, sitemap, and JSON-LD all pass the smoke-test script.
 - [ ] Feedback widget and view analytics work.

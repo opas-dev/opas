@@ -34,7 +34,7 @@ Repeat until done:
 
 ## Environment
 - Cloudflare: wrangler is OAuth-authenticated locally. Account: **DevPlant**, id `f8801c7e8853a113a25f8b52fd9ceec1`. The zone `opas.dev` exists.
-- Vercel: expect `VERCEL_TOKEN` in `.env` (repo root, gitignored). Missing → Blocker B1.
+- Vercel: CLI is authenticated locally as `timobejan` (`vercel whoami` confirms) — no token needed.
 - Neon: expect `NEON_DATABASE_URL` in `.env`. Missing → Blocker B2.
 - Docker Desktop, Node 22, pnpm available locally.
 - GitHub: push to `https://github.com/opas-dev/opas` on `main`; `gh` CLI is authenticated.
