@@ -1,5 +1,7 @@
 // ABOUTME: Defines the deterministic workspace, content, and theme seeded by every deployment.
 // ABOUTME: Keeps Postgres, Neon, and D1 demo records semantically identical.
+import { themePresets } from "@/theme/presets";
+
 export const demoIds = {
   workspace: "workspace_demo",
   gettingStartedCategory: "category_getting_started",
@@ -73,38 +75,6 @@ This draft explains how runtime themes let OPAS match your product without rebui
     id: demoIds.theme,
     workspaceId: demoIds.workspace,
     name: "OPAS Default",
-    config: {
-      logoUrl: null,
-      fonts: {
-        sans: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        mono: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-      },
-      radius: {
-        sm: "0.375rem",
-        md: "0.75rem",
-      },
-      light: {
-        background: "oklch(1 0 0)",
-        surface: "oklch(0.975 0 0)",
-        surfaceStrong: "oklch(0.94 0.005 27)",
-        foreground: "oklch(0.2 0.018 27)",
-        muted: "oklch(0.46 0.014 27)",
-        border: "oklch(0.88 0.009 27)",
-        primary: "oklch(0.464 0.169 26.9)",
-        primaryForeground: "oklch(1 0 0)",
-        focus: "oklch(0.62 0.18 27)",
-      },
-      dark: {
-        background: "oklch(0.17 0.014 27)",
-        surface: "oklch(0.21 0.014 27)",
-        surfaceStrong: "oklch(0.26 0.016 27)",
-        foreground: "oklch(0.95 0.006 27)",
-        muted: "oklch(0.72 0.012 27)",
-        border: "oklch(0.34 0.016 27)",
-        primary: "oklch(0.69 0.2 27)",
-        primaryForeground: "oklch(0.16 0.014 27)",
-        focus: "oklch(0.75 0.18 27)",
-      },
-    },
+    config: themePresets.opas,
   },
 } as const;

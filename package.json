@@ -13,8 +13,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "node -e \"require('node:fs').rmSync('.next/dev',{recursive:true,force:true})\" && next typegen && tsc --noEmit",
-    "test": "pnpm lint && pnpm typecheck && pnpm test:repositories",
+    "test": "pnpm lint && pnpm typecheck && pnpm test:theme && pnpm test:repositories",
     "test:repositories": "tsx --test --test-concurrency=1 tests/repository.integration.test.ts",
+    "test:theme": "tsx --test tests/theme.test.ts",
     "build:prepare:postgres": "esbuild scripts/prepare-postgres.ts --bundle --platform=node --format=cjs --external:pg-native --outfile=.next/standalone/prepare-postgres.cjs",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
@@ -33,7 +34,8 @@
     "next": "16.3.3",
     "pg": "8.23.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260827.1",
