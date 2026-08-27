@@ -1,5 +1,7 @@
 // ABOUTME: Resolves the repository implementation selected for the current deployment.
 // ABOUTME: Creates D1 access per request while reusing each target's database client policy.
+import "server-only";
+
 import type { Repository } from "@/db/repository";
 
 export async function getRepository(): Promise<Repository> {

@@ -7,6 +7,7 @@ RUN corepack enable
 WORKDIR /app
 
 FROM base AS dependencies
+RUN apk add --no-cache g++ make python3
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 

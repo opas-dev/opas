@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { adminSessionCookie, verifyAdminSessionToken } from "@/auth/session";
 
 const loginPath = "/admin/login";
-const adminHomePath = "/admin/theme";
+const adminHomePath = "/admin/content";
 
 function clearInvalidSession(response: NextResponse) {
   response.cookies.set(adminSessionCookie, "", {

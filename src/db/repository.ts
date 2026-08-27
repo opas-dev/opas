@@ -1,18 +1,25 @@
 // ABOUTME: Defines the database-neutral records and operations used by OPAS application code.
 // ABOUTME: Keeps deployment driver details behind one small repository contract.
-export type PublishedArticle = {
+export type ArticleStatus = "draft" | "published";
+
+export type Article = {
   id: string;
   workspaceId: string;
   categoryId: string;
   slug: string;
   title: string;
   mdx: string;
+  status: ArticleStatus;
   isFaq: boolean;
   authorName: string;
   publishedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+export type PublishedArticle = Omit<Article, "status">;
+
+export type ArticleSubmission = Omit<Article, "createdAt" | "updatedAt">;
 
 export type Category = {
   id: string;
@@ -59,7 +66,16 @@ export type SearchMiss = {
 export type Repository = {
   checkHealth(): Promise<void>;
   findPublishedArticle(workspaceId: string, slug: string): Promise<PublishedArticle | null>;
+  listPublishedArticles(workspaceId: string): Promise<PublishedArticle[]>;
   listCategories(workspaceId: string): Promise<Category[]>;
+  createCategory(category: Category): Promise<void>;
+  updateCategory(category: Category): Promise<void>;
+  deleteCategory(workspaceId: string, id: string): Promise<boolean>;
+  listArticles(workspaceId: string): Promise<Article[]>;
+  getArticle(workspaceId: string, id: string): Promise<Article | null>;
+  createArticle(article: ArticleSubmission): Promise<void>;
+  updateArticle(article: ArticleSubmission): Promise<void>;
+  deleteArticle(workspaceId: string, id: string): Promise<void>;
   getTheme(workspaceId: string): Promise<Theme | null>;
   updateTheme(theme: ThemeUpdate): Promise<void>;
   createFeedback(feedback: Feedback): Promise<void>;

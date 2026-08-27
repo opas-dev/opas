@@ -1,58 +1,31 @@
-// ABOUTME: Introduces the OPAS help center before database-backed content is connected.
-// ABOUTME: Provides a lightweight public shell for initial runtime and styling verification.
+// ABOUTME: Presents the published OPAS category and article library to public readers.
+// ABOUTME: Keeps the help-center hierarchy shallow and excludes every draft record.
 import Link from "next/link";
-import Image from "next/image";
+import { connection } from "next/server";
 
-import { getCurrentTheme } from "@/theme/current";
+import { PublicHeader } from "@/app/public-header";
+import { getRepository } from "@/db";
+import { demoIds } from "@/db/demo";
 
 export const runtime = "nodejs";
 
-const launchPoints = [
-  {
-    label: "Understand the product",
-    detail: "Why ownership, runtime themes, and portable deployment belong together.",
-  },
-  {
-    label: "Publish your first answer",
-    detail: "Create focused support content and make it available without a rebuild.",
-  },
-  {
-    label: "Choose where it runs",
-    detail: "Use Docker, Vercel, or Cloudflare Workers from the same codebase.",
-  },
-];
-
 export default async function HomePage() {
-  const theme = await getCurrentTheme();
+  await connection();
+  const repository = await getRepository();
+  const [categories, articles] = await Promise.all([
+    repository.listCategories(demoIds.workspace),
+    repository.listPublishedArticles(demoIds.workspace),
+  ]);
 
   return (
     <main>
-      <header className="site-header">
-        <Link className="wordmark" href="/" aria-label="OPAS home">
-          {theme.config.logoUrl ? (
-            <Image
-              alt=""
-              className="wordmark-logo"
-              height={30}
-              src={theme.config.logoUrl}
-              unoptimized
-              width={30}
-            />
-          ) : (
-            <span className="wordmark-mark" aria-hidden="true">
-              O
-            </span>
-          )}
-          OPAS
-        </Link>
-        <span className="header-note">Help that stays yours</span>
-      </header>
+      <PublicHeader />
 
       <section className="hero" aria-labelledby="hero-heading">
-        <p className="hero-context">Open-source help center</p>
-        <h1 id="hero-heading">Answers should be easy to find—and yours to keep.</h1>
+        <p className="hero-context">OPAS Help Center</p>
+        <h1 id="hero-heading">How can we help?</h1>
         <p className="hero-copy">
-          Theme it at runtime. Deploy it anywhere. Give readers and agents one reliable source of truth.
+          Browse clear answers by category, or use search as soon as the growing library needs it.
         </p>
         <form className="search-preview" role="search">
           <label htmlFor="help-search">What can we help you find?</label>
@@ -60,26 +33,41 @@ export default async function HomePage() {
             <input id="help-search" name="query" placeholder="Search the help center" disabled />
             <span aria-hidden="true">⌘ K</span>
           </div>
-          <p>The searchable article library arrives with the content phase.</p>
+          <p>Search is being connected next. Every published answer is available below.</p>
         </form>
       </section>
 
-      <section className="launch-points" aria-labelledby="launch-points-heading">
+      <section className="launch-points" aria-labelledby="categories-heading">
         <div className="section-heading">
-          <h2 id="launch-points-heading">Start with the essentials</h2>
-          <p>Three short paths through the OPAS story.</p>
+          <h2 id="categories-heading">Browse by category</h2>
+          <p>{articles.length} published {articles.length === 1 ? "answer" : "answers"}</p>
         </div>
-        <ol>
-          {launchPoints.map((point, index) => (
-            <li key={point.label}>
+        {categories.length > 0 ? (
+          <ol>
+            {categories.map((category, index) => {
+              const categoryArticles = articles.filter(
+                (article) => article.categoryId === category.id,
+              );
+
+              return (
+                <li key={category.id}>
               <span>{String(index + 1).padStart(2, "0")}</span>
               <div>
-                <h3>{point.label}</h3>
-                <p>{point.detail}</p>
+                    <h3>
+                      <Link href={`/${category.slug}`}>{category.name}</Link>
+                    </h3>
+                    <p>{category.description ?? "Help articles in this category."}</p>
+                    <p className="category-count">
+                      {categoryArticles.length} {categoryArticles.length === 1 ? "article" : "articles"}
+                    </p>
               </div>
             </li>
-          ))}
-        </ol>
+              );
+            })}
+          </ol>
+        ) : (
+          <p className="empty-library">No categories have been published yet.</p>
+        )}
       </section>
     </main>
   );

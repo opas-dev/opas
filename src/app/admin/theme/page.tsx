@@ -1,9 +1,8 @@
 // ABOUTME: Presents the authenticated admin surface for runtime theme changes.
 // ABOUTME: Loads the active workspace theme and safe previews for all bundled presets.
 import type { Metadata } from "next";
-import Link from "next/link";
 
-import { logoutAdmin } from "@/app/admin/actions";
+import { AdminHeader } from "@/app/admin/header";
 import { ThemeEditor, type ThemePresetPreview } from "@/app/admin/theme/editor";
 import {
   themePresetIds,
@@ -40,37 +39,7 @@ export default async function ThemeAdminPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex min-h-16 w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="grid size-8 place-items-center rounded-sm bg-primary text-xs font-bold text-primary-foreground">
-              O
-            </span>
-            <div className="min-w-0">
-              <p className="m-0 text-sm font-semibold">OPAS Admin</p>
-              <p className="m-0 max-w-44 truncate text-xs text-muted sm:max-w-none">
-                {admin.email}
-              </p>
-            </div>
-          </div>
-          <nav aria-label="Administrator" className="ml-auto flex shrink-0 items-center gap-1">
-            <Link
-              href="/"
-              className="rounded-md px-3 py-2 text-sm font-semibold text-muted transition-colors duration-200 hover:bg-surface-strong hover:text-foreground"
-            >
-              View help center
-            </Link>
-            <form action={logoutAdmin}>
-              <button
-                type="submit"
-                className="rounded-md px-3 py-2 text-sm font-semibold text-muted transition-colors duration-200 hover:bg-surface-strong hover:text-foreground"
-              >
-                Sign out
-              </button>
-            </form>
-          </nav>
-        </div>
-      </header>
+      <AdminHeader email={admin.email} active="theme" />
 
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
         <div className="mb-10 max-w-3xl">

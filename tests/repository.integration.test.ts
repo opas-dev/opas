@@ -139,6 +139,10 @@ async function exerciseRepository(harness: Harness) {
     null,
   );
 
+  const publishedArticles = await harness.repository.listPublishedArticles(demoIds.workspace);
+  assert.equal(publishedArticles.length, 1, `${harness.name} included drafts in public listings`);
+  assert.equal(publishedArticles[0].id, demoIds.publishedArticle);
+
   const categories = await harness.repository.listCategories(demoIds.workspace);
   assert.deepEqual(
     categories,
@@ -150,6 +154,170 @@ async function exerciseRepository(harness: Harness) {
       description: category.description,
       position: category.position,
     })),
+  );
+
+  const contractCategory = {
+    id: "category_contract",
+    workspaceId: demoIds.workspace,
+    slug: "contract",
+    name: "Contract",
+    description: null,
+    position: 1,
+  };
+  await harness.repository.createCategory(contractCategory);
+  assert.deepEqual(
+    (await harness.repository.listCategories(demoIds.workspace)).map((category) => category.id),
+    [
+      demoIds.gettingStartedCategory,
+      contractCategory.id,
+      demoIds.customizationCategory,
+    ],
+    `${harness.name} did not order equal-position categories by id`,
+  );
+
+  await harness.repository.updateCategory({
+    ...contractCategory,
+    name: "Repository contract",
+    description: "Cross-dialect CRUD",
+    position: -1,
+  });
+  assert.deepEqual((await harness.repository.listCategories(demoIds.workspace))[0], {
+    ...contractCategory,
+    name: "Repository contract",
+    description: "Cross-dialect CRUD",
+    position: -1,
+  });
+
+  assert.equal(
+    await harness.repository.deleteCategory(
+      demoIds.workspace,
+      demoIds.gettingStartedCategory,
+    ),
+    false,
+    `${harness.name} deleted a category that still contained articles`,
+  );
+
+  await harness.repository.updateCategory({
+    ...contractCategory,
+    workspaceId: "workspace_missing",
+    name: "Wrong workspace",
+  });
+  assert.equal(
+    (await harness.repository.listCategories(demoIds.workspace))[0].name,
+    "Repository contract",
+    `${harness.name} updated a category outside the requested workspace`,
+  );
+
+  const contractArticle = {
+    id: "article_contract",
+    workspaceId: demoIds.workspace,
+    categoryId: contractCategory.id,
+    slug: "repository-contract",
+    title: "Repository contract",
+    mdx: "# Repository contract",
+    status: "draft" as const,
+    isFaq: true,
+    authorName: "Contract author",
+    publishedAt: null,
+  };
+  await harness.repository.createArticle(contractArticle);
+
+  const createdArticle = await harness.repository.getArticle(
+    demoIds.workspace,
+    contractArticle.id,
+  );
+  assert.ok(createdArticle);
+  const {
+    createdAt: contractCreatedAt,
+    updatedAt: contractUpdatedAt,
+    ...createdArticleSubmission
+  } = createdArticle;
+  assert.deepEqual(createdArticleSubmission, contractArticle);
+  assert.ok(contractCreatedAt instanceof Date);
+  assert.ok(contractUpdatedAt instanceof Date);
+  assert.equal(
+    await harness.repository.findPublishedArticle(demoIds.workspace, contractArticle.slug),
+    null,
+    `${harness.name} exposed an admin-created draft`,
+  );
+
+  const contractPublishedAt = new Date("2026-02-03T04:05:06.000Z");
+  await harness.repository.updateArticle({
+    ...contractArticle,
+    title: "Published repository contract",
+    status: "published",
+    publishedAt: contractPublishedAt,
+  });
+
+  const updatedArticle = await harness.repository.getArticle(
+    demoIds.workspace,
+    contractArticle.id,
+  );
+  assert.ok(updatedArticle);
+  assert.equal(updatedArticle.status, "published");
+  assert.equal(updatedArticle.title, "Published repository contract");
+  assert.equal(updatedArticle.publishedAt?.toISOString(), contractPublishedAt.toISOString());
+  assert.equal(updatedArticle.createdAt.toISOString(), contractCreatedAt.toISOString());
+  assert.ok(updatedArticle.updatedAt.getTime() >= contractUpdatedAt.getTime());
+  assert.ok(
+    (await harness.repository.listPublishedArticles(demoIds.workspace)).some(
+      (article) => article.id === contractArticle.id,
+    ),
+    `${harness.name} omitted a newly published article from the public listing`,
+  );
+
+  const listedArticles = await harness.repository.listArticles(demoIds.workspace);
+  assert.deepEqual(
+    listedArticles.map((article) => [article.title, article.status]),
+    [
+      [demoContent.articles[1].title, "draft"],
+      ["Published repository contract", "published"],
+      [demoContent.articles[0].title, "published"],
+    ],
+  );
+
+  await harness.repository.updateArticle({
+    ...contractArticle,
+    workspaceId: "workspace_missing",
+    title: "Wrong workspace",
+  });
+  assert.equal(
+    (await harness.repository.getArticle(demoIds.workspace, contractArticle.id))?.title,
+    "Published repository contract",
+    `${harness.name} updated an article outside the requested workspace`,
+  );
+
+  await harness.repository.deleteArticle("workspace_missing", contractArticle.id);
+  assert.ok(await harness.repository.getArticle(demoIds.workspace, contractArticle.id));
+  await harness.repository.deleteArticle(demoIds.workspace, contractArticle.id);
+  assert.equal(
+    await harness.repository.getArticle(demoIds.workspace, contractArticle.id),
+    null,
+  );
+  assert.ok(
+    !(await harness.repository.listPublishedArticles(demoIds.workspace)).some(
+      (article) => article.id === contractArticle.id,
+    ),
+    `${harness.name} retained a deleted article in the public listing`,
+  );
+
+  assert.equal(
+    await harness.repository.deleteCategory("workspace_missing", contractCategory.id),
+    false,
+  );
+  assert.ok(
+    (await harness.repository.listCategories(demoIds.workspace)).some(
+      (category) => category.id === contractCategory.id,
+    ),
+  );
+  assert.equal(
+    await harness.repository.deleteCategory(demoIds.workspace, contractCategory.id),
+    true,
+  );
+  assert.ok(
+    !(await harness.repository.listCategories(demoIds.workspace)).some(
+      (category) => category.id === contractCategory.id,
+    ),
   );
 
   const theme = await harness.repository.getTheme(demoIds.workspace);

@@ -10,8 +10,8 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** 3
-- **Done:** 15 / 40
+- **Current phase:** 4
+- **Done:** 19 / 40
 
 ## Blockers
 B3 — The Vercel production rollout awaits the required shared-state confirmation. Phase 0 items 0.6–0.7 are parked at their remaining remote verification step while local implementation continues.
@@ -33,6 +33,9 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-27 | The active theme is loaded once per request and injected by the root server layout, with the OPAS preset as the fail-closed fallback | Reloads observe database changes immediately without cross-request staleness, while missing or invalid rows cannot inject CSS or break rendering |
 | 2026-08-27 | Admin authentication ships before the writable theme action even though it is numbered in Phase 3 | Server Actions are directly reachable POST endpoints, so the editor must never exist with only UI-level route hiding |
 | 2026-08-27 | The single administrator uses an eight-hour signed stateless session scoped to `/admin` | The same secure boundary works without another table on Postgres, Neon, and D1; production cookies are always Secure and therefore require HTTPS |
+| 2026-08-27 | Runtime articles use a strict Markdown subset, an empty component allowlist, and a first-H1-equals-title contract | The stored body remains useful Markdown while imports, expressions, JSX, metadata drift, and duplicate public headings cannot cross the compilation boundary |
+| 2026-08-27 | Content mutations stay in authenticated Server Actions while live preview uses an authenticated abortable POST route | Save and delete keep authoritative workspace checks; previews do not queue behind each other or delay a mutation |
+| 2026-08-27 | Category deletion is an atomic delete-if-empty repository operation | The UI's helpful article-count message cannot become a cascade-delete race under concurrent writes |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -58,10 +61,10 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 
 ## Phase 3 — Content model & rendering
 - [x] 3.1 Admin auth: single admin from env credentials, session cookie, middleware-protected `/admin`.
-- [ ] 3.2 Admin CRUD: categories + articles, MDX editor with live preview, draft/published.
-- [ ] 3.3 Sanitize DB-stored MDX before compiling (no imports/exports, component allowlist); document the threat model in `docs/notes.md`.
-- [ ] 3.4 Public UI: home (categories), category page, article page; shallow IA (2 levels max), breadcrumbs, last-updated.
-- [ ] 3.5 **Verify:** author → publish → public page, end-to-end on the Docker target.
+- [x] 3.2 Admin CRUD: categories + articles, MDX editor with live preview, draft/published.
+- [x] 3.3 Sanitize DB-stored MDX before compiling (no imports/exports, component allowlist); document the threat model in `docs/notes.md`.
+- [x] 3.4 Public UI: home (categories), category page, article page; shallow IA (2 levels max), breadcrumbs, last-updated.
+- [x] 3.5 **Verify:** author → publish → public page, end-to-end on the Docker target.
 
 ## Phase 4 — Search
 - [ ] 4.1 Orama index over published articles, rebuilt on publish, served via a route handler.
@@ -104,6 +107,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-27 — 3.2–3.5 — added cross-dialect category/article CRUD, strict authenticated authoring and abortable live preview, parser-enforced MDX safety, publication-aware public category/article routes, and atomic empty-category deletion — 31 tests passed across auth, validation, MDX, themes, PostgreSQL, and SQLite; Next/OpenNext/Docker builds passed; Docker browser proof rejected executable MDX, kept a draft at a real 404, published and live-edited without rebuilding, verified home/category/article navigation, preserved controlled form state after saves, deleted all proof rows, and invalidated the temporary session — this commit
 - 2026-08-27 — 0.5, 2.5, 3.1 live Cloudflare verification — deployed commit `8360567` to the scoped `opas-mvp` Worker and D1 database, exercised the authenticated runtime-theme write path, and rotated the final admin secrets — health, unauthenticated Proxy redirect, authenticated Ocean save, distinct public light/dark values, D1-backed MDX, OPAS restore, clean browser logs, and smoke-session invalidation all passed; current Worker version `d55a1674-c016-48ed-bccb-8684c6dd479a` — this commit
 - 2026-08-27 — 2.4–2.5 — added four authenticated preset choices, the strict JSON editor, cross-dialect persistence, runtime logo rendering, and the before/after proof images — the admin switched OPAS Default to Ocean under unchanged build `uqcM6NbnkaX5Q_THJczg8` and PID `81795`; SSR light/dark variables, browser console, full tests, Next build, and OpenNext build passed; the local row was restored — this commit
 - 2026-08-27 — 3.1 — added fixed-time env credential checks, signed eight-hour sessions, secure scoped cookies, Next 16 Proxy gating, authoritative page/action guards, and login/logout UI — six auth/Proxy tests, unauthenticated browser redirect, production browser login, lint, typecheck, Next build, and OpenNext build passed — this commit

@@ -33,5 +33,5 @@ export async function loginAdmin(_state: LoginState, formData: FormData): Promis
   }
 
   await startAdminSession();
-  redirect("/admin/theme");
+  redirect("/admin/content");
 }

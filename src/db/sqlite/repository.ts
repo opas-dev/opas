@@ -1,6 +1,6 @@
 // ABOUTME: Implements the OPAS repository for injected SQLite-compatible D1 databases.
 // ABOUTME: Normalizes D1 records to the same domain contract used by Postgres deployments.
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, notExists, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -19,6 +19,35 @@ type SqliteDatabase =
   | DrizzleD1Database<typeof schema>
   | BetterSQLite3Database<typeof schema>;
 
+const articleFields = {
+  id: articles.id,
+  workspaceId: articles.workspaceId,
+  categoryId: articles.categoryId,
+  slug: articles.slug,
+  title: articles.title,
+  mdx: articles.mdx,
+  status: articles.status,
+  isFaq: articles.isFaq,
+  authorName: articles.authorName,
+  publishedAt: articles.publishedAt,
+  createdAt: articles.createdAt,
+  updatedAt: articles.updatedAt,
+};
+
+const publishedArticleFields = {
+  id: articles.id,
+  workspaceId: articles.workspaceId,
+  categoryId: articles.categoryId,
+  slug: articles.slug,
+  title: articles.title,
+  mdx: articles.mdx,
+  isFaq: articles.isFaq,
+  authorName: articles.authorName,
+  publishedAt: articles.publishedAt,
+  createdAt: articles.createdAt,
+  updatedAt: articles.updatedAt,
+};
+
 export function createSqliteRepository(database: SqliteDatabase): Repository {
   // Both drivers expose the same execute methods, but Drizzle drops them from its union type.
   const executableDatabase = database as DrizzleD1Database<typeof schema>;
@@ -30,19 +59,7 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
 
     async findPublishedArticle(workspaceId, slug) {
       const [article] = await executableDatabase
-        .select({
-          id: articles.id,
-          workspaceId: articles.workspaceId,
-          categoryId: articles.categoryId,
-          slug: articles.slug,
-          title: articles.title,
-          mdx: articles.mdx,
-          isFaq: articles.isFaq,
-          authorName: articles.authorName,
-          publishedAt: articles.publishedAt,
-          createdAt: articles.createdAt,
-          updatedAt: articles.updatedAt,
-        })
+        .select(publishedArticleFields)
         .from(articles)
         .where(
           and(
@@ -55,6 +72,15 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
         .execute();
 
       return article ?? null;
+    },
+
+    async listPublishedArticles(workspaceId) {
+      return executableDatabase
+        .select(publishedArticleFields)
+        .from(articles)
+        .where(and(eq(articles.workspaceId, workspaceId), eq(articles.status, "published")))
+        .orderBy(asc(articles.title), asc(articles.id))
+        .execute();
     },
 
     async listCategories(workspaceId) {
@@ -70,6 +96,100 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
         .from(categories)
         .where(eq(categories.workspaceId, workspaceId))
         .orderBy(asc(categories.position), asc(categories.id))
+        .execute();
+    },
+
+    async createCategory(category) {
+      await executableDatabase.insert(categories).values(category).execute();
+    },
+
+    async updateCategory(category) {
+      await executableDatabase
+        .update(categories)
+        .set({
+          slug: category.slug,
+          name: category.name,
+          description: category.description,
+          position: category.position,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(categories.workspaceId, category.workspaceId),
+            eq(categories.id, category.id),
+          ),
+        )
+        .execute();
+    },
+
+    async deleteCategory(workspaceId, id) {
+      const deleted = await executableDatabase
+        .delete(categories)
+        .where(
+          and(
+            eq(categories.workspaceId, workspaceId),
+            eq(categories.id, id),
+            notExists(
+              executableDatabase
+                .select({ id: articles.id })
+                .from(articles)
+                .where(eq(articles.categoryId, id)),
+            ),
+          ),
+        )
+        .returning({ id: categories.id })
+        .execute();
+      return deleted.length === 1;
+    },
+
+    async listArticles(workspaceId) {
+      return executableDatabase
+        .select(articleFields)
+        .from(articles)
+        .where(eq(articles.workspaceId, workspaceId))
+        .orderBy(asc(articles.title), asc(articles.id))
+        .execute();
+    },
+
+    async getArticle(workspaceId, id) {
+      const [article] = await executableDatabase
+        .select(articleFields)
+        .from(articles)
+        .where(and(eq(articles.workspaceId, workspaceId), eq(articles.id, id)))
+        .limit(1)
+        .execute();
+
+      return article ?? null;
+    },
+
+    async createArticle(article) {
+      await executableDatabase.insert(articles).values(article).execute();
+    },
+
+    async updateArticle(article) {
+      await executableDatabase
+        .update(articles)
+        .set({
+          categoryId: article.categoryId,
+          slug: article.slug,
+          title: article.title,
+          mdx: article.mdx,
+          status: article.status,
+          isFaq: article.isFaq,
+          authorName: article.authorName,
+          publishedAt: article.publishedAt,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(articles.workspaceId, article.workspaceId), eq(articles.id, article.id)),
+        )
+        .execute();
+    },
+
+    async deleteArticle(workspaceId, id) {
+      await executableDatabase
+        .delete(articles)
+        .where(and(eq(articles.workspaceId, workspaceId), eq(articles.id, id)))
         .execute();
     },
 

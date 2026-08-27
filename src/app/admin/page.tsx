@@ -8,5 +8,5 @@ export const runtime = "nodejs";
 
 export default async function AdminPage() {
   await requireAdmin();
-  redirect("/admin/theme");
+  redirect("/admin/content");
 }

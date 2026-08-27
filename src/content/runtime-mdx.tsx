@@ -3,6 +3,7 @@
 import { createCompiler } from "@fumadocs/mdx-remote";
 
 import { BrowserMdx } from "@/content/browser-mdx";
+import { validateArticleMdx } from "@/content/mdx-safety";
 
 const compiler = createCompiler({
   preset: "minimal",
@@ -14,11 +15,13 @@ type RuntimeMdxProps = {
 };
 
 export async function RuntimeMdx({ source }: RuntimeMdxProps) {
+  const validatedSource = await validateArticleMdx(source);
+
   if (process.env.OPAS_DATABASE_DRIVER === "d1") {
-    const compiled = String(await compiler.compileFile(source));
+    const compiled = String(await compiler.compileFile(validatedSource));
     return <BrowserMdx compiled={compiled} />;
   }
 
-  const { body: MdxContent } = await compiler.compile({ source });
+  const { body: MdxContent } = await compiler.compile({ source: validatedSource });
   return <MdxContent />;
 }

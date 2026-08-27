@@ -21,3 +21,17 @@ Runtime themes may change values only within OPAS's predefined semantic color, f
 The root server layout validates and injects the active database row on every request. The authenticated editor writes one trusted workspace row through the shared repository, and public reloads observe the change immediately. [`theme-before.png`](theme-before.png) and [`theme-after.png`](theme-after.png) show OPAS Default and Ocean from the same production build and server process; both light and dark computed values were verified, then the local row was restored.
 
 Admin sessions are signed, stateless, valid for eight hours, and limited to `/admin`. Production cookies are always Secure, so production admin access requires HTTPS. OpenNext labels Node.js Proxy support experimental during its Cloudflare build, but the deployed workerd boundary passed: an unauthenticated request redirected to `/admin/login`, authenticated Server Actions wrote D1, and rotating the signing secret invalidated the smoke session immediately.
+
+## MDX threat model
+
+Article rows are untrusted at render time even when they normally come from the authenticated editor: an import, a compromised database credential, or a future write path must not turn content into application code. Fumadocs compiles MDX to a JavaScript function body and executes it with a dynamic function on Node or in the browser on Cloudflare, where the renderer also requires `unsafe-eval`.
+
+Every article therefore passes through the MDX parser before either execution path. The validator rejects module imports and exports, frontmatter, inline and block JavaScript expressions, expression-valued or spread component properties, unsafe link and image protocols, and every JSX element outside the registered component allowlist. Reference definitions use the narrower relative-or-HTTP(S) URL policy because Markdown shares definitions between links and images. The v0.1 component allowlist is empty because OPAS currently registers no custom article components; normal Markdown, including fenced and inline code examples that contain those strings, remains valid. A future component must be registered in the renderer and explicitly admitted here only after its properties and output are audited.
+
+This boundary prevents stored content from intentionally reaching the MDX execution surface; it does not make `unsafe-eval` harmless or protect against a compiler/runtime vulnerability. The authenticated live preview also executes validated compiled MDX in the browser on every deployment target, while public browser execution is Cloudflare-specific. Responses still need a CSP that grants `unsafe-eval` only on routes where either renderer requires it and constrains every other script source.
+
+## Docker content authoring
+
+The Docker target passed the complete administrator lifecycle against PostgreSQL: executable MDX was rejected in both preview and save, a newly authored draft returned a real public 404, publishing made it appear on the home, category, and article routes, and an MDX edit appeared after refresh without rebuilding the image. Article and category deletion removed every temporary proof row, and restoring the final signing secret invalidated the temporary administrator session.
+
+The Alpine dependency stage installs Python, Make, and a C++ compiler because the clean ARM build compiles the development-only `better-sqlite3` package from source. Those tools remain outside the non-root runtime image.

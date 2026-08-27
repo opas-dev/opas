@@ -309,11 +309,111 @@ a {
   font-size: 1.0625rem;
 }
 
+.launch-points h3 a {
+  text-decoration-color: var(--opas-border-strong);
+  text-underline-offset: 0.25em;
+}
+
+.launch-points h3 a:hover {
+  text-decoration-color: var(--opas-primary);
+}
+
 .launch-points li p {
   max-width: 44rem;
   margin: 0.4rem 0 0;
   color: var(--opas-muted);
   line-height: 1.55;
+}
+
+.launch-points li .category-count {
+  margin-top: 0.75rem;
+  color: var(--opas-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.empty-library {
+  margin: 3rem 0 0;
+  padding: 2rem;
+  border: 1px dashed var(--opas-border-strong);
+  border-radius: var(--opas-radius-md);
+  background: var(--opas-surface);
+  color: var(--opas-muted);
+}
+
+.public-section {
+  width: min(100% - 2rem, 74rem);
+  margin-inline: auto;
+  padding-block: 2rem 7rem;
+}
+
+.category-heading {
+  max-width: 48rem;
+  margin-top: clamp(4rem, 8vw, 7rem);
+}
+
+.category-heading > p:first-child {
+  margin: 0 0 1rem;
+  color: var(--opas-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.category-heading h1 {
+  margin: 0;
+  font-size: clamp(2.75rem, 7vw, 5rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.category-heading > p:last-child:not(:first-child) {
+  max-width: 42rem;
+  margin: 1.5rem 0 0;
+  color: var(--opas-muted);
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.public-article-list {
+  max-width: 52rem;
+  margin: 4rem 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--opas-border);
+}
+
+.public-article-list li {
+  padding-block: 1.25rem;
+  border-bottom: 1px solid var(--opas-border);
+}
+
+.public-article-list a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  font-size: 1.0625rem;
+  font-weight: 680;
+  text-decoration: none;
+}
+
+.public-article-list a span:last-child {
+  color: var(--opas-primary);
+  transition: transform 180ms ease;
+}
+
+.public-article-list a:hover span:last-child {
+  transform: translateX(0.25rem);
+}
+
+.public-article-list p {
+  margin: 0.5rem 0 0;
+  color: var(--opas-muted);
+  font-size: 0.75rem;
 }
 
 .article-shell {
@@ -356,6 +456,75 @@ a {
   text-wrap: pretty;
 }
 
+.article-content h2,
+.article-content h3 {
+  margin: 2.75rem 0 0;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.article-content h2 {
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+}
+
+.article-content h3 {
+  font-size: 1.35rem;
+}
+
+.article-content ul,
+.article-content ol {
+  margin: 1.5rem 0 0;
+  padding-left: 1.4rem;
+}
+
+.article-content li {
+  padding-left: 0.3rem;
+  line-height: 1.75;
+}
+
+.article-content li + li {
+  margin-top: 0.5rem;
+}
+
+.article-content a {
+  color: var(--opas-primary);
+  font-weight: 650;
+  text-underline-offset: 0.2em;
+}
+
+.article-content code {
+  border-radius: var(--opas-radius-xs);
+  background: var(--opas-code-background);
+  color: var(--opas-code-foreground);
+  font-family: var(--opas-font-mono);
+  font-size: 0.9em;
+}
+
+.article-content :not(pre) > code {
+  padding: 0.15em 0.35em;
+}
+
+.article-content pre {
+  overflow-x: auto;
+  margin: 2rem 0 0;
+  padding: 1.25rem;
+  border-radius: var(--opas-radius-md);
+  background: var(--opas-code-background);
+  color: var(--opas-code-foreground);
+  line-height: 1.65;
+}
+
+.article-content pre code {
+  background: transparent;
+}
+
+.article-content hr {
+  margin-block: 3rem;
+  border: 0;
+  border-top: 1px solid var(--opas-border);
+}
+
 .article-content blockquote {
   margin: 2rem 0 0;
   padding: 1.25rem;
@@ -366,6 +535,23 @@ a {
 
 .article-content blockquote p {
   margin: 0;
+}
+
+.article-content.article-preview {
+  max-width: none;
+  margin-top: 0;
+}
+
+.article-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem 2rem;
+  margin-top: 4rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--opas-border);
+  color: var(--opas-muted);
+  font-size: 0.8125rem;
 }
 
 .mdx-runtime-status {

@@ -96,7 +96,7 @@ test("signed sessions reject altered, malformed, and differently signed tokens",
 });
 
 test("Proxy matcher covers only administrator routes", () => {
-  for (const url of ["/admin", "/admin/login", "/admin/theme"]) {
+  for (const url of ["/admin", "/admin/login", "/admin/theme", "/admin/content"]) {
     assert.equal(
       unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig: {}, url }),
       true,
@@ -161,5 +161,5 @@ test("administrator route gate passes protected requests and redirects login ses
     }),
     sessionSecret,
   );
-  assert.equal(loginResponse.headers.get("location"), "https://docs.example.com/admin/theme");
+  assert.equal(loginResponse.headers.get("location"), "https://docs.example.com/admin/content");
 });
