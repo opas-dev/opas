@@ -11,10 +11,10 @@
 
 ## Status
 - **Current phase:** 2
-- **Done:** 8 / 40
+- **Done:** 9 / 40
 
 ## Blockers
-B3 — The remote Cloudflare and Vercel rollout awaits the required production/shared-state confirmation. Phase 0 items 0.5–0.7 are parked at their remote verification step while local implementation continues.
+B3 — The Vercel production rollout awaits the required shared-state confirmation. Phase 0 items 0.6–0.7 are parked at their remaining remote verification step while local implementation continues.
 
 Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. B2 (Neon) — `NEON_DATABASE_URL` in `.env`, connection verified (Postgres 18.6, eu-central-1), 2026-08-27.
 
@@ -25,16 +25,17 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-27 | Keyword search via Orama (in-process) | Portable across all targets — Postgres FTS does not exist on D1 |
 | 2026-08-27 | Branding is OPAS everywhere; AGPL-3.0 core with isolated `/ee` later | Timo's call |
 | 2026-08-27 | Default design register is a restrained, light product UI with crimson reserved for primary action and active state | The public help center and admin are task surfaces; this keeps long-form reading clear while runtime presets demonstrate brand range |
-| 2026-08-27 | Cloudflare compiles sanitized MDX in workerd and executes the function body in the browser | Workerd forbids request-time dynamic evaluation; this preserves live D1 content and makes the required `unsafe-eval` script policy explicit |
+| 2026-08-27 | Cloudflare compiles DB-backed MDX in workerd and executes the function body in the browser | Workerd forbids request-time dynamic evaluation; this preserves live D1 content, makes the required `unsafe-eval` script policy explicit, and requires item 3.3 to sanitize before compiling |
 | 2026-08-27 | Runtime MDX uses Fumadocs' minimal preset with its unused documentation-plugin import aliased out | Avoids the Shiki initialization failure reported on Vercel and reduced the spike Worker from 3.126 MiB to about 1.27 MiB compressed |
 | 2026-08-27 | Repository behavior is verified with Testcontainers PostgreSQL and better-sqlite3, then checked against Wrangler's local D1 runtime | The same contract covers both dialects while Wrangler separately proves the checked-in D1 migrations and deployment seed execute on workerd's database runtime |
+| 2026-08-27 | The Cloudflare D1 database runs in Eastern Europe and the MVP stays on its workers.dev hostname | Keeps OPAS data near the initial operator region and avoids touching the protected `opas.dev` root, `www`, or DNS during the spike |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
 - [x] 0.2 Runtime MDX: a page that compiles MDX read at request time (from a file or DB, not imported) with `@fumadocs/mdx-remote` — never `mdx-bundler`. **Verify:** changing the source shows new output with no rebuild.
 - [x] 0.3 Minimal DB read: Drizzle + Postgres (docker) storing one article row; the page renders MDX from the DB. **Verify:** update the row via psql → refresh shows the change.
 - [x] 0.4 Docker target: Dockerfile (standalone output) + `docker-compose.yml` (app + Postgres), single `.env`. **Verify:** `docker compose up` from a clean checkout serves the MDX page.
-- [ ] 0.5 Cloudflare target: `@opennextjs/cloudflare` (NOT `@cloudflare/next-on-pages`); create D1 database `opas-mvp` on the DevPlant account; Drizzle D1 dialect path for the same article read. **Verify:** deployed workers.dev URL renders D1-stored MDX; confirm MDX eval works on workerd and note CSP implications in `docs/notes.md`.
+- [x] 0.5 Cloudflare target: `@opennextjs/cloudflare` (NOT `@cloudflare/next-on-pages`); create D1 database `opas-mvp` on the DevPlant account; Drizzle D1 dialect path for the same article read. **Verify:** deployed workers.dev URL renders D1-stored MDX; confirm MDX eval works on workerd and note CSP implications in `docs/notes.md`.
 - [ ] 0.6 Vercel target: deploy with the Neon serverless driver; reproduce/resolve the `@fumadocs/mdx-remote` "Connection closed" issue (Fumadocs discussion #1623). **Verify:** production URL renders Neon-stored MDX.
 - [ ] 0.7 Write `docs/notes.md` with spike findings; adjust this plan if a target fails irrecoverably (brief fallback: CF drops to static-export-only — document honestly, don't ship a broken path).
 
@@ -99,6 +100,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-27 — 0.5 — created the scoped `opas-mvp` D1 database in EEUR, applied and seeded both migrations, deployed the OpenNext Worker to `opas-mvp.timo-bejan.workers.dev`, and documented workerd/CSP behavior — health and browser-rendered MDX passed; a remote D1 edit appeared on reload without a redeploy, the seed restored it, and Worker version `fd9ac205-1df9-4d57-af03-7868274f4026` remained active — `07b7d02` + this commit
 - 2026-08-27 — 1.1–1.4 — aligned all seven tables and constraints across Postgres and SQLite, consolidated runtime driver selection behind one repository, added convergent seeds and data-preserving migrations, and added one cross-dialect contract — `pnpm test`, both no-drift generation checks, a fresh Wrangler local D1 migration/seed/query, `pnpm build`, and `pnpm cf:build` passed — this commit
 - 2026-08-27 — 0.4 — added the standalone non-root image, Postgres migration/seed preparation, app and DB healthchecks, and two-service Compose stack — removed the OPAS volume, rebuilt from source, reached healthy state, and curled database-backed MDX plus `/api/health` successfully — this commit
 - 2026-08-27 — 0.3 — added the Postgres Drizzle schema, generated migration, idempotent demo seed, and database-backed runtime MDX read — updated the seeded row through `psql` and confirmed the next production-server response changed without rebuilding; build, lint, and typecheck passed — this commit
