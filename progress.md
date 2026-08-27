@@ -11,10 +11,10 @@
 
 ## Status
 - **Current phase:** 8
-- **Done:** 32 / 40
+- **Done:** 35 / 40
 
 ## Blockers
-B3 — The Vercel production rollout awaits the required shared-state confirmation. Phase 0 items 0.6–0.7 are parked at their remaining remote verification step while local implementation continues.
+B3 — The Vercel production rollout awaits the required shared-state confirmation. Items 0.6–0.7, 7.4–7.5, 8.4, and the remaining Vercel/theme definition-of-done gates are parked; all local and Cloudflare work is complete.
 
 Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. B2 (Neon) — `NEON_DATABASE_URL` in `.env`, connection verified (Postgres 18.6, eu-central-1), 2026-08-27.
 
@@ -95,23 +95,24 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [ ] 7.5 README quickstarts for all three targets, with live URLs.
 
 ## Phase 8 — Release
-- [ ] 8.1 `/ee` directory placeholder with commercial-license README; verify core has zero imports from `/ee`.
-- [ ] 8.2 CONTRIBUTING.md + short public roadmap section in README.
-- [ ] 8.3 CI on GitHub Actions: lint, typecheck, both-dialect tests.
+- [x] 8.1 `/ee` directory placeholder with commercial-license README; verify core has zero imports from `/ee`.
+- [x] 8.2 CONTRIBUTING.md + short public roadmap section in README.
+- [x] 8.3 CI on GitHub Actions: lint, typecheck, both-dialect tests.
 - [ ] 8.4 Tag `v0.1.0` + GitHub release with changelog. **Verify:** CI green on the tag; every Definition-of-done box below checked.
 
 ## Definition of done (v0.1)
-- [ ] `docker compose up` on a clean machine yields a seeded, themed, searchable help center.
-- [ ] Deployed and smoke-tested on Cloudflare Workers with D1 — live URL in README.
+- [x] `docker compose up` on a clean machine yields a seeded, themed, searchable help center.
+- [x] Deployed and smoke-tested on Cloudflare Workers with D1 — live URL in README.
 - [ ] Deployed and smoke-tested on Vercel with Neon — live URL in README.
 - [ ] A theme change via admin re-skins the site with zero rebuild, on every target.
-- [ ] `llms.txt`, `llms-full.txt`, per-article `.md`, sitemap, and JSON-LD all pass the smoke-test script.
-- [ ] Feedback widget and view analytics work.
-- [ ] Non-goals honored — NOT built: ticketing/inbox, live chat, AI/RAG answers, multi-language, WYSIWYG, plugin system, multi-tenancy, vector search.
+- [x] `llms.txt`, `llms-full.txt`, per-article `.md`, sitemap, and JSON-LD all pass the smoke-test script.
+- [x] Feedback widget and view analytics work.
+- [x] Non-goals honored — NOT built: ticketing/inbox, live chat, AI/RAG answers, multi-language, WYSIWYG, plugin system, multi-tenancy, vector search.
 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-28 — 8.1–8.3 — established the empty commercial-edition boundary, added the contribution guide and public three-target quickstarts/roadmap, and added a pinned GitHub Actions gate for the complete test suite plus Next/OpenNext builds — the core import scan, actionlint, 65 tests, Next/OpenNext/Docker builds, and Docker/Cloudflare smoke suites passed — this commit
 - 2026-08-28 — 7.1–7.3 — made all deployment seeds preserve administrator edits, required complete Compose configuration, added a guarded create/migrate/seed/deploy Cloudflare workflow, aligned the stored-MDX URL policy with the documented workerd-compatible CSP, and added one portable read-only smoke suite — 65 tests, lint, typecheck, clean-source Docker build/first boot/non-root runtime/smoke, and cross-workspace seed preservation checks passed; an absent disposable `opas-*` Worker/D1 pair completed the bootstrap and smoke suite as version `e25a9167-8e7b-4b8e-9139-c73d7e521939` before both resources were deleted; final live `opas-mvp` version `0583f6b9-3a28-472a-a1a3-bd32d6a479d6` passed the build-first dry run, missing-only D1 seed, CSP headers, full smoke suite, and zero-row analytics check, following the clean browser MDX/CSP proof — this commit
 - 2026-08-28 — 6.1–6.3 — added the accessible anonymous helpfulness form, browser view beacon, strict bounded event APIs, salted Cloudflare requester and portable process admission gates, collision-bounded 30-day samples, cross-dialect aggregates, and the authenticated analytics report — 60 tests, lint, typecheck, Next/OpenNext/Docker builds, Docker browser/API/database/admin checks, limiter race tests, and exact cleanup passed; Worker `40d90ba4-f530-423e-88d6-3072f93a1296` rendered workerd MDX, persisted D1 view/feedback/miss samples, displayed them in the authenticated report with no browser errors, rejected invalid and draft events, and retained zero proof rows — this commit
 - 2026-08-28 — 5.1–5.4 — added one workspace-safe publication projection for SSR metadata and canonicals, dynamic sitemap, escaped Article and conditional FAQPage JSON-LD, DB-generated llms documents, and rewritten per-article Markdown with discovery and crawler headers — 44 tests, lint, typecheck, Next/OpenNext/Docker builds, and Docker live publish→draft checks passed; Worker `61d7ca6a-e7d7-406e-98ee-17512d4c1831` passed exact-origin curl checks across all surfaces, reflected a D1 FAQ publish and unpublish without rebuilding, rejected drafts and wrong-category Markdown, and retained no canary row — this commit
