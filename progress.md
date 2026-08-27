@@ -11,7 +11,7 @@
 
 ## Status
 - **Current phase:** 0
-- **Done:** 0 / 40
+- **Done:** 1 / 40
 
 ## Blockers
 None — all deploy targets are unblocked.
@@ -24,9 +24,10 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-27 | D1 on Cloudflare, Neon on Vercel, Postgres in Docker; one adapter layer supports all three | Timo's call; supersedes the brief's "don't hard-depend on D1" |
 | 2026-08-27 | Keyword search via Orama (in-process) | Portable across all targets — Postgres FTS does not exist on D1 |
 | 2026-08-27 | Branding is OPAS everywhere; AGPL-3.0 core with isolated `/ee` later | Timo's call |
+| 2026-08-27 | Default design register is a restrained, light product UI with crimson reserved for primary action and active state | The public help center and admin are task surfaces; this keeps long-form reading clear while runtime presets demonstrate brand range |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
-- [ ] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
+- [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
 - [ ] 0.2 Runtime MDX: a page that compiles MDX read at request time (from a file or DB, not imported) with `@fumadocs/mdx-remote` — never `mdx-bundler`. **Verify:** changing the source shows new output with no rebuild.
 - [ ] 0.3 Minimal DB read: Drizzle + Postgres (docker) storing one article row; the page renders MDX from the DB. **Verify:** update the row via psql → refresh shows the change.
 - [ ] 0.4 Docker target: Dockerfile (standalone output) + `docker-compose.yml` (app + Postgres), single `.env`. **Verify:** `docker compose up` from a clean checkout serves the MDX page.
@@ -95,4 +96,5 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-27 — 0.1 — scaffolded Next.js 16.3.3, React 19.2.8, TypeScript, Tailwind v4, standalone output, Node runtime exports, and initial product/design context — `pnpm build`, live `pnpm dev` request, lint, and typecheck passed — this commit
 - 2026-08-27 — setup — repo created, plan authored, landing page live at opas.dev; no app code yet — n/a — initial commit

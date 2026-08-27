@@ -1,0 +1,266 @@
+/* ABOUTME: Defines the global semantic tokens and base layout for OPAS public pages. */
+/* ABOUTME: Establishes an accessible restrained palette that runtime themes will override. */
+@import "tailwindcss";
+
+:root {
+  --opas-background: oklch(1 0 0);
+  --opas-surface: oklch(0.975 0 0);
+  --opas-surface-strong: oklch(0.94 0.005 27);
+  --opas-foreground: oklch(0.2 0.018 27);
+  --opas-muted: oklch(0.46 0.014 27);
+  --opas-border: oklch(0.88 0.009 27);
+  --opas-primary: oklch(0.464 0.169 26.9);
+  --opas-primary-foreground: oklch(1 0 0);
+  --opas-focus: oklch(0.62 0.18 27);
+  --opas-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --opas-radius-sm: 0.375rem;
+  --opas-radius-md: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--opas-background);
+  --color-surface: var(--opas-surface);
+  --color-surface-strong: var(--opas-surface-strong);
+  --color-foreground: var(--opas-foreground);
+  --color-muted: var(--opas-muted);
+  --color-border: var(--opas-border);
+  --color-primary: var(--opas-primary);
+  --color-primary-foreground: var(--opas-primary-foreground);
+  --color-focus: var(--opas-focus);
+  --font-sans: var(--opas-font-sans);
+  --radius-sm: var(--opas-radius-sm);
+  --radius-md: var(--opas-radius-md);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--opas-background);
+  color: var(--opas-foreground);
+  font-family: var(--opas-font-sans);
+}
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  min-height: 100vh;
+  background: var(--opas-background);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 0.1875rem solid var(--opas-focus);
+  outline-offset: 0.1875rem;
+}
+
+.site-header {
+  width: min(100% - 2rem, 74rem);
+  min-height: 5rem;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--opas-border);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.875rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-decoration: none;
+}
+
+.wordmark-mark {
+  display: grid;
+  width: 1.875rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: var(--opas-radius-sm);
+  background: var(--opas-primary);
+  color: var(--opas-primary-foreground);
+  font-size: 0.75rem;
+  letter-spacing: 0;
+}
+
+.header-note {
+  color: var(--opas-muted);
+  font-size: 0.875rem;
+}
+
+.hero {
+  width: min(100% - 2rem, 74rem);
+  margin-inline: auto;
+  padding-block: clamp(4.5rem, 10vw, 8rem) clamp(4rem, 8vw, 6rem);
+}
+
+.hero-context {
+  margin: 0 0 1.25rem;
+  color: var(--opas-primary);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.hero h1 {
+  max-width: 13ch;
+  margin: 0;
+  font-size: clamp(2.75rem, 7.5vw, 5.75rem);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.hero-copy {
+  max-width: 42rem;
+  margin: 2rem 0 0;
+  color: var(--opas-muted);
+  font-size: clamp(1.05rem, 2vw, 1.25rem);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.search-preview {
+  max-width: 42rem;
+  margin-top: 3rem;
+}
+
+.search-preview > label {
+  display: block;
+  margin-bottom: 0.625rem;
+  font-size: 0.875rem;
+  font-weight: 680;
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  min-height: 3.75rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--opas-border);
+  border-radius: var(--opas-radius-md);
+  background: var(--opas-surface);
+}
+
+.search-field input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--opas-foreground);
+}
+
+.search-field input::placeholder {
+  color: var(--opas-muted);
+  opacity: 1;
+}
+
+.search-field span {
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--opas-border);
+  border-radius: var(--opas-radius-sm);
+  color: var(--opas-muted);
+  font-size: 0.75rem;
+}
+
+.search-preview > p {
+  margin: 0.625rem 0 0;
+  color: var(--opas-muted);
+  font-size: 0.8125rem;
+}
+
+.launch-points {
+  width: min(100% - 2rem, 74rem);
+  margin-inline: auto;
+  padding-block: 3rem 6rem;
+  border-top: 1px solid var(--opas-border);
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.section-heading p {
+  margin: 0;
+  color: var(--opas-muted);
+}
+
+.launch-points ol {
+  margin: 3rem 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--opas-border);
+}
+
+.launch-points li {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 1rem;
+  padding-block: 1.5rem;
+  border-bottom: 1px solid var(--opas-border);
+}
+
+.launch-points li > span {
+  padding-top: 0.2rem;
+  color: var(--opas-primary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.launch-points h3 {
+  margin: 0;
+  font-size: 1.0625rem;
+}
+
+.launch-points li p {
+  max-width: 44rem;
+  margin: 0.4rem 0 0;
+  color: var(--opas-muted);
+  line-height: 1.55;
+}
+
+@media (max-width: 40rem) {
+  .header-note {
+    display: none;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
