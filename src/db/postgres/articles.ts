@@ -2,11 +2,11 @@
 // ABOUTME: Returns only published articles for the public help center.
 import { and, eq } from "drizzle-orm";
 
-import { postgresDb } from "@/db/postgres/client";
+import { getPostgresDatabase } from "@/db/postgres/client";
 import { articles } from "@/db/schema/postgres";
 
 export async function findPublishedArticle(workspaceId: string, slug: string) {
-  const [article] = await postgresDb
+  const [article] = await getPostgresDatabase()
     .select({
       id: articles.id,
       slug: articles.slug,

@@ -1,28 +1,46 @@
-// ABOUTME: Creates the pooled Drizzle client used by Docker Postgres deployments.
-// ABOUTME: Reuses the pool during local hot reloads and exposes an explicit shutdown hook for scripts.
+// ABOUTME: Creates the pooled Drizzle client used by Docker Postgres deployments on demand.
+// ABOUTME: Defers environment access until runtime and reuses connections during local hot reloads.
 import { drizzle } from "drizzle-orm/node-postgres";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
 import * as schema from "@/db/schema/postgres";
 
 const processState = globalThis as typeof globalThis & {
   opasPostgresPool?: Pool;
+  opasPostgresDatabase?: NodePgDatabase<typeof schema>;
 };
 
-function createPool() {
+export function getPostgresPool() {
+  if (processState.opasPostgresPool) {
+    return processState.opasPostgresPool;
+  }
+
   const connectionString = process.env.DATABASE_URL;
 
   if (!connectionString) {
     throw new Error("DATABASE_URL is required for the Postgres deployment");
   }
 
-  return new Pool({ connectionString });
+  processState.opasPostgresPool = new Pool({ connectionString });
+  return processState.opasPostgresPool;
 }
 
-export const postgresPool = processState.opasPostgresPool ?? createPool();
+export function getPostgresDatabase() {
+  if (processState.opasPostgresDatabase) {
+    return processState.opasPostgresDatabase;
+  }
 
-if (process.env.NODE_ENV !== "production") {
-  processState.opasPostgresPool = postgresPool;
+  processState.opasPostgresDatabase = drizzle(getPostgresPool(), { schema });
+  return processState.opasPostgresDatabase;
 }
 
-export const postgresDb = drizzle(postgresPool, { schema });
+export async function closePostgres() {
+  const pool = processState.opasPostgresPool;
+
+  if (pool) {
+    await pool.end();
+    delete processState.opasPostgresPool;
+    delete processState.opasPostgresDatabase;
+  }
+}

@@ -1,0 +1,13 @@
+# ABOUTME: Keeps local state and generated artifacts out of the OPAS image context.
+# ABOUTME: Lets Docker reproduce dependencies and builds entirely inside its stages.
+.git
+.next
+.open-next
+.pnpm-store
+.vercel
+.wrangler
+node_modules
+.env
+.env.*.local
+*.log
+*.tsbuildinfo

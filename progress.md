@@ -11,7 +11,7 @@
 
 ## Status
 - **Current phase:** 0
-- **Done:** 3 / 40
+- **Done:** 4 / 40
 
 ## Blockers
 None — all deploy targets are unblocked.
@@ -30,7 +30,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
 - [x] 0.2 Runtime MDX: a page that compiles MDX read at request time (from a file or DB, not imported) with `@fumadocs/mdx-remote` — never `mdx-bundler`. **Verify:** changing the source shows new output with no rebuild.
 - [x] 0.3 Minimal DB read: Drizzle + Postgres (docker) storing one article row; the page renders MDX from the DB. **Verify:** update the row via psql → refresh shows the change.
-- [ ] 0.4 Docker target: Dockerfile (standalone output) + `docker-compose.yml` (app + Postgres), single `.env`. **Verify:** `docker compose up` from a clean checkout serves the MDX page.
+- [x] 0.4 Docker target: Dockerfile (standalone output) + `docker-compose.yml` (app + Postgres), single `.env`. **Verify:** `docker compose up` from a clean checkout serves the MDX page.
 - [ ] 0.5 Cloudflare target: `@opennextjs/cloudflare` (NOT `@cloudflare/next-on-pages`); create D1 database `opas-mvp` on the DevPlant account; Drizzle D1 dialect path for the same article read. **Verify:** deployed workers.dev URL renders D1-stored MDX; confirm MDX eval works on workerd and note CSP implications in `docs/notes.md`.
 - [ ] 0.6 Vercel target: deploy with the Neon serverless driver; reproduce/resolve the `@fumadocs/mdx-remote` "Connection closed" issue (Fumadocs discussion #1623). **Verify:** production URL renders Neon-stored MDX.
 - [ ] 0.7 Write `docs/notes.md` with spike findings; adjust this plan if a target fails irrecoverably (brief fallback: CF drops to static-export-only — document honestly, don't ship a broken path).
@@ -96,6 +96,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-27 — 0.4 — added the standalone non-root image, Postgres migration/seed preparation, app and DB healthchecks, and two-service Compose stack — removed the OPAS volume, rebuilt from source, reached healthy state, and curled database-backed MDX plus `/api/health` successfully — this commit
 - 2026-08-27 — 0.3 — added the Postgres Drizzle schema, generated migration, idempotent demo seed, and database-backed runtime MDX read — updated the seeded row through `psql` and confirmed the next production-server response changed without rebuilding; build, lint, and typecheck passed — this commit
 - 2026-08-27 — 0.2 — added request-time compilation through `@fumadocs/mdx-remote` 1.5.1 on a dynamic Node route — changed the source while `pnpm dev` stayed running and confirmed the next response changed without a rebuild; build, lint, and typecheck passed — this commit
 - 2026-08-27 — 0.1 — scaffolded Next.js 16.3.3, React 19.2.8, TypeScript, Tailwind v4, standalone output, Node runtime exports, and initial product/design context — `pnpm build`, live `pnpm dev` request, lint, and typecheck passed — this commit
