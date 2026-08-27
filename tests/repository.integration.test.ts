@@ -366,6 +366,7 @@ async function exerciseRepository(harness: Harness) {
     id: "search_miss_contract",
     workspaceId: demoIds.workspace,
     query: "billing portal",
+    createdAt: new Date("2026-08-27T12:00:00.000Z"),
   });
 
   assert.deepEqual(await harness.feedback("feedback_contract"), {
@@ -377,6 +378,27 @@ async function exerciseRepository(harness: Harness) {
     views: 1,
   });
   assert.equal(await harness.searchMissCount("search_miss_contract"), 1);
+
+  await harness.repository.recordSearchMiss({
+    id: "search_miss_expired",
+    workspaceId: demoIds.workspace,
+    query: "expired query",
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  });
+  await harness.repository.recordSearchMiss({
+    id: "search_miss_retention_trigger",
+    workspaceId: demoIds.workspace,
+    query: "current query",
+    createdAt: new Date("2026-08-27T12:00:00.000Z"),
+  });
+  await harness.repository.recordSearchMiss({
+    id: "search_miss_retention_trigger",
+    workspaceId: demoIds.workspace,
+    query: "colliding slot",
+    createdAt: new Date("2026-08-27T12:00:00.000Z"),
+  });
+  assert.equal(await harness.searchMissCount("search_miss_expired"), 0);
+  assert.equal(await harness.searchMissCount("search_miss_retention_trigger"), 1);
 
   const violations: RuleViolation[] = [
     "duplicateWorkspaceSlug",

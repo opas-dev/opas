@@ -1,10 +1,11 @@
 // ABOUTME: Implements the OPAS repository for injected SQLite-compatible D1 databases.
 // ABOUTME: Normalizes D1 records to the same domain contract used by Postgres deployments.
-import { and, asc, eq, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, lt, notExists, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import type { Repository } from "@/db/repository";
+import { searchMissRetentionStart } from "@/db/search-misses";
 import {
   articleFeedback,
   articles,
@@ -240,7 +241,20 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
     },
 
     async recordSearchMiss(miss) {
-      await executableDatabase.insert(searchMisses).values(miss).execute();
+      await executableDatabase
+        .delete(searchMisses)
+        .where(
+          and(
+            eq(searchMisses.workspaceId, miss.workspaceId),
+            lt(searchMisses.createdAt, searchMissRetentionStart(miss.createdAt)),
+          ),
+        )
+        .execute();
+      await executableDatabase
+        .insert(searchMisses)
+        .values(miss)
+        .onConflictDoNothing({ target: searchMisses.id })
+        .execute();
     },
   };
 }

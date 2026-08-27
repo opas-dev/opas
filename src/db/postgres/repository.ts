@@ -1,10 +1,11 @@
 // ABOUTME: Implements the OPAS repository for Postgres-compatible Drizzle databases.
 // ABOUTME: Shares identical queries between Docker Postgres and Neon deployments.
-import { and, asc, eq, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, lt, notExists, sql } from "drizzle-orm";
 import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import type { Repository } from "@/db/repository";
+import { searchMissRetentionStart } from "@/db/search-misses";
 import {
   articleFeedback,
   articles,
@@ -223,7 +224,17 @@ export function createPostgresRepository(database: PostgresDatabase): Repository
     },
 
     async recordSearchMiss(miss) {
-      await database.insert(searchMisses).values(miss);
+      await database
+        .delete(searchMisses)
+        .where(
+          and(
+            eq(searchMisses.workspaceId, miss.workspaceId),
+            lt(searchMisses.createdAt, searchMissRetentionStart(miss.createdAt)),
+          ),
+        );
+      await database.insert(searchMisses).values(miss).onConflictDoNothing({
+        target: searchMisses.id,
+      });
     },
   };
 }

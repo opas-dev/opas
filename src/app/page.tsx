@@ -4,6 +4,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 
 import { PublicHeader } from "@/app/public-header";
+import { Search } from "@/app/search";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
 
@@ -25,16 +26,9 @@ export default async function HomePage() {
         <p className="hero-context">OPAS Help Center</p>
         <h1 id="hero-heading">How can we help?</h1>
         <p className="hero-copy">
-          Browse clear answers by category, or use search as soon as the growing library needs it.
+          Search every published answer, or browse the help center by category.
         </p>
-        <form className="search-preview" role="search">
-          <label htmlFor="help-search">What can we help you find?</label>
-          <div className="search-field">
-            <input id="help-search" name="query" placeholder="Search the help center" disabled />
-            <span aria-hidden="true">⌘ K</span>
-          </div>
-          <p>Search is being connected next. Every published answer is available below.</p>
-        </form>
+        <Search />
       </section>
 
       <section className="launch-points" aria-labelledby="categories-heading">

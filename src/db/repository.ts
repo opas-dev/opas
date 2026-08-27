@@ -61,6 +61,7 @@ export type SearchMiss = {
   id: string;
   workspaceId: string;
   query: string;
+  createdAt: Date;
 };
 
 export type Repository = {
