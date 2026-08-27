@@ -50,11 +50,13 @@ export type Feedback = {
   articleId: string;
   helpful: boolean;
   comment?: string | null;
+  createdAt: Date;
 };
 
 export type ArticleView = {
   id: string;
   articleId: string;
+  viewedAt: Date;
 };
 
 export type SearchMiss = {
@@ -62,6 +64,25 @@ export type SearchMiss = {
   workspaceId: string;
   query: string;
   createdAt: Date;
+};
+
+export type ArticleAnalytics = {
+  articleId: string;
+  title: string;
+  status: ArticleStatus;
+  views: number;
+  feedbackCount: number;
+  helpfulCount: number;
+};
+
+export type SearchMissAnalytics = {
+  query: string;
+  count: number;
+};
+
+export type Analytics = {
+  articles: ArticleAnalytics[];
+  searchMisses: SearchMissAnalytics[];
 };
 
 export type Repository = {
@@ -79,6 +100,7 @@ export type Repository = {
   deleteArticle(workspaceId: string, id: string): Promise<void>;
   getTheme(workspaceId: string): Promise<Theme | null>;
   updateTheme(theme: ThemeUpdate): Promise<void>;
+  getAnalytics(workspaceId: string): Promise<Analytics>;
   createFeedback(feedback: Feedback): Promise<void>;
   recordView(view: ArticleView): Promise<void>;
   recordSearchMiss(miss: SearchMiss): Promise<void>;

@@ -42,6 +42,16 @@ Search uses Orama 3.1.18 in process rather than a database-specific full-text en
 
 The index contains title, plain Markdown body text, and category name. Results expose only validated public slugs and a bounded plain-text excerpt. The route normalizes queries, limits them to 200 Unicode code points, disables response caching, and records normalized zero-result queries. Miss sampling has 1,024 conflict-safe slots per UTC day and opportunistically removes records beyond the 30-day cutoff when another miss arrives, bounding anonymous writes and stored row count while keeping a useful MVP sample. Docker/PostgreSQL and Cloudflare/D1 both returned the same typo-tolerant result, while exact canary checks proved miss persistence on both dialects.
 
+## Feedback and readership signals
+
+The article view beacon and helpfulness form send no cookies and set `credentials: omit`. OPAS does not persist an IP address, user agent, referrer, client ID, or salted requester key. On Cloudflare, where the platform supplies the authoritative `CF-Connecting-IP` header, the server derives a process-salted network key only in memory for a one-minute admission window and limits one requester to 5 feedback attempts and 30 view attempts. Other targets skip requester grouping rather than trusting client-controlled forwarding headers. Every running process still caps feedback and view database attempts at 120 and 600 per minute respectively. These portable counters are best-effort overload shedding, not a deployment-wide abuse firewall; production operators should also apply trusted platform edge limits.
+
+Accepted events occupy one of 1,024 conflict-safe slots per article, event kind, and UTC day. Collisions are intentionally discarded, so the administrator report labels views, feedback, and helpfulness as directional samples rather than unique visitors or exact totals. The report includes only the last 30 days. Old event rows are removed opportunistically when the same article receives another event; an inactive or unpublished article can retain an older free-text comment beyond the reporting window, so this is not a guaranteed 30-day deletion policy.
+
+Feedback accepts only a boolean helpful value and an optional trimmed comment of at most 1,000 Unicode code points. Request bodies are strict JSON, capped at 16 KiB, and never render comments back into public HTML. Draft, missing, and wrong-workspace articles reject both event types.
+
+Cloudflare Worker version `40d90ba4-f530-423e-88d6-3072f93a1296` passed the complete D1-backed flow: workerd rendered the article and feedback controls, the browser wrote a view and a free-text no response without cookies or console errors, a sampled zero-result query appeared in the authenticated report, and direct requests rejected malformed and draft events. The proof rows were deleted afterward and all three analytics tables returned to zero rows.
+
 ## Public discovery surfaces
 
 `OPAS_SITE_URL` is the authoritative origin for canonical URLs and absolute machine-readable links. Docker defaults it to `http://localhost:3000`; the Worker pins its exact workers.dev origin. A deployment with another public hostname must set that origin explicitly.

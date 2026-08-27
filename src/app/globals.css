@@ -646,6 +646,203 @@ a {
   font-size: 0.8125rem;
 }
 
+.article-feedback {
+  max-width: 44rem;
+  margin-top: 3rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--opas-border);
+}
+
+.article-feedback h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.article-feedback fieldset {
+  margin: 1rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.article-feedback-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+.article-feedback-option {
+  display: inline-flex;
+  min-height: 2.75rem;
+  min-width: 5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--opas-border-strong);
+  border-radius: var(--opas-radius-sm);
+  color: var(--opas-foreground);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 680;
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.article-feedback-option:hover {
+  border-color: var(--opas-primary);
+  color: var(--opas-primary);
+}
+
+.article-feedback-option:has(input:checked) {
+  border-color: var(--opas-primary);
+  background: var(--opas-secondary);
+  color: var(--opas-secondary-foreground);
+}
+
+.article-feedback-option:has(input:focus-visible) {
+  outline: 0.1875rem solid var(--opas-focus);
+  outline-offset: 0.1875rem;
+}
+
+.article-feedback-option input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--opas-primary);
+}
+
+.article-feedback-option input:focus-visible {
+  outline: 0;
+}
+
+.article-feedback fieldset:disabled .article-feedback-option {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.article-feedback-comment {
+  display: block;
+  margin-top: 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 680;
+}
+
+.article-feedback-optional {
+  color: var(--opas-muted);
+  font-weight: 500;
+}
+
+.article-feedback-comment textarea {
+  display: block;
+  width: 100%;
+  min-height: 6.5rem;
+  margin-top: 0.625rem;
+  padding: 0.75rem;
+  resize: vertical;
+  border: 1px solid var(--opas-border-strong);
+  border-radius: var(--opas-radius-sm);
+  background: var(--opas-background);
+  color: var(--opas-foreground);
+  line-height: 1.5;
+  transition: border-color 180ms ease;
+}
+
+.article-feedback-comment textarea:hover {
+  border-color: var(--opas-foreground);
+}
+
+.article-feedback-comment textarea:focus {
+  border-color: var(--opas-primary);
+}
+
+.article-feedback-comment textarea::placeholder {
+  color: var(--opas-muted);
+  opacity: 1;
+}
+
+.article-feedback-comment textarea:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.article-feedback-comment-limit {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--opas-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.article-feedback-comment-limit[data-limit] {
+  color: var(--opas-danger);
+}
+
+.article-feedback-actions {
+  display: flex;
+  min-height: 3.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin-top: 1rem;
+}
+
+.article-feedback-actions button {
+  min-height: 2.75rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--opas-primary);
+  border-radius: var(--opas-radius-sm);
+  background: var(--opas-primary);
+  color: var(--opas-primary-foreground);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: opacity 180ms ease;
+}
+
+.article-feedback-actions button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.article-feedback-actions button:active:not(:disabled) {
+  opacity: 0.76;
+}
+
+.article-feedback-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.article-feedback-actions button[data-pending] {
+  cursor: wait;
+}
+
+.article-feedback-actions button:disabled:not([data-pending]) {
+  background: var(--opas-surface-strong);
+  border-color: var(--opas-border);
+  color: var(--opas-muted);
+}
+
+.article-feedback-status,
+.article-feedback-success {
+  margin: 0;
+  color: var(--opas-muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.article-feedback-status [role="alert"] {
+  color: var(--opas-danger);
+}
+
+.article-feedback-success {
+  margin-top: 1rem;
+  color: var(--opas-foreground);
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
 .mdx-runtime-status {
   color: var(--opas-muted);
 }
@@ -664,6 +861,19 @@ a {
   .section-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .article-feedback-option {
+    flex: 1;
+  }
+
+  .article-feedback-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .article-feedback-actions button {
+    width: 100%;
   }
 }
 

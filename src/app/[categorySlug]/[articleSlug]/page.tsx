@@ -4,6 +4,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ArticleFeedback } from "@/app/[categorySlug]/[articleSlug]/feedback";
+import { ArticleViewBeacon } from "@/app/[categorySlug]/[articleSlug]/view-beacon";
 import { PublicHeader } from "@/app/public-header";
 import { loadPublicPageContent } from "@/app/publication-data";
 import {
@@ -74,6 +76,7 @@ export default async function ArticlePage({
           dangerouslySetInnerHTML={{ __html: serializeJsonLd(faqData) }}
         />
       ) : null}
+      <ArticleViewBeacon articleId={article.id} />
       <PublicHeader />
       <div className="article-shell">
         <nav className="article-nav" aria-label="Breadcrumb">
@@ -92,6 +95,7 @@ export default async function ArticlePage({
             </time>
           </footer>
         </article>
+        <ArticleFeedback key={article.id} articleId={article.id} />
       </div>
     </main>
   );

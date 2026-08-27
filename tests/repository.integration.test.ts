@@ -69,6 +69,7 @@ type Harness = {
   repository: Repository;
   seed(): Promise<void>;
   deploymentSeed?(): Promise<void>;
+  createWorkspace(workspace: { id: string; slug: string; name: string }): Promise<void>;
   columns(): Promise<Record<TableName, string[]>>;
   counts(): Promise<Record<TableName, number>>;
   feedback(id: string): Promise<{ helpful: boolean; comment: string | null } | null>;
@@ -80,6 +81,24 @@ type Harness = {
 };
 
 const tableNames = Object.keys(expectedColumns) as TableName[];
+const dayInMilliseconds = 86_400_000;
+
+async function recordSearchSamples(
+  repository: Repository,
+  workspaceId: string,
+  query: string,
+  count: number,
+  createdAt: Date,
+) {
+  for (let index = 0; index < count; index += 1) {
+    await repository.recordSearchMiss({
+      id: `analytics_miss_${workspaceId}_${query}_${index}`,
+      workspaceId,
+      query,
+      createdAt,
+    });
+  }
+}
 
 async function exerciseRepository(harness: Harness) {
   await harness.seed();
@@ -352,21 +371,24 @@ async function exerciseRepository(harness: Harness) {
   assert.equal(updatedTheme.createdAt.toISOString(), demoSeededAt);
   assert.ok(updatedTheme.updatedAt.getTime() > new Date(demoSeededAt).getTime());
 
+  const contractEventAt = new Date();
   await harness.repository.createFeedback({
     id: "feedback_contract",
     articleId: demoIds.publishedArticle,
     helpful: true,
     comment: "Clear and useful",
+    createdAt: contractEventAt,
   });
   await harness.repository.recordView({
     id: "view_contract",
     articleId: demoIds.publishedArticle,
+    viewedAt: contractEventAt,
   });
   await harness.repository.recordSearchMiss({
     id: "search_miss_contract",
     workspaceId: demoIds.workspace,
     query: "billing portal",
-    createdAt: new Date("2026-08-27T12:00:00.000Z"),
+    createdAt: contractEventAt,
   });
 
   assert.deepEqual(await harness.feedback("feedback_contract"), {
@@ -379,26 +401,324 @@ async function exerciseRepository(harness: Harness) {
   });
   assert.equal(await harness.searchMissCount("search_miss_contract"), 1);
 
+  await harness.repository.createFeedback({
+    id: "feedback_contract",
+    articleId: demoIds.publishedArticle,
+    helpful: false,
+    comment: "Colliding slot",
+    createdAt: contractEventAt,
+  });
+  await harness.repository.recordView({
+    id: "view_contract",
+    articleId: demoIds.publishedArticle,
+    viewedAt: contractEventAt,
+  });
+  assert.deepEqual(await harness.feedback("feedback_contract"), {
+    helpful: true,
+    comment: "Clear and useful",
+  });
+  assert.deepEqual(await harness.relatedArticleRecords(demoIds.publishedArticle), {
+    feedback: 1,
+    views: 1,
+  });
+
+  await harness.repository.createFeedback({
+    id: "feedback_expired",
+    articleId: demoIds.publishedArticle,
+    helpful: false,
+    comment: null,
+    createdAt: new Date(contractEventAt.getTime() - 31 * dayInMilliseconds),
+  });
+  await harness.repository.recordView({
+    id: "view_expired",
+    articleId: demoIds.publishedArticle,
+    viewedAt: new Date(contractEventAt.getTime() - 31 * dayInMilliseconds),
+  });
+  assert.deepEqual(await harness.relatedArticleRecords(demoIds.publishedArticle), {
+    feedback: 2,
+    views: 2,
+  });
+
+  await harness.repository.createFeedback({
+    id: "feedback_contract",
+    articleId: demoIds.publishedArticle,
+    helpful: false,
+    comment: "Retention trigger",
+    createdAt: contractEventAt,
+  });
+  await harness.repository.recordView({
+    id: "view_contract",
+    articleId: demoIds.publishedArticle,
+    viewedAt: contractEventAt,
+  });
+  assert.deepEqual(await harness.feedback("feedback_contract"), {
+    helpful: true,
+    comment: "Clear and useful",
+  });
+  assert.deepEqual(await harness.relatedArticleRecords(demoIds.publishedArticle), {
+    feedback: 1,
+    views: 1,
+  });
+
   await harness.repository.recordSearchMiss({
     id: "search_miss_expired",
     workspaceId: demoIds.workspace,
     query: "expired query",
-    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    createdAt: new Date(contractEventAt.getTime() - 31 * dayInMilliseconds),
   });
   await harness.repository.recordSearchMiss({
     id: "search_miss_retention_trigger",
     workspaceId: demoIds.workspace,
     query: "current query",
-    createdAt: new Date("2026-08-27T12:00:00.000Z"),
+    createdAt: contractEventAt,
   });
   await harness.repository.recordSearchMiss({
     id: "search_miss_retention_trigger",
     workspaceId: demoIds.workspace,
     query: "colliding slot",
-    createdAt: new Date("2026-08-27T12:00:00.000Z"),
+    createdAt: contractEventAt,
   });
   assert.equal(await harness.searchMissCount("search_miss_expired"), 0);
   assert.equal(await harness.searchMissCount("search_miss_retention_trigger"), 1);
+
+  const analyticsArticles = [
+    {
+      id: "article_analytics_alpha",
+      workspaceId: demoIds.workspace,
+      categoryId: demoIds.customizationCategory,
+      slug: "analytics-alpha",
+      title: "Analytics tie",
+      mdx: "# Analytics alpha",
+      status: "published" as const,
+      isFaq: false,
+      authorName: "OPAS",
+      publishedAt: new Date(),
+    },
+    {
+      id: "article_analytics_alpha_b",
+      workspaceId: demoIds.workspace,
+      categoryId: demoIds.customizationCategory,
+      slug: "analytics-alpha-b",
+      title: "Analytics tie",
+      mdx: "# Analytics alpha B",
+      status: "published" as const,
+      isFaq: false,
+      authorName: "OPAS",
+      publishedAt: new Date(),
+    },
+    {
+      id: "article_analytics_zulu",
+      workspaceId: demoIds.workspace,
+      categoryId: demoIds.customizationCategory,
+      slug: "analytics-zulu",
+      title: "Zulu analytics",
+      mdx: "# Analytics zulu",
+      status: "draft" as const,
+      isFaq: false,
+      authorName: "OPAS",
+      publishedAt: null,
+    },
+  ];
+  for (const article of analyticsArticles) {
+    await harness.repository.createArticle(article);
+  }
+
+  const viewArticleIds = [
+    demoIds.publishedArticle,
+    demoIds.publishedArticle,
+    "article_analytics_alpha",
+    "article_analytics_alpha",
+    "article_analytics_alpha_b",
+    "article_analytics_alpha_b",
+    "article_analytics_zulu",
+    "article_analytics_zulu",
+  ];
+  const analyticsEventAt = new Date();
+  for (const [index, articleId] of viewArticleIds.entries()) {
+    await harness.repository.recordView({
+      id: `analytics_view_${index}`,
+      articleId,
+      viewedAt: analyticsEventAt,
+    });
+  }
+
+  const analyticsFeedback = [
+    { id: "analytics_feedback_published_no", articleId: demoIds.publishedArticle, helpful: false },
+    { id: "analytics_feedback_published_yes", articleId: demoIds.publishedArticle, helpful: true },
+    { id: "analytics_feedback_alpha", articleId: "article_analytics_alpha", helpful: false },
+    { id: "analytics_feedback_zulu_1", articleId: "article_analytics_zulu", helpful: true },
+    { id: "analytics_feedback_zulu_2", articleId: "article_analytics_zulu", helpful: true },
+    { id: "analytics_feedback_draft", articleId: demoIds.draftArticle, helpful: false },
+  ];
+  for (const feedback of analyticsFeedback) {
+    await harness.repository.createFeedback({ ...feedback, createdAt: analyticsEventAt });
+  }
+
+  const expiredAnalyticsEventAt = new Date(Date.now() - 31 * dayInMilliseconds);
+  await harness.repository.recordView({
+    id: "analytics_view_expired",
+    articleId: "article_analytics_alpha",
+    viewedAt: expiredAnalyticsEventAt,
+  });
+  await harness.repository.createFeedback({
+    id: "analytics_feedback_expired",
+    articleId: "article_analytics_alpha",
+    helpful: true,
+    createdAt: expiredAnalyticsEventAt,
+  });
+  assert.deepEqual(await harness.relatedArticleRecords("article_analytics_alpha"), {
+    feedback: 2,
+    views: 3,
+  });
+
+  const isolationWorkspace = {
+    id: "workspace_analytics_isolation",
+    slug: "analytics-isolation",
+    name: "Analytics isolation",
+  };
+  await harness.createWorkspace(isolationWorkspace);
+  await harness.repository.createCategory({
+    id: "category_analytics_isolation",
+    workspaceId: isolationWorkspace.id,
+    slug: "analytics",
+    name: "Analytics",
+    description: null,
+    position: 0,
+  });
+  await harness.repository.createArticle({
+    id: "article_analytics_isolation",
+    workspaceId: isolationWorkspace.id,
+    categoryId: "category_analytics_isolation",
+    slug: "analytics",
+    title: "Isolation article",
+    mdx: "# Isolation",
+    status: "published",
+    isFaq: false,
+    authorName: "OPAS",
+    publishedAt: new Date(),
+  });
+  for (let index = 0; index < 5; index += 1) {
+    await harness.repository.recordView({
+      id: `analytics_isolation_view_${index}`,
+      articleId: "article_analytics_isolation",
+      viewedAt: analyticsEventAt,
+    });
+  }
+  await harness.repository.createFeedback({
+    id: "analytics_isolation_feedback",
+    articleId: "article_analytics_isolation",
+    helpful: true,
+    createdAt: analyticsEventAt,
+  });
+
+  const recentSearchDate = new Date(Date.now() - 29 * dayInMilliseconds);
+  const searchGroups = [
+    ["alpha query", 4],
+    ["beta query", 4],
+    ["charlie query", 3],
+    ["delta query", 3],
+    ["echo query", 2],
+    ["foxtrot query", 2],
+    ["golf query", 2],
+    ["hotel query", 2],
+    ["india query", 2],
+    ["juliet query", 2],
+    ["kilo query", 1],
+    ["lima query", 1],
+  ] as const;
+  for (const [query, count] of searchGroups) {
+    await recordSearchSamples(
+      harness.repository,
+      demoIds.workspace,
+      query,
+      count,
+      recentSearchDate,
+    );
+  }
+  await recordSearchSamples(
+    harness.repository,
+    isolationWorkspace.id,
+    "isolated query",
+    5,
+    recentSearchDate,
+  );
+  await recordSearchSamples(
+    harness.repository,
+    demoIds.workspace,
+    "expired analytics query",
+    6,
+    new Date(Date.now() - 31 * dayInMilliseconds),
+  );
+
+  const analytics = await harness.repository.getAnalytics(demoIds.workspace);
+  assert.deepEqual(analytics.articles, [
+    {
+      articleId: demoIds.publishedArticle,
+      title: "Runtime MDX in OPAS",
+      status: "published",
+      views: 3,
+      feedbackCount: 3,
+      helpfulCount: 2,
+    },
+    {
+      articleId: "article_analytics_alpha",
+      title: "Analytics tie",
+      status: "published",
+      views: 2,
+      feedbackCount: 1,
+      helpfulCount: 0,
+    },
+    {
+      articleId: "article_analytics_alpha_b",
+      title: "Analytics tie",
+      status: "published",
+      views: 2,
+      feedbackCount: 0,
+      helpfulCount: 0,
+    },
+    {
+      articleId: "article_analytics_zulu",
+      title: "Zulu analytics",
+      status: "draft",
+      views: 2,
+      feedbackCount: 2,
+      helpfulCount: 2,
+    },
+    {
+      articleId: demoIds.draftArticle,
+      title: "Customize your help center",
+      status: "draft",
+      views: 0,
+      feedbackCount: 1,
+      helpfulCount: 0,
+    },
+  ]);
+  assert.deepEqual(analytics.searchMisses, [
+    { query: "alpha query", count: 4 },
+    { query: "beta query", count: 4 },
+    { query: "charlie query", count: 3 },
+    { query: "delta query", count: 3 },
+    { query: "echo query", count: 2 },
+    { query: "foxtrot query", count: 2 },
+    { query: "golf query", count: 2 },
+    { query: "hotel query", count: 2 },
+    { query: "india query", count: 2 },
+    { query: "juliet query", count: 2 },
+  ]);
+
+  assert.deepEqual(await harness.repository.getAnalytics(isolationWorkspace.id), {
+    articles: [
+      {
+        articleId: "article_analytics_isolation",
+        title: "Isolation article",
+        status: "published",
+        views: 5,
+        feedbackCount: 1,
+        helpfulCount: 1,
+      },
+    ],
+    searchMisses: [{ query: "isolated query", count: 5 }],
+  });
 
   const violations: RuleViolation[] = [
     "duplicateWorkspaceSlug",
@@ -442,6 +762,12 @@ async function createPostgresHarness(): Promise<Harness> {
     name: "Postgres",
     repository: createPostgresRepository(database),
     seed: () => seedPostgres(database),
+    async createWorkspace(workspace) {
+      await pool.query(
+        "insert into workspaces (id, slug, name) values ($1, $2, $3)",
+        [workspace.id, workspace.slug, workspace.name],
+      );
+    },
     async columns() {
       const result = await pool.query<{ table_name: TableName; column_name: string }>(
         `select table_name, column_name
@@ -584,6 +910,11 @@ async function createLocalSqliteHarness(): Promise<Harness> {
     name: "SQLite",
     repository: createSqliteRepository(database),
     seed: () => seedD1(database),
+    async createWorkspace(workspace) {
+      client
+        .prepare("insert into workspaces (id, slug, name) values (?, ?, ?)")
+        .run(workspace.id, workspace.slug, workspace.name);
+    },
     async deploymentSeed() {
       client.exec(readFileSync(path.join(process.cwd(), "scripts/seed-d1.sql"), "utf8"));
     },

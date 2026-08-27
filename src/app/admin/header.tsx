@@ -1,16 +1,17 @@
 // ABOUTME: Renders the shared authenticated navigation for OPAS administration pages.
-// ABOUTME: Keeps content, theme, public-site, and sign-out destinations consistent.
+// ABOUTME: Keeps content, analytics, theme, public-site, and sign-out destinations consistent.
 import Link from "next/link";
 
 import { logoutAdmin } from "@/app/admin/actions";
 
 type AdminHeaderProps = {
   email: string;
-  active: "content" | "theme";
+  active: "content" | "analytics" | "theme";
 };
 
 const navigation = [
   { id: "content", href: "/admin/content", label: "Content" },
+  { id: "analytics", href: "/admin/analytics", label: "Analytics" },
   { id: "theme", href: "/admin/theme", label: "Theme" },
 ] as const;
 

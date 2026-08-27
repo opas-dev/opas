@@ -1,9 +1,10 @@
 // ABOUTME: Implements the OPAS repository for injected SQLite-compatible D1 databases.
 // ABOUTME: Normalizes D1 records to the same domain contract used by Postgres deployments.
-import { and, asc, eq, lt, notExists, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, lt, notExists, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import { articleEventRetentionStart } from "@/analytics/records";
 import type { Repository } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
 import {
@@ -48,6 +49,23 @@ const publishedArticleFields = {
   createdAt: articles.createdAt,
   updatedAt: articles.updatedAt,
 };
+
+function normalizeCount(value: unknown) {
+  const count = Number(value);
+  return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0;
+}
+
+function compareText(left: string, right: string) {
+  if (left < right) {
+    return -1;
+  }
+
+  if (left > right) {
+    return 1;
+  }
+
+  return 0;
+}
 
 export function createSqliteRepository(database: SqliteDatabase): Repository {
   // Both drivers expose the same execute methods, but Drizzle drops them from its union type.
@@ -224,7 +242,117 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
         .execute();
     },
 
+    async getAnalytics(workspaceId) {
+      const now = new Date();
+      const articleEventCutoff = articleEventRetentionStart(now);
+      const searchMissCutoff = searchMissRetentionStart(now);
+      const [articleRows, viewRows, feedbackRows, searchMissRows] = await Promise.all([
+        executableDatabase
+          .select({
+            articleId: articles.id,
+            title: articles.title,
+            status: articles.status,
+          })
+          .from(articles)
+          .where(eq(articles.workspaceId, workspaceId))
+          .execute(),
+        executableDatabase
+          .select({
+            articleId: articleViews.articleId,
+            views: count(articleViews.id),
+          })
+          .from(articleViews)
+          .innerJoin(articles, eq(articleViews.articleId, articles.id))
+          .where(
+            and(
+              eq(articles.workspaceId, workspaceId),
+              gte(articleViews.viewedAt, articleEventCutoff),
+            ),
+          )
+          .groupBy(articleViews.articleId)
+          .execute(),
+        executableDatabase
+          .select({
+            articleId: articleFeedback.articleId,
+            feedbackCount: count(articleFeedback.id),
+            helpfulCount:
+              sql<number>`sum(case when ${articleFeedback.helpful} then 1 else 0 end)`.mapWith(
+                Number,
+              ),
+          })
+          .from(articleFeedback)
+          .innerJoin(articles, eq(articleFeedback.articleId, articles.id))
+          .where(
+            and(
+              eq(articles.workspaceId, workspaceId),
+              gte(articleFeedback.createdAt, articleEventCutoff),
+            ),
+          )
+          .groupBy(articleFeedback.articleId)
+          .execute(),
+        executableDatabase
+          .select({
+            query: searchMisses.query,
+            count: count(searchMisses.id),
+          })
+          .from(searchMisses)
+          .where(
+            and(
+              eq(searchMisses.workspaceId, workspaceId),
+              gte(searchMisses.createdAt, searchMissCutoff),
+            ),
+          )
+          .groupBy(searchMisses.query)
+          .execute(),
+      ]);
+
+      const viewsByArticleId = new Map(
+        viewRows.map((row) => [row.articleId, normalizeCount(row.views)]),
+      );
+      const feedbackByArticleId = new Map(
+        feedbackRows.map((row) => [
+          row.articleId,
+          {
+            feedbackCount: normalizeCount(row.feedbackCount),
+            helpfulCount: normalizeCount(row.helpfulCount),
+          },
+        ]),
+      );
+      const articleAnalytics = articleRows
+        .map((article) => ({
+          ...article,
+          views: viewsByArticleId.get(article.articleId) ?? 0,
+          feedbackCount:
+            feedbackByArticleId.get(article.articleId)?.feedbackCount ?? 0,
+          helpfulCount: feedbackByArticleId.get(article.articleId)?.helpfulCount ?? 0,
+        }))
+        .sort(
+          (left, right) =>
+            right.views - left.views ||
+            compareText(left.title, right.title) ||
+            compareText(left.articleId, right.articleId),
+        );
+      const topSearchMisses = searchMissRows
+        .map((miss) => ({ query: miss.query, count: normalizeCount(miss.count) }))
+        .sort(
+          (left, right) =>
+            right.count - left.count || compareText(left.query, right.query),
+        )
+        .slice(0, 10);
+
+      return { articles: articleAnalytics, searchMisses: topSearchMisses };
+    },
+
     async createFeedback(feedback) {
+      await executableDatabase
+        .delete(articleFeedback)
+        .where(
+          and(
+            eq(articleFeedback.articleId, feedback.articleId),
+            lt(articleFeedback.createdAt, articleEventRetentionStart(feedback.createdAt)),
+          ),
+        )
+        .execute();
       await executableDatabase
         .insert(articleFeedback)
         .values({
@@ -232,12 +360,27 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
           articleId: feedback.articleId,
           helpful: feedback.helpful,
           comment: feedback.comment ?? null,
+          createdAt: feedback.createdAt,
         })
+        .onConflictDoNothing({ target: articleFeedback.id })
         .execute();
     },
 
     async recordView(view) {
-      await executableDatabase.insert(articleViews).values(view).execute();
+      await executableDatabase
+        .delete(articleViews)
+        .where(
+          and(
+            eq(articleViews.articleId, view.articleId),
+            lt(articleViews.viewedAt, articleEventRetentionStart(view.viewedAt)),
+          ),
+        )
+        .execute();
+      await executableDatabase
+        .insert(articleViews)
+        .values(view)
+        .onConflictDoNothing({ target: articleViews.id })
+        .execute();
     },
 
     async recordSearchMiss(miss) {
