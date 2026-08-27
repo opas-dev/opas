@@ -8,6 +8,11 @@ export async function findPublishedArticle(workspaceId: string, slug: string) {
     return repository.findPublishedArticle(workspaceId, slug);
   }
 
+  if (driver === "neon") {
+    const repository = await import("@/db/neon/articles");
+    return repository.findPublishedArticle(workspaceId, slug);
+  }
+
   if (driver === "postgres") {
     const repository = await import("@/db/postgres/articles");
     return repository.findPublishedArticle(workspaceId, slug);

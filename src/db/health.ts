@@ -8,6 +8,11 @@ export async function checkDatabase() {
     return checkD1();
   }
 
+  if (driver === "neon") {
+    const { checkNeon } = await import("@/db/neon/health");
+    return checkNeon();
+  }
+
   if (driver === "postgres") {
     const { checkPostgres } = await import("@/db/postgres/health");
     return checkPostgres();
