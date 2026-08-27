@@ -162,6 +162,28 @@ async function exerciseRepository(harness: Harness) {
   assert.equal(theme.createdAt.toISOString(), demoSeededAt);
   assert.equal(theme.updatedAt.toISOString(), demoSeededAt);
 
+  const updatedThemeConfig = {
+    ...demoContent.theme.config,
+    light: {
+      ...demoContent.theme.config.light,
+      primary: "oklch(0.55 0.18 250)",
+    },
+  };
+  await harness.repository.updateTheme({
+    workspaceId: demoIds.workspace,
+    name: "Contract Theme",
+    config: updatedThemeConfig,
+  });
+
+  const updatedTheme = await harness.repository.getTheme(demoIds.workspace);
+  assert.ok(updatedTheme);
+  assert.equal(updatedTheme.id, demoIds.theme);
+  assert.equal(updatedTheme.workspaceId, demoIds.workspace);
+  assert.equal(updatedTheme.name, "Contract Theme");
+  assert.deepEqual(updatedTheme.config, updatedThemeConfig);
+  assert.equal(updatedTheme.createdAt.toISOString(), demoSeededAt);
+  assert.ok(updatedTheme.updatedAt.getTime() > new Date(demoSeededAt).getTime());
+
   await harness.repository.createFeedback({
     id: "feedback_contract",
     articleId: demoIds.publishedArticle,

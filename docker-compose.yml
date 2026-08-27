@@ -21,6 +21,9 @@ services:
     build:
       context: .
     environment:
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET}
       DATABASE_URL: postgres://${POSTGRES_USER:-opas}:${POSTGRES_PASSWORD:-opas}@db:5432/${POSTGRES_DB:-opas}
     ports:
       - "${APP_PORT:-3000}:3000"

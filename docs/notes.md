@@ -17,3 +17,7 @@ The Neon HTTP adapter connects successfully to Postgres 18.6 in `eu-central-1` a
 ## Runtime themes
 
 Runtime themes may change values only within OPAS's predefined semantic color, font, and radius tokens. Adding a token or a Tailwind utility requires a rebuild. Font stacks may reference only fonts already available to the browser; changing a stack does not load a font file.
+
+The root server layout validates and injects the active database row on every request. The authenticated editor writes one trusted workspace row through the shared repository, and public reloads observe the change immediately. [`theme-before.png`](theme-before.png) and [`theme-after.png`](theme-after.png) show OPAS Default and Ocean from the same production build and server process; both light and dark computed values were verified, then the local row was restored.
+
+Admin sessions are signed, stateless, valid for eight hours, and limited to `/admin`. Production cookies are always Secure, so production admin access requires HTTPS. OpenNext currently labels Node.js Proxy support experimental during its Cloudflare build; the bundle compiles successfully, but the deployed Cloudflare admin boundary still needs a live smoke test before release.

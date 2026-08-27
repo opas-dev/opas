@@ -1,6 +1,9 @@
 // ABOUTME: Introduces the OPAS help center before database-backed content is connected.
 // ABOUTME: Provides a lightweight public shell for initial runtime and styling verification.
 import Link from "next/link";
+import Image from "next/image";
+
+import { getCurrentTheme } from "@/theme/current";
 
 export const runtime = "nodejs";
 
@@ -19,14 +22,27 @@ const launchPoints = [
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const theme = await getCurrentTheme();
+
   return (
     <main>
       <header className="site-header">
         <Link className="wordmark" href="/" aria-label="OPAS home">
-          <span className="wordmark-mark" aria-hidden="true">
-            O
-          </span>
+          {theme.config.logoUrl ? (
+            <Image
+              alt=""
+              className="wordmark-logo"
+              height={30}
+              src={theme.config.logoUrl}
+              unoptimized
+              width={30}
+            />
+          ) : (
+            <span className="wordmark-mark" aria-hidden="true">
+              O
+            </span>
+          )}
           OPAS
         </Link>
         <span className="header-note">Help that stays yours</span>

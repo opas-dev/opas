@@ -5,6 +5,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import {
+  findThemePreset,
+  parseThemeRequest,
+} from "@/app/admin/theme/validation";
 import { themePresets } from "@/theme/presets";
 import { themeSchema } from "@/theme/schema";
 import { themeStylesheet } from "@/theme/stylesheet";
@@ -180,4 +184,59 @@ test("Tailwind maps the complete semantic namespace through runtime variables", 
       `missing structural mapping for ${token}`,
     );
   }
+});
+
+test("admin theme requests accept only known presets and strict theme JSON", () => {
+  const presetRequest = new FormData();
+  presetRequest.set("intent", "preset");
+  presetRequest.set("preset", "ocean");
+  assert.deepEqual(parseThemeRequest(presetRequest), {
+    success: true,
+    data: { kind: "preset", preset: "ocean" },
+  });
+
+  const unknownPreset = new FormData();
+  unknownPreset.set("intent", "preset");
+  unknownPreset.set("preset", "nightfall");
+  assert.equal(parseThemeRequest(unknownPreset).success, false);
+
+  const jsonRequest = new FormData();
+  jsonRequest.set("intent", "json");
+  jsonRequest.set("name", "  Custom support theme  ");
+  jsonRequest.set("config", JSON.stringify(themePresets.grove));
+  const parsedJson = parseThemeRequest(jsonRequest);
+  assert.equal(parsedJson.success, true);
+  if (parsedJson.success) {
+    assert.equal(parsedJson.data.kind, "json");
+    if (parsedJson.data.kind === "json") {
+      assert.equal(parsedJson.data.name, "Custom support theme");
+      assert.deepEqual(parsedJson.data.config, themePresets.grove);
+    }
+  }
+
+  const extraThemeToken = structuredClone(themePresets.opas) as unknown as Record<
+    string,
+    unknown
+  >;
+  extraThemeToken.untrusted = "value";
+  jsonRequest.set("config", JSON.stringify(extraThemeToken));
+  assert.equal(parseThemeRequest(jsonRequest).success, false);
+
+  jsonRequest.set("config", "{not-json}");
+  assert.equal(parseThemeRequest(jsonRequest).success, false);
+
+  jsonRequest.set("config", JSON.stringify(themePresets.opas));
+  jsonRequest.set("workspaceId", "workspace_untrusted");
+  assert.equal(parseThemeRequest(jsonRequest).success, false);
+});
+
+test("admin marks a preset active only when its name and complete config match", () => {
+  assert.equal(findThemePreset("Ocean", themePresets.ocean), "ocean");
+  assert.equal(findThemePreset("Ocean", themePresets.opas), null);
+  assert.equal(findThemePreset("Custom", themePresets.ocean), null);
+
+  const reorderedOcean = Object.fromEntries(
+    Object.entries(themePresets.ocean).reverse(),
+  ) as typeof themePresets.ocean;
+  assert.equal(findThemePreset("Ocean", reorderedOcean), "ocean");
 });

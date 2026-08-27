@@ -91,6 +91,18 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
       return theme ?? null;
     },
 
+    async updateTheme(theme) {
+      await executableDatabase
+        .update(themes)
+        .set({
+          name: theme.name,
+          config: theme.config,
+          updatedAt: new Date(),
+        })
+        .where(eq(themes.workspaceId, theme.workspaceId))
+        .execute();
+    },
+
     async createFeedback(feedback) {
       await executableDatabase
         .insert(articleFeedback)

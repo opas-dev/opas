@@ -1,0 +1,6 @@
+<!-- ABOUTME: Supplies the OPAS browser icon through the App Router metadata convention. -->
+<!-- ABOUTME: Uses the core crimson mark on a light surface for clear small-size recognition. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#a82230"/>
+  <circle cx="32" cy="32" r="15" fill="none" stroke="#ffffff" stroke-width="8"/>
+</svg>

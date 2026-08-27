@@ -85,6 +85,17 @@ export function createPostgresRepository(database: PostgresDatabase): Repository
       return theme ?? null;
     },
 
+    async updateTheme(theme) {
+      await database
+        .update(themes)
+        .set({
+          name: theme.name,
+          config: theme.config,
+          updatedAt: new Date(),
+        })
+        .where(eq(themes.workspaceId, theme.workspaceId));
+    },
+
     async createFeedback(feedback) {
       await database.insert(articleFeedback).values({
         id: feedback.id,

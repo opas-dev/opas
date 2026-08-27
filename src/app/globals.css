@@ -162,6 +162,13 @@ a {
   letter-spacing: 0;
 }
 
+.wordmark-logo {
+  width: 1.875rem;
+  height: 1.875rem;
+  border-radius: var(--opas-radius-sm);
+  object-fit: contain;
+}
+
 .header-note {
   color: var(--opas-muted);
   font-size: 0.875rem;

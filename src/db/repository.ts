@@ -32,6 +32,12 @@ export type Theme = {
   updatedAt: Date;
 };
 
+export type ThemeUpdate = {
+  workspaceId: string;
+  name: string;
+  config: unknown;
+};
+
 export type Feedback = {
   id: string;
   articleId: string;
@@ -55,6 +61,7 @@ export type Repository = {
   findPublishedArticle(workspaceId: string, slug: string): Promise<PublishedArticle | null>;
   listCategories(workspaceId: string): Promise<Category[]>;
   getTheme(workspaceId: string): Promise<Theme | null>;
+  updateTheme(theme: ThemeUpdate): Promise<void>;
   createFeedback(feedback: Feedback): Promise<void>;
   recordView(view: ArticleView): Promise<void>;
   recordSearchMiss(miss: SearchMiss): Promise<void>;
