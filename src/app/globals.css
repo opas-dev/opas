@@ -245,6 +245,58 @@ a {
   line-height: 1.55;
 }
 
+.article-shell {
+  width: min(100% - 2rem, 74rem);
+  margin-inline: auto;
+  padding-block: 2rem 7rem;
+}
+
+.article-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  color: var(--opas-muted);
+  font-size: 0.8125rem;
+}
+
+.article-nav a {
+  color: var(--opas-primary);
+  font-weight: 650;
+  text-underline-offset: 0.2em;
+}
+
+.article-content {
+  max-width: 44rem;
+  margin-top: clamp(4rem, 8vw, 7rem);
+}
+
+.article-content h1 {
+  margin: 0;
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.article-content p {
+  margin-block: 1.5rem 0;
+  font-size: 1.0625rem;
+  line-height: 1.75;
+  text-wrap: pretty;
+}
+
+.article-content blockquote {
+  margin: 2rem 0 0;
+  padding: 1.25rem;
+  border: 1px solid var(--opas-border);
+  border-radius: var(--opas-radius-md);
+  background: var(--opas-surface);
+}
+
+.article-content blockquote p {
+  margin: 0;
+}
+
 @media (max-width: 40rem) {
   .header-note {
     display: none;
