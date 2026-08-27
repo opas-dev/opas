@@ -35,7 +35,7 @@ Repeat until done:
 ## Environment
 - Cloudflare: wrangler is OAuth-authenticated locally. Account: **DevPlant**, id `f8801c7e8853a113a25f8b52fd9ceec1`. The zone `opas.dev` exists.
 - Vercel: CLI is authenticated locally as `timobejan` (`vercel whoami` confirms) — no token needed.
-- Neon: expect `NEON_DATABASE_URL` in `.env`. Missing → Blocker B2.
+- Neon: `NEON_DATABASE_URL` is set in `.env` — pooler endpoint, Postgres 18, eu-central-1; connection verified working.
 - Docker Desktop, Node 22, pnpm available locally.
 - GitHub: push to `https://github.com/opas-dev/opas` on `main`; `gh` CLI is authenticated.
 
