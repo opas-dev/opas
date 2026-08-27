@@ -11,7 +11,7 @@
 
 ## Status
 - **Current phase:** 2
-- **Done:** 10 / 40
+- **Done:** 12 / 40
 
 ## Blockers
 B3 — The Vercel production rollout awaits the required shared-state confirmation. Phase 0 items 0.6–0.7 are parked at their remaining remote verification step while local implementation continues.
@@ -30,6 +30,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-27 | Repository behavior is verified with Testcontainers PostgreSQL and better-sqlite3, then checked against Wrangler's local D1 runtime | The same contract covers both dialects while Wrangler separately proves the checked-in D1 migrations and deployment seed execute on workerd's database runtime |
 | 2026-08-27 | The Cloudflare D1 database runs in Eastern Europe and the MVP stays on its workers.dev hostname | Keeps OPAS data near the initial operator region and avoids touching the protected `opas.dev` root, `www`, or DNS during the spike |
 | 2026-08-27 | Runtime themes use a fixed namespace of 23 semantic colors, five radii, two font stacks, and one logo URL | A generous closed set supports distinct presets safely; runtime values can change without rebuilding, while arbitrary declarations, token names, and layout overrides stay out of the MVP |
+| 2026-08-27 | The active theme is loaded once per request and injected by the root server layout, with the OPAS preset as the fail-closed fallback | Reloads observe database changes immediately without cross-request staleness, while missing or invalid rows cannot inject CSS or break rendering |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -48,8 +49,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 
 ## Phase 2 — Theme engine (Priority 1)
 - [x] 2.1 JSON theme schema (zod): OKLCH colors, radius, font stacks, logo URL, light+dark variants. Generous token namespace — document the hard limit: only token *values* change at runtime, no new utilities without a rebuild.
-- [ ] 2.2 Tailwind v4 `@theme inline` semantic tokens mapped to CSS variables; all UI uses semantic tokens only.
-- [ ] 2.3 SSR-injected `<style>` block redefining the variables from the DB theme row, per request; light/dark.
+- [x] 2.2 Tailwind v4 `@theme inline` semantic tokens mapped to CSS variables; all UI uses semantic tokens only.
+- [x] 2.3 SSR-injected `<style>` block redefining the variables from the DB theme row, per request; light/dark.
 - [ ] 2.4 3–4 preset themes; admin page to switch and edit theme JSON.
 - [ ] 2.5 **Verify (headline demo):** change theme in admin → public pages re-skin on reload with zero rebuild; before/after screenshots in `docs/`.
 
@@ -101,7 +102,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
-- 2026-08-27 — 2.1 — added the strict Zod theme contract, safe deterministic stylesheet serializer, four complete presets, aligned deployment seeds, and documented the fixed runtime token limit — `pnpm test` passed all theme safety checks and both repository dialect contracts — this commit
+- 2026-08-27 — 2.2–2.3 — mapped the complete semantic theme namespace through Tailwind, loaded and validated the active row once per request, and SSR-injected light/dark CSS in the root layout — lint, typecheck, theme tests, Next/OpenNext production builds, live Postgres row changes under one unchanged server process, and browser-computed light/dark styles passed — this commit
+- 2026-08-27 — 2.1 — added the strict Zod theme contract, safe deterministic stylesheet serializer, four complete presets, aligned deployment seeds, and documented the fixed runtime token limit — `pnpm test` passed all theme safety checks and both repository dialect contracts — `2184552`
 - 2026-08-27 — 0.5 — created the scoped `opas-mvp` D1 database in EEUR, applied and seeded both migrations, deployed the OpenNext Worker to `opas-mvp.timo-bejan.workers.dev`, and documented workerd/CSP behavior — health and browser-rendered MDX passed; a remote D1 edit appeared on reload without a redeploy, the seed restored it, and Worker version `fd9ac205-1df9-4d57-af03-7868274f4026` remained active — `07b7d02` + this commit
 - 2026-08-27 — 1.1–1.4 — aligned all seven tables and constraints across Postgres and SQLite, consolidated runtime driver selection behind one repository, added convergent seeds and data-preserving migrations, and added one cross-dialect contract — `pnpm test`, both no-drift generation checks, a fresh Wrangler local D1 migration/seed/query, `pnpm build`, and `pnpm cf:build` passed — this commit
 - 2026-08-27 — 0.4 — added the standalone non-root image, Postgres migration/seed preparation, app and DB healthchecks, and two-service Compose stack — removed the OPAS volume, rebuilt from source, reached healthy state, and curled database-backed MDX plus `/api/health` successfully — this commit

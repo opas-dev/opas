@@ -4,32 +4,96 @@
 
 :root {
   --opas-background: oklch(1 0 0);
+  --opas-foreground: oklch(0.2 0.018 27);
   --opas-surface: oklch(0.975 0 0);
   --opas-surface-strong: oklch(0.94 0.005 27);
-  --opas-foreground: oklch(0.2 0.018 27);
+  --opas-surface-elevated: oklch(0.995 0 0);
   --opas-muted: oklch(0.46 0.014 27);
   --opas-border: oklch(0.88 0.009 27);
+  --opas-border-strong: oklch(0.72 0.018 27);
   --opas-primary: oklch(0.464 0.169 26.9);
   --opas-primary-foreground: oklch(1 0 0);
+  --opas-secondary: oklch(0.92 0.018 27);
+  --opas-secondary-foreground: oklch(0.25 0.025 27);
+  --opas-accent: oklch(0.91 0.06 72);
+  --opas-accent-foreground: oklch(0.29 0.055 50);
+  --opas-success: oklch(0.52 0.14 150);
+  --opas-success-foreground: oklch(1 0 0);
+  --opas-warning: oklch(0.78 0.16 78);
+  --opas-warning-foreground: oklch(0.26 0.045 55);
+  --opas-danger: oklch(0.55 0.2 25);
+  --opas-danger-foreground: oklch(1 0 0);
   --opas-focus: oklch(0.62 0.18 27);
+  --opas-code-background: oklch(0.95 0.008 27);
+  --opas-code-foreground: oklch(0.24 0.025 27);
   --opas-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --opas-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --opas-radius-xs: 0.25rem;
   --opas-radius-sm: 0.375rem;
   --opas-radius-md: 0.75rem;
+  --opas-radius-lg: 1rem;
+  --opas-radius-xl: 1.5rem;
 }
 
 @theme inline {
   --color-background: var(--opas-background);
+  --color-foreground: var(--opas-foreground);
   --color-surface: var(--opas-surface);
   --color-surface-strong: var(--opas-surface-strong);
-  --color-foreground: var(--opas-foreground);
+  --color-surface-elevated: var(--opas-surface-elevated);
   --color-muted: var(--opas-muted);
   --color-border: var(--opas-border);
+  --color-border-strong: var(--opas-border-strong);
   --color-primary: var(--opas-primary);
   --color-primary-foreground: var(--opas-primary-foreground);
+  --color-secondary: var(--opas-secondary);
+  --color-secondary-foreground: var(--opas-secondary-foreground);
+  --color-accent: var(--opas-accent);
+  --color-accent-foreground: var(--opas-accent-foreground);
+  --color-success: var(--opas-success);
+  --color-success-foreground: var(--opas-success-foreground);
+  --color-warning: var(--opas-warning);
+  --color-warning-foreground: var(--opas-warning-foreground);
+  --color-danger: var(--opas-danger);
+  --color-danger-foreground: var(--opas-danger-foreground);
   --color-focus: var(--opas-focus);
+  --color-code-background: var(--opas-code-background);
+  --color-code-foreground: var(--opas-code-foreground);
   --font-sans: var(--opas-font-sans);
+  --font-mono: var(--opas-font-mono);
+  --radius-xs: var(--opas-radius-xs);
   --radius-sm: var(--opas-radius-sm);
   --radius-md: var(--opas-radius-md);
+  --radius-lg: var(--opas-radius-lg);
+  --radius-xl: var(--opas-radius-xl);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --opas-background: oklch(0.17 0.014 27);
+    --opas-foreground: oklch(0.95 0.006 27);
+    --opas-surface: oklch(0.21 0.014 27);
+    --opas-surface-strong: oklch(0.26 0.016 27);
+    --opas-surface-elevated: oklch(0.235 0.016 27);
+    --opas-muted: oklch(0.72 0.012 27);
+    --opas-border: oklch(0.34 0.016 27);
+    --opas-border-strong: oklch(0.46 0.02 27);
+    --opas-primary: oklch(0.69 0.2 27);
+    --opas-primary-foreground: oklch(0.16 0.014 27);
+    --opas-secondary: oklch(0.3 0.022 27);
+    --opas-secondary-foreground: oklch(0.94 0.008 27);
+    --opas-accent: oklch(0.42 0.09 68);
+    --opas-accent-foreground: oklch(0.94 0.035 82);
+    --opas-success: oklch(0.7 0.16 150);
+    --opas-success-foreground: oklch(0.17 0.025 150);
+    --opas-warning: oklch(0.82 0.16 82);
+    --opas-warning-foreground: oklch(0.2 0.04 65);
+    --opas-danger: oklch(0.68 0.2 25);
+    --opas-danger-foreground: oklch(0.16 0.02 25);
+    --opas-focus: oklch(0.75 0.18 27);
+    --opas-code-background: oklch(0.135 0.012 27);
+    --opas-code-foreground: oklch(0.9 0.012 27);
+  }
 }
 
 * {

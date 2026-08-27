@@ -1,6 +1,8 @@
 // ABOUTME: Verifies the runtime theme schema, bundled presets, and CSS serialization contract.
 // ABOUTME: Guards the fixed token surface against omissions and CSS injection values.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import { themePresets } from "@/theme/presets";
@@ -157,4 +159,25 @@ test("stylesheet emits every fixed token in deterministic light and dark blocks"
 
   assert.ok(stylesheet.includes(`--opas-primary: ${themePresets.opas.light.primary};`));
   assert.ok(stylesheet.includes(`--opas-primary: ${themePresets.opas.dark.primary};`));
+});
+
+test("Tailwind maps the complete semantic namespace through runtime variables", () => {
+  const globals = readFileSync(path.join(process.cwd(), "src/app/globals.css"), "utf8");
+  assert.ok(globals.includes("@theme inline"));
+
+  for (const token of colorTokens) {
+    assert.ok(
+      globals.includes(`--color-${token}: var(--opas-${token});`),
+      `missing color mapping for ${token}`,
+    );
+  }
+
+  for (const token of structuralTokens) {
+    const [group, ...nameParts] = token.split("-");
+    const name = nameParts.join("-");
+    assert.ok(
+      globals.includes(`--${group}-${name}: var(--opas-${token});`),
+      `missing structural mapping for ${token}`,
+    );
+  }
 });

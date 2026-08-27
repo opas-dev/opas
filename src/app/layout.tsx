@@ -3,6 +3,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import { getCurrentTheme } from "@/theme/current";
+import { themeStylesheet } from "@/theme/stylesheet";
+
 import "./globals.css";
 
 export const runtime = "nodejs";
@@ -19,9 +22,14 @@ type RootLayoutProps = Readonly<{
   children: ReactNode;
 }>;
 
-export default function RootLayout({ children }: RootLayoutProps) {
+export default async function RootLayout({ children }: RootLayoutProps) {
+  const theme = await getCurrentTheme();
+
   return (
     <html lang="en">
+      <head>
+        <style id="opas-runtime-theme">{themeStylesheet(theme.config)}</style>
+      </head>
       <body>{children}</body>
     </html>
   );
