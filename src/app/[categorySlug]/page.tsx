@@ -1,30 +1,41 @@
 // ABOUTME: Lists published articles for one public help-center category.
 // ABOUTME: Resolves the category at request time and never includes private drafts.
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 
 import { PublicHeader } from "@/app/public-header";
-import { getRepository } from "@/db";
-import { demoIds } from "@/db/demo";
+import { loadPublicPageContent } from "@/app/publication-data";
+import { categoryMetadata } from "@/content/publication";
 
 export const runtime = "nodejs";
 
-export default async function CategoryPage({ params }: PageProps<"/[categorySlug]">) {
+export async function generateMetadata({
+  params,
+}: PageProps<"/[categorySlug]">): Promise<Metadata> {
   const { categorySlug } = await params;
-  await connection();
-  const repository = await getRepository();
-  const [categories, articles] = await Promise.all([
-    repository.listCategories(demoIds.workspace),
-    repository.listPublishedArticles(demoIds.workspace),
-  ]);
+  const { categories } = await loadPublicPageContent();
   const category = categories.find((candidate) => candidate.slug === categorySlug);
 
   if (!category) {
     notFound();
   }
 
-  const categoryArticles = articles.filter((article) => article.categoryId === category.id);
+  return categoryMetadata(category) ?? {};
+}
+
+export default async function CategoryPage({ params }: PageProps<"/[categorySlug]">) {
+  const { categorySlug } = await params;
+  const { categories, publications } = await loadPublicPageContent();
+  const category = categories.find((candidate) => candidate.slug === categorySlug);
+
+  if (!category) {
+    notFound();
+  }
+
+  const categoryArticles = publications.filter(
+    (publication) => publication.category.id === category.id,
+  );
 
   return (
     <main>
@@ -43,15 +54,15 @@ export default async function CategoryPage({ params }: PageProps<"/[categorySlug
 
         {categoryArticles.length > 0 ? (
           <ul className="public-article-list">
-            {categoryArticles.map((article) => (
-              <li key={article.id}>
-                <Link href={`/${category.slug}/${article.slug}`}>
-                  <span>{article.title}</span>
+            {categoryArticles.map((publication) => (
+              <li key={publication.article.id}>
+                <Link href={publication.path}>
+                  <span>{publication.article.title}</span>
                   <span aria-hidden="true">→</span>
                 </Link>
                 <p>
-                  <time dateTime={article.updatedAt.toISOString()}>
-                    Updated {article.updatedAt.toISOString().slice(0, 10)}
+                  <time dateTime={publication.article.updatedAt.toISOString()}>
+                    Updated {publication.article.updatedAt.toISOString().slice(0, 10)}
                   </time>
                 </p>
               </li>

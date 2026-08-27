@@ -25,6 +25,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET}
       DATABASE_URL: postgres://${POSTGRES_USER:-opas}:${POSTGRES_PASSWORD:-opas}@db:5432/${POSTGRES_DB:-opas}
+      OPAS_SITE_URL: ${OPAS_SITE_URL:-http://localhost:3000}
     ports:
       - "${APP_PORT:-3000}:3000"
     depends_on:

@@ -1,10 +1,10 @@
 // ABOUTME: Builds and queries the in-process search index for published help articles.
 // ABOUTME: Reuses an index only while the current article and category snapshot is unchanged.
 import { create, insertMultiple, search } from "@orama/orama";
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { toString } from "mdast-util-to-string";
 
+import { articleDescription, articlePlainText } from "@/content/publication";
 import type { Article, Category, PublishedArticle } from "@/db/repository";
+import { publicArticlePath } from "@/site";
 
 export type SearchResult = {
   articleId: string;
@@ -36,9 +36,6 @@ const articleSearchSchema = {
   body: "string",
 } as const;
 
-const publicSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const excerptLength = 180;
-
 function createArticleSearchIndex() {
   return create({ schema: articleSearchSchema });
 }
@@ -66,40 +63,6 @@ function compareText(left: string, right: string) {
 
 function isPublished(article: Article | PublishedArticle) {
   return !("status" in article) || article.status === "published";
-}
-
-function collapseWhitespace(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function articleBody(article: Article | PublishedArticle) {
-  const markdown = fromMarkdown(article.mdx);
-  const plainText = collapseWhitespace(markdown.children.map((node) => toString(node)).join(" "));
-  const title = collapseWhitespace(article.title);
-
-  if (plainText === title) {
-    return "";
-  }
-
-  if (plainText.startsWith(`${title} `)) {
-    return plainText.slice(title.length + 1);
-  }
-
-  return plainText;
-}
-
-function articleExcerpt(body: string, title: string) {
-  const text = body || title;
-
-  if (text.length <= excerptLength) {
-    return text;
-  }
-
-  const candidate = text.slice(0, excerptLength - 1).trimEnd();
-  const finalWordBoundary = candidate.lastIndexOf(" ");
-  const excerpt = finalWordBoundary >= 120 ? candidate.slice(0, finalWordBoundary) : candidate;
-
-  return `${excerpt}…`;
 }
 
 function timestamp(value: Date | null) {
@@ -149,25 +112,25 @@ function searchDocuments(
 
   for (const article of articles) {
     const category = categoriesById.get(article.categoryId);
+    const href = category ? publicArticlePath(category.slug, article.slug) : null;
 
     if (
       !isPublished(article) ||
       !category ||
       category.workspaceId !== article.workspaceId ||
-      !publicSlugPattern.test(category.slug) ||
-      !publicSlugPattern.test(article.slug)
+      !href
     ) {
       continue;
     }
 
-    const body = articleBody(article);
+    const body = articlePlainText(article.mdx, article.title);
     documents.push({
       id: article.id,
       articleId: article.id,
       title: article.title,
       categoryName: category.name,
-      href: `/${category.slug}/${article.slug}`,
-      excerpt: articleExcerpt(body, article.title),
+      href,
+      excerpt: articleDescription(article.mdx, article.title),
       body,
     });
   }

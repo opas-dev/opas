@@ -6,6 +6,36 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["pg-cloudflare"],
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Link",
+            value:
+              '</llms.txt>; rel="llms-txt", </llms-full.txt>; rel="llms-full-txt"',
+          },
+          {
+            key: "X-Llms-Txt",
+            value: "/llms.txt",
+          },
+        ],
+      },
+    ];
+  },
+  async rewrites() {
+    return {
+      beforeFiles: [],
+      afterFiles: [
+        {
+          source: "/:categorySlug/:articleSlug\\.md",
+          destination: "/api/markdown/:categorySlug/:articleSlug",
+        },
+      ],
+      fallback: [],
+    };
+  },
   turbopack: {
     resolveAlias: {
       "fumadocs-core/mdx-plugins": "./src/content/runtime-mdx-plugins.ts",

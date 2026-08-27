@@ -3,6 +3,12 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import {
+  resolveSiteOrigin,
+  siteDescription,
+  siteName,
+  sitePublisherName,
+} from "@/site";
 import { getCurrentTheme } from "@/theme/current";
 import { themeStylesheet } from "@/theme/stylesheet";
 
@@ -10,13 +16,18 @@ import "./globals.css";
 
 export const runtime = "nodejs";
 
-export const metadata: Metadata = {
-  title: {
-    default: "OPAS Help Center",
-    template: "%s · OPAS",
-  },
-  description: "A help center you can theme, deploy, and own.",
-};
+export function generateMetadata(): Metadata {
+  return {
+    metadataBase: new URL(resolveSiteOrigin()),
+    title: {
+      default: siteName,
+      template: "%s · OPAS",
+    },
+    description: siteDescription,
+    applicationName: "OPAS",
+    publisher: sitePublisherName,
+  };
+}
 
 type RootLayoutProps = Readonly<{
   children: ReactNode;

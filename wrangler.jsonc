@@ -19,7 +19,8 @@
   ],
   "vars": {
     "NEXTJS_ENV": "production",
-    "OPAS_DATABASE_DRIVER": "d1"
+    "OPAS_DATABASE_DRIVER": "d1",
+    "OPAS_SITE_URL": "https://opas-mvp.timo-bejan.workers.dev"
   },
   "d1_databases": [
     {

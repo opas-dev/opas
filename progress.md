@@ -10,8 +10,8 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** 5
-- **Done:** 22 / 40
+- **Current phase:** 6
+- **Done:** 26 / 40
 
 ## Blockers
 B3 — The Vercel production rollout awaits the required shared-state confirmation. Phase 0 items 0.6–0.7 are parked at their remaining remote verification step while local implementation continues.
@@ -37,6 +37,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-27 | Content mutations stay in authenticated Server Actions while live preview uses an authenticated abortable POST route | Save and delete keep authoritative workspace checks; previews do not queue behind each other or delay a mutation |
 | 2026-08-27 | Category deletion is an atomic delete-if-empty repository operation | The UI's helpful article-count message cannot become a cascade-delete race under concurrent writes |
 | 2026-08-27 | Search indexes the authoritative published database snapshot and reuses it only while a deterministic content signature is unchanged; anonymous misses use 1,024 daily sample slots with opportunistic cleanup beyond 30 days | Every isolate stays correct after publish, edit, unpublish, or restart; the cache remains optional, and public analytics writes and stored row count are bounded |
+| 2026-08-28 | One request-time publication projection and the explicit `OPAS_SITE_URL` origin drive HTML metadata, sitemap, JSON-LD, llms documents, and per-article Markdown | Every discovery surface applies the same workspace, category, slug, and published-state boundary, while canonical URLs remain exact on Docker, Workers, and the future Vercel target |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -73,10 +74,10 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 4.3 Zero-result queries recorded to search_misses. **Verify:** search works on Docker and CF targets; a miss gets logged.
 
 ## Phase 5 — SEO & AI surfaces
-- [ ] 5.1 SSR metadata, canonical URLs, `sitemap.xml`.
-- [ ] 5.2 `Article` JSON-LD (datePublished/dateModified/author/publisher) on every article; `FAQPage` JSON-LD on articles flagged Q&A-shaped.
-- [ ] 5.3 `/llms.txt` + `/llms-full.txt` generated from the DB.
-- [ ] 5.4 Per-article `.md` endpoint plus `Link` / `X-Llms-Txt` headers. **Verify:** curl checks for 5.1–5.4 against a deployed target.
+- [x] 5.1 SSR metadata, canonical URLs, `sitemap.xml`.
+- [x] 5.2 `Article` JSON-LD (datePublished/dateModified/author/publisher) on every article; `FAQPage` JSON-LD on articles flagged Q&A-shaped.
+- [x] 5.3 `/llms.txt` + `/llms-full.txt` generated from the DB.
+- [x] 5.4 Per-article `.md` endpoint plus `Link` / `X-Llms-Txt` headers. **Verify:** curl checks for 5.1–5.4 against a deployed target.
 
 ## Phase 6 — Feedback & analytics
 - [ ] 6.1 "Was this helpful?" widget (yes/no + optional comment) → article_feedback.
@@ -108,6 +109,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-28 — 5.1–5.4 — added one workspace-safe publication projection for SSR metadata and canonicals, dynamic sitemap, escaped Article and conditional FAQPage JSON-LD, DB-generated llms documents, and rewritten per-article Markdown with discovery and crawler headers — 44 tests, lint, typecheck, Next/OpenNext/Docker builds, and Docker live publish→draft checks passed; Worker `61d7ca6a-e7d7-406e-98ee-17512d4c1831` passed exact-origin curl checks across all surfaces, reflected a D1 FAQ publish and unpublish without rebuilding, rejected drafts and wrong-category Markdown, and retained no canary row — this commit
 - 2026-08-27 — 4.1–4.3 — added snapshot-aware Orama indexing over published Markdown, one Unicode query contract, a normalized no-store search route, accessible abortable as-you-type results with one-character typo tolerance, and bounded zero-result analytics — 38 tests, lint, typecheck, Next/OpenNext/Docker builds, Docker draft→publish→edit index refresh, responsive browser checks, and Docker/PostgreSQL retention and miss persistence passed; deployed Worker `251eed75-161e-4528-8cd3-2757d3d8c629` returned the D1 article for `runtme`, kept a one-code-point query out of D1, logged exactly one bounded-slot D1 miss in EEUR/FRA, removed the canary row, and passed the live browser/console check — this commit
 - 2026-08-27 — 3.2–3.5 — added cross-dialect category/article CRUD, strict authenticated authoring and abortable live preview, parser-enforced MDX safety, publication-aware public category/article routes, and atomic empty-category deletion — 31 tests passed across auth, validation, MDX, themes, PostgreSQL, and SQLite; Next/OpenNext/Docker builds passed; Docker browser proof rejected executable MDX, kept a draft at a real 404, published and live-edited without rebuilding, verified home/category/article navigation, preserved controlled form state after saves, deleted all proof rows, and invalidated the temporary session — this commit
 - 2026-08-27 — 0.5, 2.5, 3.1 live Cloudflare verification — deployed commit `8360567` to the scoped `opas-mvp` Worker and D1 database, exercised the authenticated runtime-theme write path, and rotated the final admin secrets — health, unauthenticated Proxy redirect, authenticated Ocean save, distinct public light/dark values, D1-backed MDX, OPAS restore, clean browser logs, and smoke-session invalidation all passed; current Worker version `d55a1674-c016-48ed-bccb-8684c6dd479a` — this commit

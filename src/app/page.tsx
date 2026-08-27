@@ -1,22 +1,21 @@
 // ABOUTME: Presents the published OPAS category and article library to public readers.
 // ABOUTME: Keeps the help-center hierarchy shallow and excludes every draft record.
+import type { Metadata } from "next";
 import Link from "next/link";
-import { connection } from "next/server";
 
 import { PublicHeader } from "@/app/public-header";
+import { loadPublicPageContent } from "@/app/publication-data";
 import { Search } from "@/app/search";
-import { getRepository } from "@/db";
-import { demoIds } from "@/db/demo";
+import { homeMetadata } from "@/content/publication";
 
 export const runtime = "nodejs";
 
+export function generateMetadata(): Metadata {
+  return homeMetadata();
+}
+
 export default async function HomePage() {
-  await connection();
-  const repository = await getRepository();
-  const [categories, articles] = await Promise.all([
-    repository.listCategories(demoIds.workspace),
-    repository.listPublishedArticles(demoIds.workspace),
-  ]);
+  const { categories, publications } = await loadPublicPageContent();
 
   return (
     <main>
@@ -34,28 +33,32 @@ export default async function HomePage() {
       <section className="launch-points" aria-labelledby="categories-heading">
         <div className="section-heading">
           <h2 id="categories-heading">Browse by category</h2>
-          <p>{articles.length} published {articles.length === 1 ? "answer" : "answers"}</p>
+          <p>
+            {publications.length} published{" "}
+            {publications.length === 1 ? "answer" : "answers"}
+          </p>
         </div>
         {categories.length > 0 ? (
           <ol>
             {categories.map((category, index) => {
-              const categoryArticles = articles.filter(
-                (article) => article.categoryId === category.id,
+              const categoryArticles = publications.filter(
+                (publication) => publication.category.id === category.id,
               );
 
               return (
                 <li key={category.id}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <div>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <div>
                     <h3>
                       <Link href={`/${category.slug}`}>{category.name}</Link>
                     </h3>
                     <p>{category.description ?? "Help articles in this category."}</p>
                     <p className="category-count">
-                      {categoryArticles.length} {categoryArticles.length === 1 ? "article" : "articles"}
+                      {categoryArticles.length}{" "}
+                      {categoryArticles.length === 1 ? "article" : "articles"}
                     </p>
-              </div>
-            </li>
+                  </div>
+                </li>
               );
             })}
           </ol>
