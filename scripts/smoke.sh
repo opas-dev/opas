@@ -6,6 +6,7 @@ set -uo pipefail
 
 smoke_usage() {
   printf 'Usage: %s <http-or-https-base-url>\n' "${0##*/}" >&2
+  printf 'Set OPAS_SMOKE_FAQ_PATH=/category/article to require valid FAQPage JSON-LD.\n' >&2
 }
 
 if [[ $# -ne 1 ]]; then
@@ -61,6 +62,28 @@ if ! smoke_base_url=$(node -e '
   process.stdout.write(url.origin);
 ' "$smoke_base_url"); then
   printf 'ERROR: base URL must be an HTTP(S) origin without credentials, a path, query, or fragment.\n' >&2
+  smoke_usage
+  exit 64
+fi
+
+smoke_faq_path=${OPAS_SMOKE_FAQ_PATH:-}
+if [[ -n "$smoke_faq_path" ]] && ! smoke_faq_path=$(node -e '
+  const path = process.argv[1];
+  const segments = path.split("/").filter(Boolean);
+  const isSlug = (value) =>
+    value.length <= 120 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+
+  if (
+    segments.length !== 2 ||
+    path !== `/${segments.join("/")}` ||
+    !segments.every(isSlug)
+  ) {
+    process.exit(1);
+  }
+
+  process.stdout.write(path);
+' "$smoke_faq_path"); then
+  printf 'ERROR: OPAS_SMOKE_FAQ_PATH must be a safe two-level article path.\n' >&2
   smoke_usage
   exit 64
 fi
@@ -246,6 +269,8 @@ smoke_extract_article_contract() {
   local smoke_headline_path=$3
   local smoke_markdown_headline_path=$4
   local smoke_query_path=$5
+  local smoke_faq_requirement=${6:-optional}
+  local smoke_search_requirement=${7:-required}
 
   smoke_parser_error="${smoke_tmp_dir}/parser-${smoke_request_index}.txt"
   if ! node - \
@@ -255,6 +280,8 @@ smoke_extract_article_contract() {
     "$smoke_headline_path" \
     "$smoke_markdown_headline_path" \
     "$smoke_query_path" \
+    "$smoke_faq_requirement" \
+    "$smoke_search_requirement" \
     2>"$smoke_parser_error" <<'NODE'
 const fs = require("node:fs");
 
@@ -264,7 +291,19 @@ const expectedUrl = process.argv[4];
 const headlinePath = process.argv[5];
 const markdownHeadlinePath = process.argv[6];
 const queryPath = process.argv[7];
+const faqRequirement = process.argv[8];
+const searchRequirement = process.argv[9];
 const html = fs.readFileSync(htmlPath, "utf8");
+
+if (!["optional", "required"].includes(faqRequirement)) {
+  console.error(`Unknown FAQ requirement: ${faqRequirement}.`);
+  process.exit(1);
+}
+if (!["required", "skipped"].includes(searchRequirement)) {
+  console.error(`Unknown search requirement: ${searchRequirement}.`);
+  process.exit(1);
+}
+
 const canonicalTag = [...html.matchAll(/<link\b[^>]*>/giu)].find((match) =>
   /\brel=["']canonical["']/iu.test(match[0]),
 );
@@ -276,21 +315,31 @@ if (canonical !== expectedUrl) {
 }
 
 const jsonLdMatch = html.match(
-  /<script\b[^>]*\bid=["']opas-article-jsonld["'][^>]*>([\s\S]*?)<\/script>/iu,
+  /(<script\b[^>]*\bid=["']opas-article-jsonld["'][^>]*>)([\s\S]*?)<\/script>/iu,
 );
 if (!jsonLdMatch) {
   console.error("Article JSON-LD script is missing.");
   process.exit(1);
 }
+if (!/\btype=["']application\/ld\+json["']/iu.test(jsonLdMatch[1])) {
+  console.error("Article JSON-LD script must use the application/ld+json type.");
+  process.exit(1);
+}
 
 let article;
 try {
-  article = JSON.parse(jsonLdMatch[1]);
+  article = JSON.parse(jsonLdMatch[2]);
 } catch (error) {
   console.error(`Article JSON-LD is invalid JSON: ${error.message}`);
   process.exit(1);
 }
 
+if (article["@context"] !== "https://schema.org") {
+  console.error(
+    `Article JSON-LD @context must be https://schema.org, received ${String(article["@context"])}.`,
+  );
+  process.exit(1);
+}
 if (article["@type"] !== "Article") {
   console.error(`Article JSON-LD @type must be Article, received ${String(article["@type"])}.`);
   process.exit(1);
@@ -310,10 +359,84 @@ if (article.mainEntityOfPage !== expectedUrl) {
   process.exit(1);
 }
 
-const query = article.headline.normalize("NFKC").trim().replace(/\s+/gu, " ");
-if ([...query].length < 2 || !/[\p{L}\p{N}]/u.test(query)) {
-  console.error("The discovered article headline cannot form a safe two-character search query.");
+const isIsoTimestamp = (value) => {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+};
+
+if (!isIsoTimestamp(article.datePublished)) {
+  console.error("Article JSON-LD datePublished must be an ISO 8601 UTC timestamp.");
   process.exit(1);
+}
+if (!isIsoTimestamp(article.dateModified)) {
+  console.error("Article JSON-LD dateModified must be an ISO 8601 UTC timestamp.");
+  process.exit(1);
+}
+if (
+  article.author?.["@type"] !== "Person" ||
+  typeof article.author?.name !== "string" ||
+  article.author.name.trim() === ""
+) {
+  console.error("Article JSON-LD author must be a named Person.");
+  process.exit(1);
+}
+if (
+  article.publisher?.["@type"] !== "Organization" ||
+  article.publisher?.name !== "OPAS"
+) {
+  console.error("Article JSON-LD publisher must be the OPAS Organization.");
+  process.exit(1);
+}
+
+const faqJsonLdMatch = html.match(
+  /(<script\b[^>]*\bid=["']opas-faq-jsonld["'][^>]*>)([\s\S]*?)<\/script>/iu,
+);
+
+if (!faqJsonLdMatch && faqRequirement === "required") {
+  console.error("FAQPage JSON-LD script is missing.");
+  process.exit(1);
+}
+
+if (faqJsonLdMatch) {
+  if (!/\btype=["']application\/ld\+json["']/iu.test(faqJsonLdMatch[1])) {
+    console.error("FAQPage JSON-LD script must use the application/ld+json type.");
+    process.exit(1);
+  }
+
+  let faq;
+  try {
+    faq = JSON.parse(faqJsonLdMatch[2]);
+  } catch (error) {
+    console.error(`FAQPage JSON-LD is invalid JSON: ${error.message}`);
+    process.exit(1);
+  }
+
+  if (faq["@context"] !== "https://schema.org" || faq["@type"] !== "FAQPage") {
+    console.error("FAQPage JSON-LD must use the schema.org context and FAQPage type.");
+    process.exit(1);
+  }
+  if (!Array.isArray(faq.mainEntity) || faq.mainEntity.length === 0) {
+    console.error("FAQPage JSON-LD must contain at least one mainEntity question.");
+    process.exit(1);
+  }
+  if (
+    faq.mainEntity.some(
+      (question) =>
+        question?.["@type"] !== "Question" ||
+        typeof question?.name !== "string" ||
+        question.name.trim() === "" ||
+        question.acceptedAnswer?.["@type"] !== "Answer" ||
+        typeof question.acceptedAnswer?.text !== "string" ||
+        question.acceptedAnswer.text.trim() === "",
+    )
+  ) {
+    console.error("Every FAQPage mainEntity must be a named Question with a non-empty Answer.");
+    process.exit(1);
+  }
 }
 
 fs.writeFileSync(headlinePath, article.headline);
@@ -321,7 +444,16 @@ fs.writeFileSync(
   markdownHeadlinePath,
   article.headline.trim().replace(/\s+/gu, " ").replace(/([\\\[\]])/gu, "\\$1"),
 );
-fs.writeFileSync(queryPath, encodeURIComponent(query));
+
+if (searchRequirement === "required") {
+  const query = article.headline.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  if ([...query].length < 2 || !/[\p{L}\p{N}]/u.test(query)) {
+    console.error("The discovered article headline cannot form a safe two-character search query.");
+    process.exit(1);
+  }
+
+  fs.writeFileSync(queryPath, encodeURIComponent(query));
+}
 NODE
   then
     smoke_fail "article canonical and JSON-LD must match the sitemap publication"
@@ -432,6 +564,19 @@ smoke_article_headline=$(<"$smoke_headline_file")
 smoke_markdown_headline=$(<"$smoke_markdown_headline_file")
 smoke_article_query=$(<"$smoke_query_file")
 smoke_pass "discovered article canonical and Article JSON-LD"
+
+if [[ -n "$smoke_faq_path" ]]; then
+  smoke_expect_get "published FAQ article" "$smoke_faq_path" "200"
+  smoke_extract_article_contract \
+    "$smoke_faq_path" \
+    "${smoke_canonical_origin}${smoke_faq_path}" \
+    "${smoke_tmp_dir}/faq-headline.txt" \
+    "${smoke_tmp_dir}/faq-markdown-headline.txt" \
+    "${smoke_tmp_dir}/faq-query.txt" \
+    "required" \
+    "skipped"
+  smoke_pass "published FAQ article and complete FAQPage JSON-LD"
+fi
 
 smoke_expect_get "published-article search" "/api/search?q=${smoke_article_query}" "200"
 smoke_validate_search_result "$smoke_article_path" "$smoke_article_headline"

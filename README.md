@@ -71,12 +71,13 @@ Create one Neon branch, copy `.env.example` to `.env`, and put its direct connec
 
 ```sh
 vercel link
+vercel pull --environment=production --yes
 vercel build --prod --yes
 pnpm neon:prepare
 vercel deploy --prebuilt --prod --skip-domain
 ```
 
-Smoke-test the staged deployment before promoting it. `vercel.json` keeps the function in `fra1`, close to the documented Neon region. The complete environment, promotion, and rollback procedure is in [docs/deploy-vercel.md](docs/deploy-vercel.md).
+Smoke-test the staged deployment and complete the browser MDX, client-navigation, console, and runtime-theme checks before promoting it. `vercel.json` keeps the function in `fra1`, close to the documented Neon region. The complete environment, verification, promotion, and rollback procedure is in [docs/deploy-vercel.md](docs/deploy-vercel.md).
 
 ## Development and verification
 

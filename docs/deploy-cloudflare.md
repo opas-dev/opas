@@ -34,6 +34,12 @@ pnpm exec opennextjs-cloudflare deploy
 pnpm smoke https://opas-mvp.timo-bejan.workers.dev
 ```
 
+When a published FAQ article is available, require both its complete Article and FAQPage structured-data contracts in the same run:
+
+```sh
+OPAS_SMOKE_FAQ_PATH=/getting-started/your-faq-slug pnpm smoke https://opas-mvp.timo-bejan.workers.dev
+```
+
 Build before changing D1 so a compile or configuration failure leaves the active schema untouched. Every migration must be expand-first and remain compatible with both the active Worker and the build being deployed: an upload can still fail after migration. The deploy preserves existing Worker secrets. Use `pnpm cf:bootstrap` whenever admin credentials also need to be applied from `.env`; use `pnpm cf:deploy` only for an application-only release with no schema change.
 
 ## Rollback
@@ -42,7 +48,8 @@ List versions, then roll the exact `opas-mvp` Worker back to a known-good versio
 
 ```sh
 pnpm exec wrangler versions list --name opas-mvp
-pnpm exec wrangler rollback <version-id> --name opas-mvp --message "Rollback OPAS" --yes
+OPAS_WORKER_VERSION_ID=00000000-0000-0000-0000-000000000000
+pnpm exec wrangler rollback "$OPAS_WORKER_VERSION_ID" --name opas-mvp --message "Rollback OPAS" --yes
 pnpm smoke https://opas-mvp.timo-bejan.workers.dev
 ```
 

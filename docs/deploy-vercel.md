@@ -32,9 +32,10 @@ vercel env add OPAS_SITE_URL production
 vercel env add ADMIN_EMAIL production
 vercel env add ADMIN_PASSWORD production
 vercel env add ADMIN_SESSION_SECRET production
+vercel pull --environment=production --yes
 ```
 
-Vercel prompts for each value without placing it in shell history.
+Vercel prompts for each value without placing it in shell history. Pull again after changing a Production variable so the local build cannot reuse stale project settings or environment values.
 
 ## Build, migrate, and seed
 
@@ -65,11 +66,23 @@ vercel deploy --prebuilt --prod --skip-domain
 Set `DEPLOYMENT_URL` to the HTTPS URL printed by Vercel and check the database-backed public surfaces:
 
 ```sh
-DEPLOYMENT_URL=https://<deployment-url>
+DEPLOYMENT_URL=https://your-deployment.vercel.app
 pnpm smoke "$DEPLOYMENT_URL"
 ```
 
 The smoke suite discovers a published article and verifies its database-backed page, search result, Markdown, sitemap, JSON-LD, and llms entries. It follows the stable canonical origin advertised by the staged deployment without requiring `DEPLOYMENT_URL` to match it.
+
+For a published FAQ article, require the complete Article and FAQPage structured-data contracts too:
+
+```sh
+OPAS_SMOKE_FAQ_PATH=/getting-started/your-faq-slug pnpm smoke "$DEPLOYMENT_URL"
+```
+
+Before promotion, verify the browser-only paths that curl cannot cover:
+
+1. Open the staged home page, follow its client-side links to a category and the database-backed article, and confirm the MDX remains visible after hydration.
+2. Confirm the browser console has no `Connection closed` exception and the network panel has no failed RSC or article requests.
+3. Sign in on the staged `/admin` route, record the active theme, apply a different preset, and reload a staged public page. Confirm its computed theme values changed without a rebuild, then restore the original preset and verify the public page again.
 
 Promote only after those checks pass:
 
@@ -80,9 +93,11 @@ vercel promote "$DEPLOYMENT_URL"
 Repeat the checks against `OPAS_SITE_URL` after promotion.
 
 ```sh
-OPAS_SITE_URL=https://<stable-production-domain>
+OPAS_SITE_URL=https://help.example.com
 pnpm smoke "$OPAS_SITE_URL"
 ```
+
+Repeat the public home-to-article client navigation against the promoted origin and confirm the browser console and network panel remain clean.
 
 ## Roll back
 
@@ -90,7 +105,7 @@ List the Production deployments, set `PREVIOUS_DEPLOYMENT_URL` to the last known
 
 ```sh
 vercel list --environment production
-PREVIOUS_DEPLOYMENT_URL=https://<previous-production-deployment-url>
+PREVIOUS_DEPLOYMENT_URL=https://previous-deployment.vercel.app
 vercel rollback "$PREVIOUS_DEPLOYMENT_URL"
 vercel rollback status
 ```
