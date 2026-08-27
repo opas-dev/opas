@@ -12,23 +12,37 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "test": "pnpm lint && pnpm typecheck"
+    "typecheck": "node -e \"require('node:fs').rmSync('.next/dev',{recursive:true,force:true})\" && next typegen && tsc --noEmit",
+    "test": "pnpm lint && pnpm typecheck",
+    "db:generate:postgres": "drizzle-kit generate --config drizzle.postgres.config.ts",
+    "db:migrate:postgres": "drizzle-kit migrate --config drizzle.postgres.config.ts",
+    "db:seed:postgres": "node --env-file=.env --import tsx scripts/seed-postgres.ts"
   },
   "dependencies": {
     "@fumadocs/mdx-remote": "1.5.1",
+    "drizzle-orm": "0.45.2",
     "next": "16.3.3",
+    "pg": "8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "22.20.1",
+    "@types/pg": "8.23.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
+    "drizzle-kit": "0.31.10",
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.3",
     "tailwindcss": "4.3.3",
+    "tsx": "4.23.12",
     "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "unrs-resolver"
+    ]
   }
 }
