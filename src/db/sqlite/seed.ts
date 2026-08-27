@@ -1,10 +1,16 @@
-// ABOUTME: Writes the deterministic OPAS demo content to a Postgres-compatible database.
-// ABOUTME: Upserts the same complete records so repeated preparation converges after edits.
-import { getPostgresDatabase } from "@/db/postgres/client";
+// ABOUTME: Writes the deterministic OPAS demo content to a D1-compatible database.
+// ABOUTME: Accepts an injected Drizzle client so production and integration checks share seed logic.
 import { demoContent, demoSeededAt } from "@/db/demo";
-import { articles, categories, themes, workspaces } from "@/db/schema/postgres";
+import { getD1Database } from "@/db/sqlite/client";
+import { articles, categories, themes, workspaces } from "@/db/schema/sqlite";
+import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-export async function seedPostgres(database = getPostgresDatabase()) {
+type SqliteDatabase =
+  | DrizzleD1Database<typeof import("@/db/schema/sqlite")>
+  | BetterSQLite3Database<typeof import("@/db/schema/sqlite")>;
+
+export async function seedD1(database: SqliteDatabase = getD1Database()) {
   const seededAt = new Date(demoSeededAt);
 
   await database
@@ -22,7 +28,8 @@ export async function seedPostgres(database = getPostgresDatabase()) {
         createdAt: seededAt,
         updatedAt: seededAt,
       },
-    });
+    })
+    .execute();
 
   for (const category of demoContent.categories) {
     await database
@@ -43,7 +50,8 @@ export async function seedPostgres(database = getPostgresDatabase()) {
           createdAt: seededAt,
           updatedAt: seededAt,
         },
-      });
+      })
+      .execute();
   }
 
   for (const article of demoContent.articles) {
@@ -72,7 +80,8 @@ export async function seedPostgres(database = getPostgresDatabase()) {
           createdAt: seededAt,
           updatedAt: seededAt,
         },
-      });
+      })
+      .execute();
   }
 
   await database
@@ -91,5 +100,6 @@ export async function seedPostgres(database = getPostgresDatabase()) {
         createdAt: seededAt,
         updatedAt: seededAt,
       },
-    });
+    })
+    .execute();
 }

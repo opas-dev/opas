@@ -13,7 +13,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "node -e \"require('node:fs').rmSync('.next/dev',{recursive:true,force:true})\" && next typegen && tsc --noEmit",
-    "test": "pnpm lint && pnpm typecheck",
+    "test": "pnpm lint && pnpm typecheck && pnpm test:repositories",
+    "test:repositories": "tsx --test --test-concurrency=1 tests/repository.integration.test.ts",
     "build:prepare:postgres": "esbuild scripts/prepare-postgres.ts --bundle --platform=node --format=cjs --external:pg-native --outfile=.next/standalone/prepare-postgres.cjs",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
@@ -38,10 +39,13 @@
     "@cloudflare/workers-types": "5.20260827.1",
     "@opennextjs/cloudflare": "1.20.4",
     "@tailwindcss/postcss": "4.3.3",
+    "@testcontainers/postgresql": "12.1.0",
+    "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.20.1",
     "@types/pg": "8.23.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
+    "better-sqlite3": "13.0.3",
     "drizzle-kit": "0.31.10",
     "esbuild": "0.28.2",
     "eslint": "9.39.5",
@@ -53,6 +57,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "better-sqlite3",
       "esbuild",
       "unrs-resolver",
       "workerd"

@@ -10,11 +10,11 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** 0
-- **Done:** 4 / 40
+- **Current phase:** 2
+- **Done:** 8 / 40
 
 ## Blockers
-None — all deploy targets are unblocked.
+B3 — The remote Cloudflare and Vercel rollout awaits the required production/shared-state confirmation. Phase 0 items 0.5–0.7 are parked at their remote verification step while local implementation continues.
 
 Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. B2 (Neon) — `NEON_DATABASE_URL` in `.env`, connection verified (Postgres 18.6, eu-central-1), 2026-08-27.
 
@@ -26,7 +26,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-27 | Branding is OPAS everywhere; AGPL-3.0 core with isolated `/ee` later | Timo's call |
 | 2026-08-27 | Default design register is a restrained, light product UI with crimson reserved for primary action and active state | The public help center and admin are task surfaces; this keeps long-form reading clear while runtime presets demonstrate brand range |
 | 2026-08-27 | Cloudflare compiles sanitized MDX in workerd and executes the function body in the browser | Workerd forbids request-time dynamic evaluation; this preserves live D1 content and makes the required `unsafe-eval` script policy explicit |
-| 2026-08-27 | Runtime MDX uses Fumadocs' minimal preset with its unused documentation-plugin import aliased out | Avoids the Shiki initialization failure reported on Vercel and reduces the Worker from 3.126 MiB to 1.299 MiB compressed |
+| 2026-08-27 | Runtime MDX uses Fumadocs' minimal preset with its unused documentation-plugin import aliased out | Avoids the Shiki initialization failure reported on Vercel and reduced the spike Worker from 3.126 MiB to about 1.27 MiB compressed |
+| 2026-08-27 | Repository behavior is verified with Testcontainers PostgreSQL and better-sqlite3, then checked against Wrangler's local D1 runtime | The same contract covers both dialects while Wrangler separately proves the checked-in D1 migrations and deployment seed execute on workerd's database runtime |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -38,10 +39,10 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [ ] 0.7 Write `docs/notes.md` with spike findings; adjust this plan if a target fails irrecoverably (brief fallback: CF drops to static-export-only — document honestly, don't ship a broken path).
 
 ## Phase 1 — Data layer & adapters
-- [ ] 1.1 Schema in both dialects (shared table/column names): workspaces, categories, articles (slug, title, mdx, draft/published, timestamps), themes (JSON), article_feedback, article_views, search_misses.
-- [ ] 1.2 Storage adapter: one `db` module resolving the driver per deployment (node-postgres for Docker, Neon serverless driver for Vercel, D1 binding for Workers); repository functions are dialect-agnostic.
-- [ ] 1.3 Migrations per dialect (drizzle-kit) + seed script: demo workspace, categories, articles, default theme.
-- [ ] 1.4 Repository integration tests running against both Postgres (docker) and SQLite/D1 (miniflare or local SQLite). **Verify:** the same suite is green on both dialects.
+- [x] 1.1 Schema in both dialects (shared table/column names): workspaces, categories, articles (slug, title, mdx, draft/published, timestamps), themes (JSON), article_feedback, article_views, search_misses.
+- [x] 1.2 Storage adapter: one `db` module resolving the driver per deployment (node-postgres for Docker, Neon serverless driver for Vercel, D1 binding for Workers); repository functions are dialect-agnostic.
+- [x] 1.3 Migrations per dialect (drizzle-kit) + seed script: demo workspace, categories, articles, default theme.
+- [x] 1.4 Repository integration tests running against both Postgres (docker) and SQLite/D1 (miniflare or local SQLite). **Verify:** the same suite is green on both dialects.
 
 ## Phase 2 — Theme engine (Priority 1)
 - [ ] 2.1 JSON theme schema (zod): OKLCH colors, radius, font stacks, logo URL, light+dark variants. Generous token namespace — document the hard limit: only token *values* change at runtime, no new utilities without a rebuild.
@@ -98,6 +99,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-27 — 1.1–1.4 — aligned all seven tables and constraints across Postgres and SQLite, consolidated runtime driver selection behind one repository, added convergent seeds and data-preserving migrations, and added one cross-dialect contract — `pnpm test`, both no-drift generation checks, a fresh Wrangler local D1 migration/seed/query, `pnpm build`, and `pnpm cf:build` passed — this commit
 - 2026-08-27 — 0.4 — added the standalone non-root image, Postgres migration/seed preparation, app and DB healthchecks, and two-service Compose stack — removed the OPAS volume, rebuilt from source, reached healthy state, and curled database-backed MDX plus `/api/health` successfully — this commit
 - 2026-08-27 — 0.3 — added the Postgres Drizzle schema, generated migration, idempotent demo seed, and database-backed runtime MDX read — updated the seeded row through `psql` and confirmed the next production-server response changed without rebuilding; build, lint, and typecheck passed — this commit
 - 2026-08-27 — 0.2 — added request-time compilation through `@fumadocs/mdx-remote` 1.5.1 on a dynamic Node route — changed the source while `pnpm dev` stayed running and confirmed the next response changed without a rebuild; build, lint, and typecheck passed — this commit

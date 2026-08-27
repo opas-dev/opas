@@ -8,6 +8,13 @@
       "when": 1787832263173,
       "tag": "0000_silly_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787849365828,
+      "tag": "0001_mysterious_bishop",
+      "breakpoints": true
     }
   ]
 }

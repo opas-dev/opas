@@ -1,7 +1,7 @@
 // ABOUTME: Defines the OPAS relational model for SQLite and Cloudflare D1 deployments.
 // ABOUTME: Keeps table and column names aligned with the Postgres schema.
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestampColumns = {
   createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -60,6 +60,7 @@ export const articles = sqliteTable(
   (table) => [
     uniqueIndex("articles_workspace_slug_unique").on(table.workspaceId, table.slug),
     index("articles_category_status_index").on(table.categoryId, table.status),
+    check("articles_status_check", sql`${table.status} in ('draft', 'published')`),
   ],
 );
 

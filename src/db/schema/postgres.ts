@@ -1,7 +1,9 @@
 // ABOUTME: Defines the OPAS relational model for Postgres and Neon deployments.
 // ABOUTME: Keeps table and column names aligned with the SQLite/D1 schema.
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -64,6 +66,7 @@ export const articles = pgTable(
   (table) => [
     uniqueIndex("articles_workspace_slug_unique").on(table.workspaceId, table.slug),
     index("articles_category_status_index").on(table.categoryId, table.status),
+    check("articles_status_check", sql`${table.status} in ('draft', 'published')`),
   ],
 );
 
