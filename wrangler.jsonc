@@ -1,0 +1,36 @@
+// ABOUTME: Defines the scoped Cloudflare Worker and local D1 binding for OPAS.
+// ABOUTME: Uses only opas-* resources in the shared DevPlant account.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "opas-mvp",
+  "main": ".open-next/worker.js",
+  "account_id": "f8801c7e8853a113a25f8b52fd9ceec1",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "opas-mvp"
+    }
+  ],
+  "vars": {
+    "NEXTJS_ENV": "production",
+    "OPAS_DATABASE_DRIVER": "d1"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "opas-mvp",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "preview_database_id": "DB",
+      "migrations_dir": "drizzle/sqlite"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

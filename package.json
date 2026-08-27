@@ -15,9 +15,15 @@
     "typecheck": "node -e \"require('node:fs').rmSync('.next/dev',{recursive:true,force:true})\" && next typegen && tsc --noEmit",
     "test": "pnpm lint && pnpm typecheck",
     "build:prepare:postgres": "esbuild scripts/prepare-postgres.ts --bundle --platform=node --format=cjs --external:pg-native --outfile=.next/standalone/prepare-postgres.cjs",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "cf:types": "wrangler types --env-interface CloudflareEnv worker-configuration.d.ts",
     "db:generate:postgres": "drizzle-kit generate --config drizzle.postgres.config.ts",
+    "db:generate:sqlite": "drizzle-kit generate --config drizzle.sqlite.config.ts",
     "db:migrate:postgres": "drizzle-kit migrate --config drizzle.postgres.config.ts",
-    "db:seed:postgres": "node --env-file=.env --import tsx scripts/seed-postgres.ts"
+    "db:seed:postgres": "node --env-file=.env --import tsx scripts/seed-postgres.ts",
+    "db:migrate:d1:local": "wrangler d1 migrations apply opas-mvp --local",
+    "db:seed:d1:local": "wrangler d1 execute opas-mvp --local --file scripts/seed-d1.sql"
   },
   "dependencies": {
     "@fumadocs/mdx-remote": "1.5.1",
@@ -28,6 +34,8 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20260827.1",
+    "@opennextjs/cloudflare": "1.20.4",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "22.20.1",
     "@types/pg": "8.23.1",
@@ -39,12 +47,14 @@
     "eslint-config-next": "16.3.3",
     "tailwindcss": "4.3.3",
     "tsx": "4.23.12",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "wrangler": "4.127.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
-      "unrs-resolver"
+      "unrs-resolver",
+      "workerd"
     ]
   }
 }

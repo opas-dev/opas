@@ -1,0 +1,4 @@
+# ABOUTME: Gives immutable Next.js assets long-lived browser caching on Cloudflare.
+# ABOUTME: Leaves dynamic help-center routes under application-controlled caching.
+/_next/static/*
+  Cache-Control: public,max-age=31536000,immutable

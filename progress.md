@@ -25,6 +25,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-27 | Keyword search via Orama (in-process) | Portable across all targets — Postgres FTS does not exist on D1 |
 | 2026-08-27 | Branding is OPAS everywhere; AGPL-3.0 core with isolated `/ee` later | Timo's call |
 | 2026-08-27 | Default design register is a restrained, light product UI with crimson reserved for primary action and active state | The public help center and admin are task surfaces; this keeps long-form reading clear while runtime presets demonstrate brand range |
+| 2026-08-27 | Cloudflare compiles sanitized MDX in workerd and executes the function body in the browser | Workerd forbids request-time dynamic evaluation; this preserves live D1 content and makes the required `unsafe-eval` script policy explicit |
+| 2026-08-27 | Runtime MDX uses Fumadocs' minimal preset with its unused documentation-plugin import aliased out | Avoids the Shiki initialization failure reported on Vercel and reduces the Worker from 3.126 MiB to 1.299 MiB compressed |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.

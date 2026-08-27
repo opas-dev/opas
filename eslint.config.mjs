@@ -15,5 +15,6 @@ export default defineConfig([
     "coverage/**",
     "next-env.d.ts",
     "out/**",
+    "worker-configuration.d.ts",
   ]),
 ]);

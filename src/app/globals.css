@@ -297,6 +297,10 @@ a {
   margin: 0;
 }
 
+.mdx-runtime-status {
+  color: var(--opas-muted);
+}
+
 @media (max-width: 40rem) {
   .header-note {
     display: none;
