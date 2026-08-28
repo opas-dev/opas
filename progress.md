@@ -10,8 +10,8 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** 8
-- **Done:** 39 / 40
+- **Current phase:** Complete
+- **Done:** 40 / 40
 
 ## Blockers
 None.
@@ -99,7 +99,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 8.1 `/ee` directory placeholder with commercial-license README; verify core has zero imports from `/ee`.
 - [x] 8.2 CONTRIBUTING.md + short public roadmap section in README.
 - [x] 8.3 CI on GitHub Actions: lint, typecheck, both-dialect tests.
-- [ ] 8.4 Tag `v0.1.0` + GitHub release with changelog. **Verify:** CI green on the tag; every Definition-of-done box below checked.
+- [x] 8.4 Tag `v0.1.0` + GitHub release with changelog. **Verify:** CI green on the tag; every Definition-of-done box below checked.
 
 ## Definition of done (v0.1)
 - [x] `docker compose up` on a clean machine yields a seeded, themed, searchable help center.
@@ -113,6 +113,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-28 — 8.4 — tagged verified checkpoint `34df183` as annotated `v0.1.0` and published the [OPAS v0.1.0 GitHub release](https://github.com/opas-dev/opas/releases/tag/v0.1.0) with the three-target changelog and Cloudflare/D1 identified as primary production — exact tag CI run `33139327166` passed all tests plus Next/OpenNext builds, all seven definition-of-done gates were checked, and final Cloudflare/Vercel live smoke suites passed — this commit
 - 2026-08-28 — 0.6–0.7, 7.4–7.5, Vercel definition-of-done gates — created the isolated `opas-mvp` Vercel project and Neon schema, pinned Node 22.x in `fra1`, added a secret-safe reproducible compatibility build, deployed the artifact through Vercel's Production environment, documented Cloudflare/D1 as primary production, and published the stable compatibility URL — Neon preparation converged twice with two migrations and the missing-only seed; the immutable deployment `dpl_D92FbsStyTNb6FATs1ou89GZPvYy` and promoted stable alias passed the complete smoke suite including a temporary FAQ; hydrated home-to-article navigation kept Neon MDX visible, all completed RSC requests returned 200, the console contained no `Connection closed` error, and an authenticated Ocean theme change plus OPAS restore appeared publicly without rebuilding; exact proof analytics/FAQ rows were removed; 65 tests, Next/OpenNext/Vercel builds, actionlint, the core import scan, and final live Cloudflare/Vercel smoke suites passed, while Neon retained the OPAS Default theme and zero analytics rows — this commit
 - 2026-08-28 — completion evidence follow-up — aligned the literal workerd and semantic-token wording with the shipped design and expanded the portable smoke suite to validate every Article field plus optional required FAQPage structured data — shell validation, the complete test suite, live Cloudflare Article/FAQ proof, remote cleanup, and CI passed — this commit
 - 2026-08-28 — 7.4 preflight — made the Vercel runbook pull current Production settings and require staged plus promoted browser proofs for hydrated MDX, client navigation, clean RSC traffic, and runtime theme change/restore — the exact Neon preparation command migrated and seeded disposable Postgres three times without replacing article/theme edits; the confirmed direct Neon endpoint connected read-only to the expected empty Postgres 18.6 schema, local secrets were restricted to mode 0600, and no runtime code blocker remained — this commit
