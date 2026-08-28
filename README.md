@@ -8,7 +8,7 @@ OPAS is an open-source help center for the AI era: theme it at runtime, deploy i
 - Anonymous helpfulness feedback and 30-day aggregate analytics avoid cookies and persisted requester metadata.
 - The same application supports Docker with Postgres, Vercel with Neon, and Cloudflare Workers with D1.
 
-OPAS v0.1 is the first verified release. The implementation plan and verification record live in [progress.md](progress.md); the product and architecture brief is in [docs/brief.md](docs/brief.md).
+OPAS v0.1 is the first verified release. The implementation plan and verification record live in [progress.md](progress.md); the product and architecture brief is in [docs/brief.md](docs/brief.md), and the source-backed next-release plan is in [docs/competitive-roadmap.md](docs/competitive-roadmap.md).
 
 ## Live targets
 
@@ -105,10 +105,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and contributi
 ## Roadmap
 
 - v0.1: shipped across Docker/Postgres, primary Cloudflare/D1 production, and the live Vercel/Neon compatibility target with runtime theming, MDX authoring, search, discovery surfaces, and privacy-light analytics.
-- Community follow-ups: content-freshness automation, draft-from-ticket workflows, theme experiments, and a plugin system.
-- Commercial edition: SAML and SCIM, audit logs, advanced permissions, multi-brand operation, and white-label controls in the isolated `/ee` directory.
+- v0.2 — OPAS Answers: Markdown/GitBook migration, published-source RAG with citations and abstention, native and embeddable chat, support handoff, answer evaluation, content-gap analytics, and read-only MCP.
+- Next: revisions, signed previews, multiple administrators, review roles, GitHub sync, permission-scoped private knowledge, and demand-backed AI-agent traffic analytics.
+- Commercial edition: managed AI usage, organization connectors, SAML and SCIM, audit logs, advanced permissions, multi-brand operation, and white-label controls in the isolated `/ee` directory.
 
-Ticketing, live chat, AI retrieval answers, multi-language authoring, and a WYSIWYG editor are outside the v0.1 scope.
+Ticketing/inbox, live-agent chat, autonomous support actions, multi-language authoring, a WYSIWYG editor, and multi-tenancy remain outside the v0.2 scope.
 
 ## License
 

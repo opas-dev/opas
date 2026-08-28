@@ -1,6 +1,6 @@
-# OPAS MVP (v0.1) — Plan & Progress
+# OPAS — Plan & Progress
 
-**Mission:** ship OPAS v0.1 — an open-source, runtime-themable, deploy-anywhere help center — per [docs/brief.md](docs/brief.md), verified on all three targets: Docker (Postgres), Vercel (Neon), Cloudflare Workers (D1).
+**Mission:** evolve the verified OPAS v0.1 help center into OPAS Answers v0.2 — a portable, source-grounded answer and knowledge-improvement system — per [docs/competitive-roadmap.md](docs/competitive-roadmap.md).
 
 ## Protocol
 1. Work phases top to bottom; within a phase, reorder freely when it helps.
@@ -10,8 +10,9 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** Complete
-- **Done:** 40 / 40
+- **Current phase:** Phase 9 — research and pilot intake
+- **v0.1:** 40 / 40 complete
+- **v0.2:** 1 / 25 complete
 
 ## Blockers
 None.
@@ -42,6 +43,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-28 | Deployment seeds insert only records that are missing | First boot remains automatic while an administrator's edits survive container restarts and repeat D1 or Neon preparation |
 | 2026-08-28 | Cloudflare bootstrap permits the exact `demo.opas.dev` Custom Domain only for the maintained DevPlant `opas-mvp` Worker, explicitly keeps workers.dev enabled, and rejects every other custom route | The app gets a stable canonical production hostname without exposing `opas.dev`, `www`, `opas-landing`, or unrelated shared-account resources |
 | 2026-08-28 | Cloudflare Workers/D1 is the primary production deployment; Vercel/Neon is a live compatibility target using Vercel's `Production` environment | Vercel's environment label must not imply that OPAS traffic, domains, or production ownership moved away from Cloudflare |
+| 2026-08-28 | OPAS Answers v0.2 centers on imported published knowledge, cited answers, explicit abstention, contextual handoff, and a content-gap loop | Competitor research shows this complete loop is the smallest product that creates customer value and can be operated safely; a chat bubble alone is not enough |
+| 2026-08-28 | Start with one portable Orama hybrid retrieval contract; benchmark Cloudflare AI Search but do not require it | OPAS must preserve Docker/Postgres and Vercel/Neon portability, while AI Search remains an open-beta Cloudflare service with future pricing unannounced |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -110,9 +113,61 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] Feedback widget and view analytics work.
 - [x] Non-goals honored — NOT built: ticketing/inbox, live chat, AI/RAG answers, multi-language, WYSIWYG, plugin system, multi-tenancy, vector search.
 
+## Phase 9 — Research, pilot inputs, and migration
+
+- [x] 9.1 Research current documentation and AI-support competitors; rank the next features, define product boundaries, architecture, packaging, and measurable release gates in [docs/competitive-roadmap.md](docs/competitive-roadmap.md). **Verify:** consequential claims link to current primary sources; the plan names assumptions, limits, implementation order, and explicit non-goals.
+- [ ] 9.2 Collect two or three design partners' source of truth, format, required refresh cadence, and a frozen 50-question fixture: at least 20 answerable, 5 ambiguous, 10 unsupported, 5 stale/conflicting with both represented, and 10 adversarial. **Verify:** every accepted pilot has a versioned source inventory and expected-outcome fixture keyed to source-content hashes with no production secrets or customer personal data; reports always show each class's numerator and denominator.
+- [ ] 9.3 Add the import mapping and storage prerequisites: preserve OPAS's two-level navigation by mapping the first source level to categories, flatten deeper paths into deterministic workspace-unique slugs, add article position, rewrite links, and store allowlisted content-addressed images in cross-dialect binary rows capped at 1 MiB. **Verify:** a nested fixture preserves order and working links with every rename reported; assets survive Docker restart and Cloudflare/Vercel redeploy, serve immutable hashes, and remain below D1's 2 MB row limit.
+- [ ] 9.4 Import Markdown files and ZIP archives, including GitBook `SUMMARY.md`, frontmatter, safe local assets, relative links, and redirect candidates; emit dry-run, rename, conflict, skipped-content, and completion reports. **Verify:** a representative GitBook export imports into an empty workspace without silent loss; path traversal, absolute paths, symlinks, encrypted entries, nested archives, duplicate normalized paths, MIME spoofing, and compressed/expanded/compression-ratio/file-count/per-file/total-size limits are rejected before writes.
+- [ ] 9.5 Make import atomic and recoverable: stage one manifest, validate before activation, reject conflicting slugs deterministically, and leave existing content unchanged on failure. **Verify:** intentionally failed imports roll back articles and assets on both database dialects with no orphans; a successful import renders, searches, exports, and rewrites the expected published pages.
+
+## Phase 10 — Evidence pipeline and retrieval
+
+- [ ] 10.1 Add matching Postgres and SQLite/D1 records for deterministic article chunks, embedding generations, retryable jobs, indexing state, saved question sets, and evaluation runs. **Verify:** the shared repository contract and migrations pass on both dialects without changing existing v0.1 data.
+- [ ] 10.2 Chunk validated Markdown by heading with stable IDs and source metadata; commit the current content hash, chunks, incremented workspace index generation, and pending job with each publish/import, and synchronously invalidate old chunks plus increment the generation on unpublish/delete. **Verify:** drafts, deleted rows, stale revisions, failed jobs, and cross-workspace content never remain vector-retrievable; current published text stays keyword-searchable on both dialects while embeddings are pending.
+- [ ] 10.3 Add a provider-neutral, post-commit embedding worker: Workers AI on Cloudflare and a configured OpenAI-compatible endpoint elsewhere; persist provider, model, dimension, configuration hash, vector, and content hash, and activate only an exact current match. **Verify:** unchanged chunks are not recomputed, retry/expiry recovery is bounded, model/config changes trigger controlled re-indexing, and provider failure never blocks publishing or reactivates an old vector.
+- [ ] 10.4 Add published/workspace-scoped hybrid retrieval through Orama with bounded query input, top-k results, immutable generation-keyed caches, a database generation check on every request, and final publication/content-hash revalidation before generation. **Verify:** one deterministic embedding fixture returns the same source IDs on Docker, Vercel-compatible Postgres, and multiple warm workerd isolates; update, unpublish, and delete canaries disappear across every isolate; workerd stays at or below 96 MB at the documented corpus limit.
+- [ ] 10.5 Run lexical, Orama hybrid, every supported production embedding provider, and optional Cloudflare AI Search against the same design-partner fixture; keep the smallest portable implementation that clears all gates. **Verify:** per-class numerator/denominator plus recall@5, warm p95 retrieval ≤250 ms, cached-index rebuild p95 ≤2 seconds, embedding activation p95 ≤60 seconds, workerd peak memory ≤96 MB, and average evaluated inference cost ≤$0.02 are recorded; each provider retrieves an accepted top-five source for at least 90% of answerable questions.
+
+## Phase 11 — Native answers
+
+- [ ] 11.1 Add one generation contract with streaming Workers AI through AI Gateway on Cloudflare and a generic OpenAI-compatible provider on Docker/Vercel; set the Workers binding gateway options to `collectLog: false` and `skipCache: true` for every conversation, store only OPAS's redacted usage metadata, and disclose provider retention. **Verify:** the same deterministic provider fixture passes on every target, Gateway inspection proves no conversation log or cached response persists, and production secrets remain outside builds, logs, client bundles, and stored conversations.
+- [ ] 11.2 Add a bounded streaming answer API that retrieves only current published evidence, applies an eval-calibrated sufficiency threshold, abstains below it, accepts only server-issued citation IDs, and maps them to canonical metadata. **Verify:** every displayed citation resolves to a retrieved current chunk; model-produced/malformed URLs or unknown IDs cannot become citations; weak or conflicting evidence produces abstention.
+- [ ] 11.3 Add an accessible native assistant that shares the search entry point, supports bounded follow-ups, validated current-page context, suggested questions, streaming/cancel/retry states, citations, and mobile layouts; render a strict Markdown subset without runtime MDX, raw HTML, images, unsafe protocols, or model-owned links. **Verify:** streamed/stored XSS, keyboard, screen-reader, reduced-motion, narrow viewport, disconnect, retry, and browser console checks pass.
+- [ ] 11.4 Add visible AI labeling, retention disclosure, configurable topic guardrails, prompt-injection defenses, and prominent handoff after abstention or negative feedback. **Verify:** at least 90% of unsupported/adversarial fixture questions abstain or hand off, and no draft, deleted, cross-workspace, or out-of-scope text appears.
+- [ ] 11.5 Add ephemeral abuse gates plus atomic per-workspace leases that reserve maximum token cost and concurrency before inference, then reconcile exactly once after completion, cancellation, timeout, or crash; make cross-provider fallback opt-in under the same reservation. **Verify:** races on both dialects cannot exceed configured concurrency or spend, expired leases recover, fallback cannot double-reserve or silently change vendors, and every simulated outage leaves ordinary pages and search available.
+- [ ] 11.6 Gate pilot release on saved evaluations. **Verify:** at least 90% of answerable responses are manually scored grounded and materially correct; at least 90% of material factual claims are entailed by and covered by displayed citations; 100% of citation URLs are server-derived; production first-token p95 is ≤3 seconds and exposes total latency, token use, and cost.
+
+## Phase 12 — Embed, handoff, and outcomes
+
+- [ ] 12.1 Ship a dedicated embed document and small loader script. Exclude only that route from the catch-all `frame-ancestors 'none'` policy, emit exact configured parent origins, avoid runtime MDX/`unsafe-eval`, resolve current-page URLs to published article IDs, and validate both directions of `postMessage`. **Verify:** allowed and denied parents behave correctly on Docker, Cloudflare, and Vercel; every other route remains unframeable; forged messages, arbitrary page text, oversized context, CSP violations, and style leakage are rejected.
+- [ ] 12.2 Add email and generic webhook handoff with question, bounded transcript, citations, page URL, outcome, and user-supplied contact details; do not build an inbox. **Verify:** real end-to-end email and webhook deliveries contain the expected context, escape untrusted content, reject SSRF targets, separate contact retention from analytics, and prevent duplicate sends.
+- [ ] 12.3 Record answered, abstained, low-rated, escalated, and abandoned outcomes plus optional feedback reasons. **Verify:** public writes are bounded and rate-limited on all targets, and outcome counts reconcile with inspected redacted conversations without cookies or persisted requester metadata.
+- [ ] 12.4 Complete native and embedded browser acceptance before a confirmed production rollout using an isolated `opas-*` Cloudflare staging Worker/D1 pair plus a Vercel preview with a disposable Neon branch/schema. **Verify:** all three paths pass desktop/mobile, light/dark, streaming, cancellation, citation navigation, handoff, accessibility, console, CSP/CORS, persistence, retention, and rollback checks without mutating production data.
+
+## Phase 13 — Quality operations, agent surfaces, and v0.2 release
+
+- [ ] 13.1 Redact emails, phone numbers, tokens, credentials, IP-shaped values, and configured customer patterns before storing bounded conversation, retrieval trace, timing, token, cost, and outcome data with 30-day default retention; let core operators disable analytics or shorten retention, separate explicit handoff contacts, and never persist requester IP, raw user agent, or cookies. **Verify:** redaction/configuration fixtures pass, every read excludes expired data, real cleanup invocations on Cloudflare, Vercel, and Docker physically delete it, Gateway/provider persistence matches disclosure, and an inspection proves excluded data is absent.
+- [ ] 13.2 Add authenticated redacted conversation/source trace review, saved-question runs, result comparison, CSV export, and a test playground. **Verify:** an administrator can reproduce a failed answer from retained redacted evidence, inspect retrieved chunks and scores, compare releases, and export only the active workspace's unexpired data.
+- [ ] 13.3 Add ranked unsupported/low-rated/escalated questions, source usefulness, topic guardrails, and corrective editor suggestions that enter retrieval only after they are merged into a published, citable article. **Verify:** known failure fixtures move predictably after a published correction, while unpublished suggestions never appear in retrieval and every answer retains a canonical citation.
+- [ ] 13.4 Add read-only MCP search/read tools and `Copy page`, `View Markdown`, and `Open in ChatGPT/Claude` actions. **Verify:** the current Streamable HTTP protocol passes with a patched SDK and fresh stateless transport per request; tools expose only published scoped content and reject malformed origins and protocol versions.
+- [ ] 13.5 Release v0.2 after complete portability and production checks. **Verify:** lint, typecheck, both-dialect tests, Next/OpenNext/Docker builds, Docker smoke, isolated Cloudflare/D1 stage, Vercel preview/disposable Neon, migration/rollback, eval gates, security/privacy headers, and post-confirmation production smoke all pass; the exact tag CI is green.
+
+## Definition of done (v0.2)
+
+- [ ] A representative existing knowledge base imports supported content without manual reauthoring or silent loss; every flatten, rename, and unsupported item is reported.
+- [ ] Native and embedded assistants stream grounded answers with valid, materially supporting citations and explicit abstention.
+- [ ] A failed answer can hand off by email or webhook with its useful context intact.
+- [ ] Administrators can inspect traces, rerun saved questions, and act on a ranked content-gap queue.
+- [ ] AI provider failure or a hard spend limit never takes down ordinary docs or keyword search.
+- [ ] Public MCP and page actions expose only current published content.
+- [ ] Docker/Postgres, Cloudflare/D1 production, and Vercel/Neon compatibility retain one tested product contract.
+- [ ] Non-goals honored — NOT built: ticketing/inbox, live-agent chat, autonomous actions, broad connectors, WYSIWYG, multi-language, multi-tenancy, private knowledge, or a plugin marketplace.
+
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-28 — 9.1 — researched current documentation platforms and adjacent AI-support products, reconciled pricing and capability evidence, and turned the highest-value gaps into the OPAS Answers v0.2 execution plan — current primary-source links, assumptions, architecture, release gates, limits, packaging, sequencing, and non-goals were audited in `docs/competitive-roadmap.md` — this commit
 - 2026-08-28 — production domain rollout — bound the maintained `opas-mvp` Worker to `demo.opas.dev`, made that Custom Domain authoritative for canonical and discovery URLs, retained workers.dev as a non-canonical fallback, and preserved the protected apex/`www` landing deployment — Cloudflare created the Custom Domain record and certificate; Worker version `dc03e4da-bd42-4c91-98ef-be64808defa6` passed lint, typecheck, the deployment guard suite, OpenNext build, Wrangler dry-run, the complete D1-backed smoke suite on `demo.opas.dev`, and the workers.dev health check — this commit
 - 2026-08-28 — 8.4 — tagged verified checkpoint `34df183` as annotated `v0.1.0` and published the [OPAS v0.1.0 GitHub release](https://github.com/opas-dev/opas/releases/tag/v0.1.0) with the three-target changelog and Cloudflare/D1 identified as primary production — exact tag CI run `33139327166` passed all tests plus Next/OpenNext builds, all seven definition-of-done gates were checked, and final Cloudflare/Vercel live smoke suites passed — this commit
 - 2026-08-28 — 0.6–0.7, 7.4–7.5, Vercel definition-of-done gates — created the isolated `opas-mvp` Vercel project and Neon schema, pinned Node 22.x in `fra1`, added a secret-safe reproducible compatibility build, deployed the artifact through Vercel's Production environment, documented Cloudflare/D1 as primary production, and published the stable compatibility URL — Neon preparation converged twice with two migrations and the missing-only seed; the immutable deployment `dpl_D92FbsStyTNb6FATs1ou89GZPvYy` and promoted stable alias passed the complete smoke suite including a temporary FAQ; hydrated home-to-article navigation kept Neon MDX visible, all completed RSC requests returned 200, the console contained no `Connection closed` error, and an authenticated Ocean theme change plus OPAS restore appeared publicly without rebuilding; exact proof analytics/FAQ rows were removed; 65 tests, Next/OpenNext/Vercel builds, actionlint, the core import scan, and final live Cloudflare/Vercel smoke suites passed, while Neon retained the OPAS Default theme and zero analytics rows — this commit
