@@ -11,12 +11,12 @@
 
 ## Status
 - **Current phase:** 8
-- **Done:** 35 / 40
+- **Done:** 39 / 40
 
 ## Blockers
-B3 — The Vercel production rollout awaits the required shared-state confirmation. Items 0.6–0.7, 7.4–7.5, 8.4, and the remaining Vercel/theme definition-of-done gates are parked; all local and Cloudflare work is complete.
+None.
 
-Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. B2 (Neon) — `NEON_DATABASE_URL` in `.env`, connection verified (Postgres 18.6, eu-central-1), 2026-08-27.
+Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. B2 (Neon) — `NEON_DATABASE_URL` in `.env`, connection verified (Postgres 18.6, eu-central-1), 2026-08-27. B3 (rollout authority) — Timo authorized the complete rollout on 2026-08-28 and clarified that Cloudflare, not Vercel, is production.
 
 ## Decisions
 | Date | Decision | Why |
@@ -41,6 +41,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-28 | Article readership and helpfulness use bounded 30-day samples with no cookies or persisted request metadata | Fixed daily slots bound stored rows, ephemeral admission gates bound per-process database attempts, Cloudflare adds a trusted per-requester window, and the report remains honest about collisions and opportunistic physical cleanup |
 | 2026-08-28 | Deployment seeds insert only records that are missing | First boot remains automatic while an administrator's edits survive container restarts and repeat D1 or Neon preparation |
 | 2026-08-28 | Cloudflare bootstrap requires one matching `opas-*` Worker/D1 pair on workers.dev and rejects custom routes | The deploy remains portable to an explicit account while the maintained shared-account workflow cannot reach `opas-landing`, protected domains, or unrelated resources |
+| 2026-08-28 | Cloudflare Workers/D1 is the primary production deployment; Vercel/Neon is a live compatibility target using Vercel's `Production` environment | Vercel's environment label must not imply that OPAS traffic, domains, or production ownership moved away from Cloudflare |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -48,8 +49,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 0.3 Minimal DB read: Drizzle + Postgres (docker) storing one article row; the page renders MDX from the DB. **Verify:** update the row via psql → refresh shows the change.
 - [x] 0.4 Docker target: Dockerfile (standalone output) + `docker-compose.yml` (app + Postgres), single `.env`. **Verify:** `docker compose up` from a clean checkout serves the MDX page.
 - [x] 0.5 Cloudflare target: `@opennextjs/cloudflare` (NOT `@cloudflare/next-on-pages`); create D1 database `opas-mvp` on the DevPlant account; Drizzle D1 dialect path for the same article read. **Verify:** deployed workers.dev URL renders D1-stored MDX; confirm the workerd-compatible path compiles validated MDX in the Worker and executes the resulting render function in the browser, and note CSP implications in `docs/notes.md`.
-- [ ] 0.6 Vercel target: deploy with the Neon serverless driver; reproduce/resolve the `@fumadocs/mdx-remote` "Connection closed" issue (Fumadocs discussion #1623). **Verify:** production URL renders Neon-stored MDX.
-- [ ] 0.7 Write `docs/notes.md` with spike findings; adjust this plan if a target fails irrecoverably (brief fallback: CF drops to static-export-only — document honestly, don't ship a broken path).
+- [x] 0.6 Vercel target: deploy with the Neon serverless driver; reproduce/resolve the `@fumadocs/mdx-remote` "Connection closed" issue (Fumadocs discussion #1623). **Verify:** the live Vercel Production-environment compatibility URL renders Neon-stored MDX.
+- [x] 0.7 Write `docs/notes.md` with spike findings; adjust this plan if a target fails irrecoverably (brief fallback: CF drops to static-export-only — document honestly, don't ship a broken path).
 
 ## Phase 1 — Data layer & adapters
 - [x] 1.1 Schema in both dialects (shared table/column names): workspaces, categories, articles (slug, title, mdx, draft/published, timestamps), themes (JSON), article_feedback, article_views, search_misses.
@@ -91,8 +92,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 7.1 `docker compose up` from a clean clone: single `.env`, healthchecks, auto-migrate + seed on first boot. **Verify:** fresh clone → compose up → working seeded help center.
 - [x] 7.2 CF Workers deploy script + docs (creates D1, migrates, seeds, deploys). **Verify:** clean deploy to workers.dev. May bind `mvp.opas.dev`; NEVER touch `opas.dev` root or `www`.
 - [x] 7.3 Smoke-test script (curl of key routes incl. search, `llms.txt`, `.md`) runnable against any base URL.
-- [ ] 7.4 Vercel + Neon verified deploy + docs.
-- [ ] 7.5 README quickstarts for all three targets, with live URLs.
+- [x] 7.4 Vercel + Neon verified deploy + docs.
+- [x] 7.5 README quickstarts for all three targets, with live URLs.
 
 ## Phase 8 — Release
 - [x] 8.1 `/ee` directory placeholder with commercial-license README; verify core has zero imports from `/ee`.
@@ -103,8 +104,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Definition of done (v0.1)
 - [x] `docker compose up` on a clean machine yields a seeded, themed, searchable help center.
 - [x] Deployed and smoke-tested on Cloudflare Workers with D1 — live URL in README.
-- [ ] Deployed and smoke-tested on Vercel with Neon — live URL in README.
-- [ ] A theme change via admin re-skins the site with zero rebuild, on every target.
+- [x] Deployed and smoke-tested on Vercel with Neon — live URL in README.
+- [x] A theme change via admin re-skins the site with zero rebuild, on every target.
 - [x] `llms.txt`, `llms-full.txt`, per-article `.md`, sitemap, and JSON-LD all pass the smoke-test script.
 - [x] Feedback widget and view analytics work.
 - [x] Non-goals honored — NOT built: ticketing/inbox, live chat, AI/RAG answers, multi-language, WYSIWYG, plugin system, multi-tenancy, vector search.
@@ -112,6 +113,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-28 — 0.6–0.7, 7.4–7.5, Vercel definition-of-done gates — created the isolated `opas-mvp` Vercel project and Neon schema, pinned Node 22.x in `fra1`, added a secret-safe reproducible compatibility build, deployed the artifact through Vercel's Production environment, documented Cloudflare/D1 as primary production, and published the stable compatibility URL — Neon preparation converged twice with two migrations and the missing-only seed; the immutable deployment `dpl_D92FbsStyTNb6FATs1ou89GZPvYy` and promoted stable alias passed the complete smoke suite including a temporary FAQ; hydrated home-to-article navigation kept Neon MDX visible, all completed RSC requests returned 200, the console contained no `Connection closed` error, and an authenticated Ocean theme change plus OPAS restore appeared publicly without rebuilding; exact proof analytics/FAQ rows were removed; 65 tests, Next/OpenNext/Vercel builds, actionlint, the core import scan, and final live Cloudflare/Vercel smoke suites passed, while Neon retained the OPAS Default theme and zero analytics rows — this commit
 - 2026-08-28 — completion evidence follow-up — aligned the literal workerd and semantic-token wording with the shipped design and expanded the portable smoke suite to validate every Article field plus optional required FAQPage structured data — shell validation, the complete test suite, live Cloudflare Article/FAQ proof, remote cleanup, and CI passed — this commit
 - 2026-08-28 — 7.4 preflight — made the Vercel runbook pull current Production settings and require staged plus promoted browser proofs for hydrated MDX, client navigation, clean RSC traffic, and runtime theme change/restore — the exact Neon preparation command migrated and seeded disposable Postgres three times without replacing article/theme edits; the confirmed direct Neon endpoint connected read-only to the expected empty Postgres 18.6 schema, local secrets were restricted to mode 0600, and no runtime code blocker remained — this commit
 - 2026-08-28 — 8.3 release follow-up — added version-tag CI runs so the v0.1.0 release gate can be verified on its exact tag — actionlint and the preceding complete `main` CI run passed — this commit

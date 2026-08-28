@@ -8,19 +8,19 @@ OPAS is an open-source help center for the AI era: theme it at runtime, deploy i
 - Anonymous helpfulness feedback and 30-day aggregate analytics avoid cookies and persisted requester metadata.
 - The same application supports Docker with Postgres, Vercel with Neon, and Cloudflare Workers with D1.
 
-OPAS is preparing its v0.1 release. The implementation plan and verification record live in [progress.md](progress.md); the product and architecture brief is in [docs/brief.md](docs/brief.md).
+OPAS v0.1 is the first verified release. The implementation plan and verification record live in [progress.md](progress.md); the product and architecture brief is in [docs/brief.md](docs/brief.md).
 
 ## Live targets
 
-| Target | Database | URL |
-| --- | --- | --- |
-| Docker | Postgres | `http://localhost:3000` after local startup |
-| Cloudflare Workers | D1 | [opas-mvp.timo-bejan.workers.dev](https://opas-mvp.timo-bejan.workers.dev) |
-| Vercel | Neon Postgres | Pending production verification; the URL will be added after rollout |
+| Target | Database | Role | URL |
+| --- | --- | --- | --- |
+| Docker | Postgres | Self-hosted | `http://localhost:3000` after local startup |
+| Cloudflare Workers | D1 | Primary production | [opas-mvp.timo-bejan.workers.dev](https://opas-mvp.timo-bejan.workers.dev) |
+| Vercel | Neon Postgres | Live compatibility | [opas-mvp-timo-bejans-projects.vercel.app](https://opas-mvp-timo-bejans-projects.vercel.app) |
 
 ## Prerequisites
 
-- Node.js 22 or newer
+- Node.js 22.x
 - pnpm 10.13.1 through Corepack
 - Docker for the Docker target and repository integration tests
 - An authenticated Wrangler CLI and Cloudflare account for a Workers deployment
@@ -54,7 +54,7 @@ The public site is at [localhost:3000](http://localhost:3000) and administration
 
 ## Cloudflare quickstart
 
-OPAS uses `@opennextjs/cloudflare` and D1. The checked-in release target is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and its workers.dev origin. A fork can set its own explicit account ID and matching `opas-*` names. Copy `.env.example` to the gitignored `.env`, set the administrator credentials, then run:
+Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and its workers.dev origin. A fork can set its own explicit account ID and matching `opas-*` names. Copy `.env.example` to the gitignored `.env`, set the administrator credentials, then run:
 
 ```sh
 pnpm exec wrangler login
@@ -67,12 +67,15 @@ See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for configuration, mi
 
 ## Vercel quickstart
 
-Create one Neon branch, copy `.env.example` to `.env`, and put its direct connection string there as `NEON_DATABASE_URL`. Link the checkout to Vercel and configure the six Production variables listed in [docs/deploy-vercel.md](docs/deploy-vercel.md). Then build before migrating, prepare Neon transactionally, and upload the staged artifact:
+Vercel and Neon are a live portability target, not OPAS production. “Production” in the commands below is only Vercel's environment name; promotion changes the Vercel project alias and does not move Cloudflare traffic or attach an OPAS domain.
+
+Create one Neon branch, copy `.env.example` to `.env`, and put its direct connection string and real administrator values there. Link the checkout to Vercel and configure the six Vercel Production-environment variables listed in [docs/deploy-vercel.md](docs/deploy-vercel.md). Then pin the project to Node 22, build before migrating, prepare Neon transactionally, and upload the staged artifact:
 
 ```sh
 vercel link
 vercel pull --environment=production --yes
-vercel build --prod --yes
+vercel project update opas-mvp --framework nextjs --node-version 22.x --yes
+pnpm vercel:build https://opas-mvp-timo-bejans-projects.vercel.app
 pnpm neon:prepare
 vercel deploy --prebuilt --prod --skip-domain
 ```
@@ -101,7 +104,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and contributi
 
 ## Roadmap
 
-- v0.1: finish the verified Docker, Cloudflare, and Vercel release with runtime theming, MDX authoring, search, discovery surfaces, and privacy-light analytics.
+- v0.1: shipped across Docker/Postgres, primary Cloudflare/D1 production, and the live Vercel/Neon compatibility target with runtime theming, MDX authoring, search, discovery surfaces, and privacy-light analytics.
 - Community follow-ups: content-freshness automation, draft-from-ticket workflows, theme experiments, and a plugin system.
 - Commercial edition: SAML and SCIM, audit logs, advanced permissions, multi-brand operation, and white-label controls in the isolated `/ee` directory.
 

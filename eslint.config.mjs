@@ -10,6 +10,7 @@ export default defineConfig([
   globalIgnores([
     ".next/**",
     ".open-next/**",
+    ".vercel/**",
     ".wrangler/**",
     "build/**",
     "coverage/**",

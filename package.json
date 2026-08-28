@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "packageManager": "pnpm@10.13.1",
   "engines": {
-    "node": ">=22.0.0"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "next dev",
@@ -24,6 +24,7 @@
     "test:repositories": "tsx --test --test-concurrency=1 tests/repository.integration.test.ts",
     "test:theme": "tsx --test tests/theme.test.ts",
     "build:prepare:postgres": "esbuild scripts/prepare-postgres.ts --bundle --platform=node --format=cjs --external:pg-native --outfile=.next/standalone/prepare-postgres.cjs",
+    "vercel:build": "tsx scripts/build-vercel.ts",
     "cf:bootstrap": "node --env-file=.env --import tsx scripts/bootstrap-cloudflare.ts",
     "cf:build": "opennextjs-cloudflare build",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",

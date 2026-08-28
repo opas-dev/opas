@@ -1,6 +1,6 @@
 # Deploy to Cloudflare Workers and D1
 
-The checked-in Wrangler config is pinned to the maintained `opas-mvp` deployment in the DevPlant account. A fork may replace that explicit account ID and use its own matching `opas-*` Worker, D1 database, and workers.dev hostname. The bootstrap rejects malformed account IDs, names outside `opas-*`, `opas-landing`, mismatched Worker/database names, and custom routes.
+Cloudflare Workers and D1 are the primary OPAS production deployment. The checked-in Wrangler config is pinned to the maintained `opas-mvp` deployment in the DevPlant account. A fork may replace that explicit account ID and use its own matching `opas-*` Worker, D1 database, and workers.dev hostname. The bootstrap rejects malformed account IDs, names outside `opas-*`, `opas-landing`, mismatched Worker/database names, and custom routes.
 
 ## First deployment
 

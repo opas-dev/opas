@@ -16,7 +16,11 @@ The guarded Phase 7 bootstrap was exercised from an absent target through D1 cre
 
 ## Vercel and Neon
 
-The Neon HTTP adapter connects successfully to Postgres 18.6 in `eu-central-1` and shares the Postgres repository queries. The minimal Fumadocs preset avoids the Shiki path associated with the reported `Connection closed` failure. Only a real Vercel production deployment can close that finding; it remains pending the rollout confirmation.
+The Neon HTTP adapter connects to Postgres 18.6 in `eu-central-1` and shares the Postgres repository queries. The live compatibility project uses Vercel's Production environment but is not the primary OPAS production deployment; Cloudflare Workers and D1 retain that role. Vercel deployment `dpl_D92FbsStyTNb6FATs1ou89GZPvYy` runs Node 22 in `fra1` and is promoted at [opas-mvp-timo-bejans-projects.vercel.app](https://opas-mvp-timo-bejans-projects.vercel.app).
+
+The reported Fumadocs discussion #1623 `Connection closed` failure did not reproduce with `@fumadocs/mdx-remote` 1.5.1 and the minimal preset. The Neon-backed article remained visible after hydration and home-to-category-to-article client navigation; resolved RSC requests returned HTTP 200, there were no unresolved request failures, and the browser console stayed free of `Connection closed` and other errors before and after promotion. The portable smoke suite also passed against both the immutable deployment and stable alias, including the complete Article contract and a temporary FAQPage contract.
+
+An authenticated theme action changed the same deployment from OPAS Default to Ocean. A public reload observed different light and dark semantic values without a rebuild, and restoring OPAS Default restored the original values. Neon preparation converged on two migrations and the missing-only seed; the temporary FAQ and all proof analytics rows were deleted, leaving the seeded two articles, one theme, and empty analytics tables.
 
 ## Runtime themes
 
