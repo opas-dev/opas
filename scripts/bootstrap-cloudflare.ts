@@ -14,6 +14,9 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const protectedWorkerName = "opas-landing";
+const maintainedAccountId = "f8801c7e8853a113a25f8b52fd9ceec1";
+const maintainedCustomDomain = "demo.opas.dev";
+const maintainedWorkerName = "opas-mvp";
 const opasResourcePattern = /^opas-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const cloudflareAccountPattern = /^[a-f0-9]{32}$/;
 
@@ -59,7 +62,47 @@ function requireOpasResource(value: unknown, field: string) {
   return name;
 }
 
-function validateSiteOrigin(value: unknown, workerName: string) {
+function validateRouting(config: JsonObject, accountId: string, workerName: string) {
+  if ("route" in config) {
+    throw new Error("Singular Worker routes are not permitted.");
+  }
+
+  if (!("routes" in config)) {
+    if (config.workers_dev === false) {
+      throw new Error("workers.dev must remain enabled.");
+    }
+
+    return undefined;
+  }
+
+  const routes = config.routes;
+  const route = Array.isArray(routes) && routes.length === 1 ? routes[0] : undefined;
+  const routeKeys = isObject(route) ? Object.keys(route).sort() : [];
+  const isMaintainedRoute =
+    accountId === maintainedAccountId &&
+    workerName === maintainedWorkerName &&
+    config.workers_dev === true &&
+    isObject(route) &&
+    route.pattern === maintainedCustomDomain &&
+    route.custom_domain === true &&
+    routeKeys.length === 2 &&
+    routeKeys[0] === "custom_domain" &&
+    routeKeys[1] === "pattern";
+
+  if (!isMaintainedRoute) {
+    throw new Error(
+      `Custom routing is limited to ${maintainedCustomDomain} on the maintained ${maintainedWorkerName} Worker, with workers.dev enabled.`,
+    );
+  }
+
+  return maintainedCustomDomain;
+}
+
+function validateSiteOrigin(
+  value: unknown,
+  workerName: string,
+  customDomain: string | undefined,
+) {
   const configuredOrigin = requireString(value, "vars.OPAS_SITE_URL");
   let siteUrl: URL;
 
@@ -69,6 +112,11 @@ function validateSiteOrigin(value: unknown, workerName: string) {
     throw new Error("vars.OPAS_SITE_URL must be a valid HTTPS origin.");
   }
 
+  const hasExpectedHostname = customDomain
+    ? siteUrl.hostname === customDomain
+    : siteUrl.hostname.startsWith(`${workerName}.`) &&
+      siteUrl.hostname.endsWith(".workers.dev");
+
   if (
     siteUrl.protocol !== "https:" ||
     siteUrl.username !== "" ||
@@ -77,8 +125,7 @@ function validateSiteOrigin(value: unknown, workerName: string) {
     siteUrl.search !== "" ||
     siteUrl.hash !== "" ||
     siteUrl.origin !== configuredOrigin ||
-    !siteUrl.hostname.startsWith(`${workerName}.`) ||
-    !siteUrl.hostname.endsWith(".workers.dev")
+    !hasExpectedHostname
   ) {
     throw new Error("vars.OPAS_SITE_URL must be an exact HTTPS origin.");
   }
@@ -101,20 +148,17 @@ export function validateCloudflareConfig(
     throw new Error("account_id must be an explicit Cloudflare account ID.");
   }
 
-  if (
-    ("routes" in config &&
-      (!Array.isArray(config.routes) || config.routes.length !== 0)) ||
-    "route" in config ||
-    config.workers_dev === false
-  ) {
-    throw new Error("The bootstrap supports workers.dev only and rejects custom routes.");
-  }
+  const customDomain = validateRouting(config, accountId, workerName);
 
   if (!isObject(config.vars) || config.vars.OPAS_DATABASE_DRIVER !== "d1") {
     throw new Error("vars.OPAS_DATABASE_DRIVER must be d1.");
   }
 
-  const siteOrigin = validateSiteOrigin(config.vars.OPAS_SITE_URL, workerName);
+  const siteOrigin = validateSiteOrigin(
+    config.vars.OPAS_SITE_URL,
+    workerName,
+    customDomain,
+  );
   const databases = config.d1_databases;
 
   if (!Array.isArray(databases) || databases.length !== 1 || !isObject(databases[0])) {

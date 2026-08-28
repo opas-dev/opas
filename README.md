@@ -15,7 +15,7 @@ OPAS v0.1 is the first verified release. The implementation plan and verificatio
 | Target | Database | Role | URL |
 | --- | --- | --- | --- |
 | Docker | Postgres | Self-hosted | `http://localhost:3000` after local startup |
-| Cloudflare Workers | D1 | Primary production | [opas-mvp.timo-bejan.workers.dev](https://opas-mvp.timo-bejan.workers.dev) |
+| Cloudflare Workers | D1 | Primary production | [demo.opas.dev](https://demo.opas.dev) ([workers.dev fallback](https://opas-mvp.timo-bejan.workers.dev)) |
 | Vercel | Neon Postgres | Live compatibility | [opas-mvp-timo-bejans-projects.vercel.app](https://opas-mvp-timo-bejans-projects.vercel.app) |
 
 ## Prerequisites
@@ -54,7 +54,7 @@ The public site is at [localhost:3000](http://localhost:3000) and administration
 
 ## Cloudflare quickstart
 
-Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and its workers.dev origin. A fork can set its own explicit account ID and matching `opas-*` names. Copy `.env.example` to the gitignored `.env`, set the administrator credentials, then run:
+Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and the `demo.opas.dev` custom domain. Its workers.dev endpoint remains enabled as a fallback. A fork can set its own explicit account ID and matching `opas-*` names for a workers.dev deployment. Copy `.env.example` to the gitignored `.env`, set the administrator credentials, then run:
 
 ```sh
 pnpm exec wrangler login

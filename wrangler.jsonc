@@ -1,10 +1,17 @@
-// ABOUTME: Defines the scoped Cloudflare Worker and local D1 binding for OPAS.
-// ABOUTME: Uses only opas-* resources in the shared DevPlant account.
+// ABOUTME: Defines the scoped Cloudflare Worker, custom domain, and D1 binding for OPAS.
+// ABOUTME: Keeps workers.dev available while limiting production routing to demo.opas.dev.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "opas-mvp",
   "main": ".open-next/worker.js",
   "account_id": "f8801c7e8853a113a25f8b52fd9ceec1",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "demo.opas.dev",
+      "custom_domain": true
+    }
+  ],
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
@@ -20,7 +27,7 @@
   "vars": {
     "NEXTJS_ENV": "production",
     "OPAS_DATABASE_DRIVER": "d1",
-    "OPAS_SITE_URL": "https://opas-mvp.timo-bejan.workers.dev"
+    "OPAS_SITE_URL": "https://demo.opas.dev"
   },
   "d1_databases": [
     {
