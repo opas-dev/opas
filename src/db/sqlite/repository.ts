@@ -3,7 +3,7 @@
 import { and, asc, count, eq, gte, lt, notExists, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { AnyD1Database, DrizzleD1Database } from "drizzle-orm/d1";
 
 import { articleEventRetentionStart } from "@/analytics/records";
 import {
@@ -32,8 +32,12 @@ import {
 } from "@/db/schema/sqlite";
 import type * as schema from "@/db/schema/sqlite";
 
+type D1BackedDatabase = DrizzleD1Database<typeof schema> & {
+  $client: AnyD1Database;
+};
+
 type SqliteDatabase =
-  | DrizzleD1Database<typeof schema>
+  | D1BackedDatabase
   | BetterSQLite3Database<typeof schema>;
 
 const articleFields = {
@@ -86,8 +90,8 @@ function compareText(left: string, right: string) {
 
 function isD1Database(
   database: SqliteDatabase,
-): database is DrizzleD1Database<typeof schema> {
-  return "batch" in database;
+): database is D1BackedDatabase {
+  return "batch" in database && "$client" in database;
 }
 
 async function executeAtomically(database: SqliteDatabase, statements: SQL[]) {
@@ -96,9 +100,11 @@ async function executeAtomically(database: SqliteDatabase, statements: SQL[]) {
   }
 
   if (isD1Database(database)) {
-    const queries = statements.map((statement) => database.run(statement));
-    type Query = (typeof queries)[number];
-    await database.batch(queries as [Query, ...Query[]]);
+    const queries = statements.map((statement) => {
+      const query = database.run(statement).getQuery();
+      return database.$client.prepare(query.sql).bind(...query.params);
+    });
+    await database.$client.batch(queries);
     return;
   }
 

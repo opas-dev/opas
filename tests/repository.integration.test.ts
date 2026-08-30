@@ -9,6 +9,8 @@ import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import Database from "better-sqlite3";
 import { drizzle as createSqliteDatabase } from "drizzle-orm/better-sqlite3";
 import { migrate as migrateSqlite } from "drizzle-orm/better-sqlite3/migrator";
+import { drizzle as createD1Database } from "drizzle-orm/d1";
+import type { AnyD1Database } from "drizzle-orm/d1";
 import { drizzle as createPostgresDatabase } from "drizzle-orm/node-postgres";
 import { migrate as migratePostgres } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
@@ -2076,6 +2078,97 @@ test("repository contract passes on local SQLite", async () => {
     await exerciseRepository(harness);
   } finally {
     await harness.close();
+  }
+});
+
+test("SQLite repository uses the native D1 client for atomic statement batches", async () => {
+  type PreparedStatement = {
+    sql: string;
+    parameters: unknown[];
+  };
+
+  const preparedStatements: PreparedStatement[] = [];
+  const batches: PreparedStatement[][] = [];
+  const client = {
+    prepare(sql: string) {
+      return {
+        bind(...parameters: unknown[]) {
+          const statement = { sql, parameters };
+          preparedStatements.push(statement);
+          return statement;
+        },
+      };
+    },
+    async batch(statements: PreparedStatement[]) {
+      batches.push([...statements]);
+      return [];
+    },
+  } as unknown as AnyD1Database;
+  const database = createD1Database(client, { schema: sqliteSchema });
+  const repository = createSqliteRepository(database);
+  const expiredAt = new Date("2026-08-30T12:00:00.000Z");
+
+  await repository.cleanupExpiredAssets("workspace_d1_batch", expiredAt);
+
+  assert.equal(batches.length, 1);
+  assert.equal(batches[0].length, 2);
+  assert.deepEqual(batches[0], preparedStatements);
+  assert.match(
+    preparedStatements[0].sql,
+    /delete from asset_manifests where workspace_id = \? and expires_at <= \?/,
+  );
+  assert.deepEqual(preparedStatements[0].parameters, [
+    "workspace_d1_batch",
+    expiredAt.getTime(),
+  ]);
+  assert.match(preparedStatements[1].sql, /delete from assets/);
+  assert.deepEqual(preparedStatements[1].parameters, ["workspace_d1_batch"]);
+});
+
+test("SQLite repository keeps local atomic statements in one Drizzle transaction", async () => {
+  const client = new Database(":memory:");
+  client.exec(`
+    create table asset_manifests (
+      id text primary key,
+      workspace_id text not null,
+      expires_at integer not null
+    );
+    create table assets (
+      id text primary key,
+      workspace_id text not null
+    );
+    create table article_assets (asset_id text not null);
+    create table asset_manifest_items (asset_id text not null);
+    insert into asset_manifests (id, workspace_id, expires_at)
+      values ('manifest_local_batch', 'workspace_local_batch', 0);
+    insert into assets (id, workspace_id)
+      values ('asset_local_batch', 'workspace_local_batch');
+  `);
+  const database = createSqliteDatabase(client, { schema: sqliteSchema });
+  const runTransaction = database.transaction.bind(database);
+  let transactionCount = 0;
+  database.transaction = ((transaction, config) => {
+    transactionCount += 1;
+    return runTransaction(transaction, config);
+  }) as typeof database.transaction;
+
+  try {
+    await createSqliteRepository(database).cleanupExpiredAssets(
+      "workspace_local_batch",
+      new Date(1),
+    );
+
+    assert.equal(transactionCount, 1);
+    assert.equal(
+      client.prepare("select count(*) as count from asset_manifests").pluck().get(),
+      0,
+    );
+    assert.equal(
+      client.prepare("select count(*) as count from assets").pluck().get(),
+      0,
+    );
+  } finally {
+    client.close();
   }
 });
 
