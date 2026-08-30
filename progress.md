@@ -10,9 +10,9 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** Phase 9 — research and pilot intake
+- **Current phase:** Phase 9 — pilot intake, migration, and authoring
 - **v0.1:** 40 / 40 complete
-- **v0.2:** 1 / 25 complete
+- **v0.2:** 1 / 26 complete
 
 ## Blockers
 None.
@@ -45,6 +45,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-28 | Cloudflare Workers/D1 is the primary production deployment; Vercel/Neon is a live compatibility target using Vercel's `Production` environment | Vercel's environment label must not imply that OPAS traffic, domains, or production ownership moved away from Cloudflare |
 | 2026-08-28 | OPAS Answers v0.2 centers on imported published knowledge, cited answers, explicit abstention, contextual handoff, and a content-gap loop | Competitor research shows this complete loop is the smallest product that creates customer value and can be operated safely; a chat bubble alone is not enough |
 | 2026-08-28 | Start with one portable Orama hybrid retrieval contract; benchmark Cloudflare AI Search but do not require it | OPAS must preserve Docker/Postgres and Vercel/Neon portability, while AI Search remains an open-beta Cloudflare service with future pricing unannounced |
+| 2026-08-30 | Include bounded Markdown-native WYSIWYG authoring in v0.2 | Interested non-technical content owners need to maintain imported knowledge visually, while canonical Markdown, lossless source mode, and the existing server safety boundary preserve portability and control scope |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -113,13 +114,14 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] Feedback widget and view analytics work.
 - [x] Non-goals honored — NOT built: ticketing/inbox, live chat, AI/RAG answers, multi-language, WYSIWYG, plugin system, multi-tenancy, vector search.
 
-## Phase 9 — Research, pilot inputs, and migration
+## Phase 9 — Research, pilot inputs, migration, and authoring
 
 - [x] 9.1 Research current documentation and AI-support competitors; rank the next features, define product boundaries, architecture, packaging, and measurable release gates in [docs/competitive-roadmap.md](docs/competitive-roadmap.md). **Verify:** consequential claims link to current primary sources; the plan names assumptions, limits, implementation order, and explicit non-goals.
 - [ ] 9.2 Collect two or three design partners' source of truth, format, required refresh cadence, and a frozen 50-question fixture: at least 20 answerable, 5 ambiguous, 10 unsupported, 5 stale/conflicting with both represented, and 10 adversarial. **Verify:** every accepted pilot has a versioned source inventory and expected-outcome fixture keyed to source-content hashes with no production secrets or customer personal data; reports always show each class's numerator and denominator.
-- [ ] 9.3 Add the import mapping and storage prerequisites: preserve OPAS's two-level navigation by mapping the first source level to categories, flatten deeper paths into deterministic workspace-unique slugs, add article position, rewrite links, and store allowlisted content-addressed images in cross-dialect binary rows capped at 1 MiB. **Verify:** a nested fixture preserves order and working links with every rename reported; assets survive Docker restart and Cloudflare/Vercel redeploy, serve immutable hashes, and remain below D1's 2 MB row limit.
-- [ ] 9.4 Import Markdown files and ZIP archives, including GitBook `SUMMARY.md`, frontmatter, safe local assets, relative links, and redirect candidates; emit dry-run, rename, conflict, skipped-content, and completion reports. **Verify:** a representative GitBook export imports into an empty workspace without silent loss; path traversal, absolute paths, symlinks, encrypted entries, nested archives, duplicate normalized paths, MIME spoofing, and compressed/expanded/compression-ratio/file-count/per-file/total-size limits are rejected before writes.
+- [ ] 9.3 Add the import mapping and storage prerequisites: preserve OPAS's two-level navigation by mapping the first source level to categories, flatten deeper paths into deterministic workspace-unique slugs, add article position, rewrite links, and store allowlisted content-addressed images in cross-dialect binary rows capped at 1 MiB. Authenticated imports and editor uploads stage assets under expiring manifests, attach referenced hashes atomically on save, and remove unreferenced rows after failure, cancellation, article deletion, or expiry. **Verify:** a nested fixture preserves order and working links with every rename reported; assets survive Docker restart and Cloudflare/Vercel redeploy, serve immutable hashes, remain below D1's 2 MB row limit, and leave no orphan after rollback or cleanup on either dialect; blob/data URLs are rejected.
+- [ ] 9.4 Import Markdown files and ZIP archives, including GitBook `SUMMARY.md`, frontmatter, safe local assets, relative links, and redirect candidates; map allowlisted frontmatter to article fields, strip it before safe-MDX storage, deterministically demote and report secondary H1s, and emit dry-run, rename, conflict, unknown-field, skipped-content, and completion reports. **Verify:** a representative GitBook export imports into an empty workspace without silent loss; precedence conflicts and unknown frontmatter are visible; stored bodies have exactly one title-owned H1 and no frontmatter; path traversal, absolute paths, symlinks, encrypted entries, nested archives, duplicate normalized paths, MIME spoofing, and compressed/expanded/compression-ratio/file-count/per-file/total-size limits are rejected before writes.
 - [ ] 9.5 Make import atomic and recoverable: stage one manifest, validate before activation, reject conflicting slugs deterministically, and leave existing content unchanged on failure. **Verify:** intentionally failed imports roll back articles and assets on both database dialects with no orphans; a successful import renders, searches, exports, and rewrites the expected published pages.
+- [ ] 9.6 Replace raw-text-only article authoring with accessible Visual and Source modes over one canonical safe-MDX value. Define one Markdown compiler/plugin contract shared by editor parsing, validation, preview, Node and workerd rendering, and export; include table support, title-owned H1 serialization, undo/redo, safe paste, keyboard operation, and staged persisted/allowed image insertion. Preserve unsupported valid syntax as an explicit read-only source block or refuse conversion rather than rewriting it, and reject later H1s in Source mode. **Verify:** imported and hand-authored fixtures survive Visual → Source → Visual with semantic equivalence and stable links, tables, lists, code, and images; the same table renders on preview, Docker, Cloudflare/workerd, Vercel, and exported Markdown; title changes keep exactly one matching H1 and later H1s fail validation; hostile pasted HTML and URLs are rejected; failed/deleted/abandoned image operations leave no orphan on either dialect; unsaved existing articles remain byte-for-byte unchanged; keyboard and screen-reader checks pass; public-route bundles exclude editor code; browser and save/publish/export checks pass on Docker, isolated Cloudflare/D1 staging, and Vercel preview/Neon.
 
 ## Phase 10 — Evidence pipeline and retrieval
 
@@ -156,17 +158,19 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Definition of done (v0.2)
 
 - [ ] A representative existing knowledge base imports supported content without manual reauthoring or silent loss; every flatten, rename, and unsupported item is reported.
+- [ ] A non-technical administrator can visually create and maintain an article while Source mode retains portable, validated Markdown without lossy round trips.
 - [ ] Native and embedded assistants stream grounded answers with valid, materially supporting citations and explicit abstention.
 - [ ] A failed answer can hand off by email or webhook with its useful context intact.
 - [ ] Administrators can inspect traces, rerun saved questions, and act on a ranked content-gap queue.
 - [ ] AI provider failure or a hard spend limit never takes down ordinary docs or keyword search.
 - [ ] Public MCP and page actions expose only current published content.
 - [ ] Docker/Postgres, Cloudflare/D1 production, and Vercel/Neon compatibility retain one tested product contract.
-- [ ] Non-goals honored — NOT built: ticketing/inbox, live-agent chat, autonomous actions, broad connectors, WYSIWYG, multi-language, multi-tenancy, private knowledge, or a plugin marketplace.
+- [ ] Non-goals honored — NOT built: ticketing/inbox, live-agent chat, autonomous actions, broad connectors, arbitrary custom-block authoring, real-time collaborative editing, multi-language, multi-tenancy, private knowledge, or a plugin marketplace.
 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-30 — v0.2 scope amendment — moved bounded Markdown-native WYSIWYG authoring into the release with a lossless Visual/Source contract, cross-target acceptance gates, and canonical safe-MDX storage — roadmap wording, status count, definition of done, and explicit non-goals align — this commit
 - 2026-08-28 — 9.1 — researched current documentation platforms and adjacent AI-support products, reconciled pricing and capability evidence, and turned the highest-value gaps into the OPAS Answers v0.2 execution plan — current primary-source links, assumptions, architecture, release gates, limits, packaging, sequencing, and non-goals were audited in `docs/competitive-roadmap.md` — this commit
 - 2026-08-28 — production domain rollout — bound the maintained `opas-mvp` Worker to `demo.opas.dev`, made that Custom Domain authoritative for canonical and discovery URLs, retained workers.dev as a non-canonical fallback, and preserved the protected apex/`www` landing deployment — Cloudflare created the Custom Domain record and certificate; Worker version `dc03e4da-bd42-4c91-98ef-be64808defa6` passed lint, typecheck, the deployment guard suite, OpenNext build, Wrangler dry-run, the complete D1-backed smoke suite on `demo.opas.dev`, and the workers.dev health check — this commit
 - 2026-08-28 — 8.4 — tagged verified checkpoint `34df183` as annotated `v0.1.0` and published the [OPAS v0.1.0 GitHub release](https://github.com/opas-dev/opas/releases/tag/v0.1.0) with the three-target changelog and Cloudflare/D1 identified as primary production — exact tag CI run `33139327166` passed all tests plus Next/OpenNext builds, all seven definition-of-done gates were checked, and final Cloudflare/Vercel live smoke suites passed — this commit

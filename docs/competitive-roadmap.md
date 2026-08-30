@@ -2,6 +2,8 @@
 
 **Decision date:** 2026-08-28
 
+**Amended:** 2026-08-30
+
 **Status:** recommended next release
 
 **Goal:** convert current interest into design-partner usage with a trustworthy answer-and-improvement loop
@@ -12,13 +14,14 @@ Build **OPAS Answers v0.2** around one complete loop:
 
 > Import existing knowledge → retrieve only published evidence → answer with inspectable citations → abstain when evidence is insufficient → offer human contact with context → turn failures into a ranked content-improvement queue.
 
-The release should ship five connected capabilities:
+The release should ship six connected capabilities:
 
 1. Markdown/ZIP and GitBook-export migration with a dry-run report.
-2. Heading-aware chunking, hybrid retrieval, streaming answers, citations, and explicit abstention.
-3. Native docs chat plus an iframe-isolated embeddable widget with page context and email/webhook handoff.
-4. Conversation outcomes, source traces, a saved-question test playground, and a content-gap queue.
-5. Read-only MCP and page actions for agent access.
+2. A Markdown-native WYSIWYG editor with a lossless source mode.
+3. Heading-aware chunking, hybrid retrieval, streaming answers, citations, and explicit abstention.
+4. Native docs chat plus an iframe-isolated embeddable widget with page context and email/webhook handoff.
+5. Conversation outcomes, source traces, a saved-question test playground, and a content-gap queue.
+6. Read-only MCP and page actions for agent access.
 
 This is more valuable than shipping a chat bubble alone. Across the current market, the durable product is a closed quality loop: grounded answer, visible sources, safe failure, human recovery, and evidence about what the documentation still needs.
 
@@ -70,14 +73,15 @@ The proposed v0.2 product has a credible market wedge:
 | ---: | --- | --- | --- |
 | 1 | Grounded chat/RAG | Build in v0.2 | It is the clearest missing customer value and the common paid-platform feature. |
 | 2 | Migration/import | Build in v0.2 | Interested teams will not reauthor their knowledge base to run a pilot. GitBook supports URL, Markdown, HTML, Word, ZIP, and repository imports, which shows how central migration is to activation. [GitBook migration](https://gitbook.com/docs/getting-started/import) |
-| 3 | Embed and handoff | Build in v0.2 | Answers become more valuable inside the customer's product, and handoff makes abstention useful instead of terminal. |
-| 4 | Evaluation and content gaps | Build in v0.2 | Quality must be measurable before real users trust the assistant. Failed questions should improve the knowledge base. |
-| 5 | MCP and page actions | Build in v0.2 | MCP is now present across major docs platforms; OPAS already has most of the source material required. |
-| 6 | Revisions, previews, multiple admins, reviewer role | Build next | These make team authoring safe after the pilot value loop exists. |
-| 7 | GitHub sync and selected connectors | Build next | Freshness matters, but the ingestion and conflict contracts should be proven first. |
-| 8 | Private docs and retrieval ACLs | Later | High value, but a source-authorization bug would be severe. Build only with end-to-end isolation tests. |
-| 9 | OpenAPI reference/playground | Conditional | Move up only if the first design partners are API-first. |
-| 10 | AI writer, translation, adaptive content, autonomous actions | Defer | These broaden risk before answer quality and activation are proven. |
+| 3 | Markdown-native WYSIWYG | Build in v0.2 | Import gets knowledge into OPAS; a visual editor lets non-technical owners keep it correct without sacrificing portable source. |
+| 4 | Embed and handoff | Build in v0.2 | Answers become more valuable inside the customer's product, and handoff makes abstention useful instead of terminal. |
+| 5 | Evaluation and content gaps | Build in v0.2 | Quality must be measurable before real users trust the assistant. Failed questions should improve the knowledge base. |
+| 6 | MCP and page actions | Build in v0.2 | MCP is now present across major docs platforms; OPAS already has most of the source material required. |
+| 7 | Revisions, previews, multiple admins, reviewer role | Build next | These make team authoring safe after the pilot value loop exists. |
+| 8 | GitHub sync and selected connectors | Build next | Freshness matters, but the ingestion and conflict contracts should be proven first. |
+| 9 | Private docs and retrieval ACLs | Later | High value, but a source-authorization bug would be severe. Build only with end-to-end isolation tests. |
+| 10 | OpenAPI reference/playground | Conditional | Move up only if the first design partners are API-first. |
+| 11 | AI writer, translation, adaptive content, autonomous actions | Defer | These broaden risk before answer quality and activation are proven. |
 
 ## Technical direction
 
@@ -85,9 +89,19 @@ The proposed v0.2 product has a credible market wedge:
 
 Keep OPAS's shallow information architecture for v0.2. Map the first GitBook level to categories, flatten deeper paths deterministically into ordered articles, derive workspace-unique slugs from full source paths, rewrite internal links, and report every rename. Add an article position field so the source order survives; do not change the existing public URL contract merely to imitate GitBook's deeper tree.
 
-Imported assets need writable storage, which OPAS does not currently have. The smallest portable v0.2 choice is content-addressed binary rows shared by Postgres and D1, limited to allowlisted image types and 1 MiB per object, served from immutable same-origin URLs with hashes and cache headers. That stays below D1's 2 MB row/BLOB limit. If a real pilot cannot fit this bound, introduce an R2/S3-compatible asset adapter before importing that pilot rather than writing to ephemeral application files. [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
+Imported assets need writable storage, which OPAS does not currently have. The smallest portable v0.2 choice is content-addressed binary rows shared by Postgres and D1, limited to allowlisted image types and 1 MiB per object, served from immutable same-origin URLs with hashes and cache headers. Authenticated imports and editor uploads stage assets under an expiring manifest; a successful article transaction attaches referenced hashes, while failure, cancellation, article deletion, and expiry remove unreferenced rows. Blob and data URLs never become stored article sources. That stays below D1's 2 MB row/BLOB limit. If a real pilot cannot fit this bound, introduce an R2/S3-compatible asset adapter before importing that pilot rather than writing to ephemeral application files. [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
 
 Treat every archive as hostile. Reject path traversal, absolute paths, symlinks, encrypted entries, nested archives, duplicate normalized paths, MIME spoofing, and unsupported types; enforce compressed size, expanded size, compression ratio, file count, per-file, and total-asset limits before writes. Stage an import under one manifest and activate it only after validation so a failed import leaves no visible articles, rewritten links, or orphaned assets.
+
+Frontmatter is import metadata, not stored MDX. Map only an explicit allowlist to corresponding OPAS article fields, strip it before the existing safety validator sees the body, and report every unknown field and every conflict with path, `SUMMARY.md`, or form metadata. Use the first H1 as the title when no stronger mapped title exists; deterministically demote later H1s to H2 during import and report each change. Source-mode saves reject later H1s, preserving exactly one title-owned H1 after import.
+
+### Markdown-native visual authoring
+
+Keep validated Markdown/MDX as the canonical stored value; do not introduce a proprietary editor document format. Replace the raw-text-only article experience with Visual and Source modes backed by one document. Define one Markdown syntax and compiler/plugin contract shared by editor parsing, server validation, preview, Node rendering, workerd rendering, and export; extend it with table support before exposing the table control. The visual surface covers headings, paragraphs, emphasis, links, lists, quotes, code, tables, dividers, and persisted or allowed remote images, with an accessible toolbar and keyboard commands, undo/redo, safe paste, and drag-and-drop asset insertion through the staged asset lifecycle.
+
+The title field owns the article title. Serialization writes exactly one matching level-one heading, and server validation rejects any later H1, so renaming an article cannot leave its body invalid. Switching Visual → Source → Visual must preserve semantic content and stable links. If a valid imported document contains syntax the visual grammar cannot represent losslessly, Visual mode must preserve it as an explicit read-only source block or refuse conversion with a precise message; it must never delete or silently normalize that content. Saving still passes through the existing server-side MDX safety and publication validation boundary.
+
+Select the editor library through a small round-trip and accessibility spike when implementation starts. The acceptance contract matters more than the library: client-only authoring must not enlarge or weaken the public runtime, stored content must remain exportable Markdown, and an existing article must remain byte-for-byte unchanged until the author saves.
 
 ### One portable evidence pipeline
 
@@ -151,8 +165,9 @@ Private sources remain out of v0.2. They require signed viewer identity, source-
 - Capture two or three interested teams' source of truth, format, required refresh cadence, and the frozen 50-question fixture.
 - Add deterministic shallow-navigation mapping, article order, and bounded content-addressed database assets.
 - Import Markdown files and ZIPs, including GitBook `SUMMARY.md`, frontmatter, safe assets, relative links, and redirect candidates.
+- Replace raw-text-only authoring with the Markdown-native Visual/Source editor and prove lossless round trips over imported and hand-authored fixtures.
 - Produce dry-run, rename, conflict, skipped-content, and post-import reports; never silently discard unsupported custom blocks or assets.
-- Verify a representative GitBook export can be imported, rendered, searched, and rolled back after an intentionally failed run.
+- Verify a representative GitBook export can be imported, visually edited, source-edited, rendered, searched, exported, and rolled back after an intentionally failed run.
 
 ### Milestone 1 — Evidence and retrieval
 
@@ -195,11 +210,11 @@ After v0.2 proves adoption and answer quality:
 5. OpenAPI reference/playground if pilot usage shows a developer-docs concentration.
 6. Aggregate AI-agent traffic by family if pilot operators say it changes content or distribution decisions.
 
-Do not schedule SDK generation, full WYSIWYG authoring, real-time collaborative editing, live human chat, a ticket inbox, voice/social channels, autonomous support actions, a large connector catalog, multi-tenancy, or a plugin marketplace before the core loop has retained pilots.
+Do not schedule SDK generation, arbitrary custom-block visual authoring, real-time collaborative editing, live human chat, a ticket inbox, voice/social channels, autonomous support actions, a large connector catalog, multi-tenancy, or a plugin marketplace before the core loop has retained pilots.
 
 ## Packaging
 
-Keep public-content import, retrieval, chat, citations, abstention, embed, read-only MCP, and basic quality analytics in the AGPL core. That is the product wedge, not a teaser.
+Keep public-content import, Markdown-native visual authoring, retrieval, chat, citations, abstention, embed, read-only MCP, and basic quality analytics in the AGPL core. That is the product wedge, not a teaser.
 
 Use hosted or `/ee` packaging for managed inference and credits, organization-wide connectors, private sources, SAML/SCIM, granular RBAC, audit logs and legal holds, managed residency guarantees, multi-brand operation, and SLAs. Core self-hosters retain control over whether conversations are stored and for how long. Start hosted pilots with a flat subscription and included capped AI usage. Outcome-based billing should wait until OPAS has stable outcome semantics and enough data to explain disputed resolutions; current competitors use both per-outcome pricing—[Help Scout at $0.75](https://docs.helpscout.com/article/1746-ai-resolutions-pricing) and [Intercom at $0.99 for standard Fin outcomes](https://www.intercom.com/help/en/articles/8205718-fin-ai-agent-outcomes)—and subscription-plus-credit models.
 

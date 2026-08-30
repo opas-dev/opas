@@ -105,11 +105,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and contributi
 ## Roadmap
 
 - v0.1: shipped across Docker/Postgres, primary Cloudflare/D1 production, and the live Vercel/Neon compatibility target with runtime theming, MDX authoring, search, discovery surfaces, and privacy-light analytics.
-- v0.2 — OPAS Answers: Markdown/GitBook migration, published-source RAG with citations and abstention, native and embeddable chat, support handoff, answer evaluation, content-gap analytics, and read-only MCP.
+- v0.2 — OPAS Answers: Markdown/GitBook migration, Markdown-native WYSIWYG authoring, published-source RAG with citations and abstention, native and embeddable chat, support handoff, answer evaluation, content-gap analytics, and read-only MCP.
 - Next: revisions, signed previews, multiple administrators, review roles, GitHub sync, permission-scoped private knowledge, and demand-backed AI-agent traffic analytics.
 - Commercial edition: managed AI usage, organization connectors, SAML and SCIM, audit logs, advanced permissions, multi-brand operation, and white-label controls in the isolated `/ee` directory.
 
-Ticketing/inbox, live-agent chat, autonomous support actions, multi-language authoring, a WYSIWYG editor, and multi-tenancy remain outside the v0.2 scope.
+Ticketing/inbox, live-agent chat, autonomous support actions, arbitrary custom-block editing, real-time collaboration, multi-language authoring, and multi-tenancy remain outside the v0.2 scope.
 
 ## License
 
