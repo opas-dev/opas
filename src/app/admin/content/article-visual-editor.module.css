@@ -1,0 +1,155 @@
+/* ABOUTME: Adapts the client-only Visual article editor to OPAS product tokens. */
+/* ABOUTME: Keeps authoring typography, controls, and code surfaces calm and accessible. */
+.editor {
+  --accentBase: var(--opas-background);
+  --accentBgSubtle: var(--opas-surface-strong);
+  --accentBg: color-mix(in oklch, var(--opas-primary) 12%, var(--opas-background));
+  --accentBgHover: color-mix(in oklch, var(--opas-primary) 18%, var(--opas-background));
+  --accentBgActive: color-mix(in oklch, var(--opas-primary) 24%, var(--opas-background));
+  --accentLine: color-mix(in oklch, var(--opas-primary) 30%, var(--opas-border));
+  --accentBorder: color-mix(in oklch, var(--opas-primary) 45%, var(--opas-border));
+  --accentBorderHover: var(--opas-primary);
+  --accentSolid: var(--opas-primary);
+  --accentSolidHover: color-mix(in oklch, var(--opas-primary) 88%, black);
+  --accentText: var(--opas-primary);
+  --accentTextContrast: var(--opas-foreground);
+  --basePageBg: var(--opas-background);
+  --baseBase: var(--opas-background);
+  --baseBgSubtle: var(--opas-surface);
+  --baseBg: var(--opas-surface-strong);
+  --baseBgHover: color-mix(in oklch, var(--opas-foreground) 7%, var(--opas-surface));
+  --baseBgActive: color-mix(in oklch, var(--opas-foreground) 11%, var(--opas-surface));
+  --baseLine: var(--opas-border);
+  --baseBorder: var(--opas-border);
+  --baseBorderHover: var(--opas-muted);
+  --baseSolid: var(--opas-muted);
+  --baseSolidHover: var(--opas-foreground);
+  --baseText: var(--opas-muted);
+  --baseTextContrast: var(--opas-foreground);
+  --error-color: var(--opas-danger);
+  --font-body: var(--opas-font-sans);
+  --font-mono: var(--opas-font-mono);
+
+  min-height: 38rem;
+  background: var(--opas-background);
+  color: var(--opas-foreground);
+}
+
+.content {
+  min-height: 34.75rem;
+  padding: 1.25rem;
+  color: var(--opas-foreground);
+  font-family: var(--opas-font-sans);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.content > :first-child {
+  margin-top: 0;
+}
+
+.content h2,
+.content h3,
+.content h4,
+.content h5,
+.content h6 {
+  margin-block: 1.75em 0.65em;
+  color: var(--opas-foreground);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.content h2 {
+  font-size: 1.5rem;
+}
+
+.content h3 {
+  font-size: 1.25rem;
+}
+
+.content p,
+.content li {
+  max-width: 70ch;
+  text-wrap: pretty;
+}
+
+.content a {
+  color: var(--opas-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.content blockquote {
+  margin-inline: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--opas-border);
+  border-radius: var(--opas-radius-md);
+  background: var(--opas-surface-strong);
+}
+
+.content code {
+  border-radius: var(--opas-radius-sm);
+  background: var(--opas-code-background);
+  color: var(--opas-code-foreground);
+  font-family: var(--opas-font-mono);
+}
+
+.content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--opas-radius-md);
+}
+
+.plainCodeBlock {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--opas-border);
+  border-radius: var(--opas-radius-md);
+  background: var(--opas-code-background);
+}
+
+.plainCodeMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.plainCodeMeta input {
+  min-height: 2.25rem;
+  min-width: 8rem;
+  flex: 1 1 8rem;
+  border: 1px solid color-mix(in oklch, var(--opas-code-foreground) 30%, transparent);
+  border-radius: var(--opas-radius-sm);
+  background: transparent;
+  color: var(--opas-code-foreground);
+  padding-inline: 0.625rem;
+  font-family: var(--opas-font-mono);
+  font-size: 0.75rem;
+}
+
+.plainCodeBlock textarea {
+  min-height: 9rem;
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  color: var(--opas-code-foreground);
+  font-family: var(--opas-font-mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  outline: none;
+}
+
+@media (max-width: 40rem) {
+  .editor {
+    min-height: 31rem;
+  }
+
+  .content {
+    min-height: 27.75rem;
+    padding: 1rem;
+  }
+}

@@ -12,6 +12,7 @@ export type Article = {
   status: ArticleStatus;
   isFaq: boolean;
   authorName: string;
+  position: number;
   publishedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -19,7 +20,41 @@ export type Article = {
 
 export type PublishedArticle = Omit<Article, "status">;
 
-export type ArticleSubmission = Omit<Article, "createdAt" | "updatedAt">;
+export type ArticleSubmission = Omit<Article, "createdAt" | "updatedAt" | "position"> & {
+  position?: number;
+};
+
+export type AssetMediaType =
+  | "image/gif"
+  | "image/jpeg"
+  | "image/png"
+  | "image/webp";
+
+export type Asset = {
+  workspaceId: string;
+  hash: string;
+  mediaType: AssetMediaType;
+  byteSize: number;
+  content: Uint8Array;
+  createdAt: Date;
+};
+
+export type AssetUpload = {
+  mediaType: string;
+  content: Uint8Array;
+};
+
+export type AssetManifest = {
+  id: string;
+  workspaceId: string;
+  expiresAt: Date;
+  createdAt: Date;
+};
+
+export type ArticleAssetSelection = {
+  manifestId?: string;
+  hashes: readonly string[];
+};
 
 export type Category = {
   id: string;
@@ -28,6 +63,23 @@ export type Category = {
   name: string;
   description: string | null;
   position: number;
+};
+
+export type KnowledgeImportCategory = Omit<Category, "workspaceId">;
+
+export type KnowledgeImportArticle = Omit<
+  ArticleSubmission,
+  "workspaceId" | "position"
+> & {
+  position: number;
+  assetHashes: readonly string[];
+};
+
+export type KnowledgeImport = {
+  workspaceId: string;
+  manifestId: string;
+  categories: readonly KnowledgeImportCategory[];
+  articles: readonly KnowledgeImportArticle[];
 };
 
 export type Theme = {
@@ -95,9 +147,21 @@ export type Repository = {
   deleteCategory(workspaceId: string, id: string): Promise<boolean>;
   listArticles(workspaceId: string): Promise<Article[]>;
   getArticle(workspaceId: string, id: string): Promise<Article | null>;
-  createArticle(article: ArticleSubmission): Promise<void>;
-  updateArticle(article: ArticleSubmission): Promise<void>;
+  createArticle(article: ArticleSubmission, assets?: ArticleAssetSelection): Promise<void>;
+  updateArticle(article: ArticleSubmission, assets?: ArticleAssetSelection): Promise<void>;
   deleteArticle(workspaceId: string, id: string): Promise<void>;
+  createAssetManifest(workspaceId: string, expiresAt: Date): Promise<AssetManifest>;
+  stageAsset(
+    workspaceId: string,
+    manifestId: string,
+    upload: AssetUpload,
+  ): Promise<Asset>;
+  getAsset(workspaceId: string, hash: string): Promise<Asset | null>;
+  getPublishedAsset(workspaceId: string, hash: string): Promise<Asset | null>;
+  listArticleAssetHashes(workspaceId: string, articleId: string): Promise<string[]>;
+  discardAssetManifest(workspaceId: string, manifestId: string): Promise<void>;
+  cleanupExpiredAssets(workspaceId: string, expiredAt: Date): Promise<void>;
+  activateKnowledgeImport(knowledgeImport: KnowledgeImport): Promise<void>;
   getTheme(workspaceId: string): Promise<Theme | null>;
   updateTheme(theme: ThemeUpdate): Promise<void>;
   getAnalytics(workspaceId: string): Promise<Analytics>;

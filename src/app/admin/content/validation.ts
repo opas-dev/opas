@@ -2,6 +2,9 @@
 // ABOUTME: Converts untrusted form values into the fixed single-workspace content contract.
 import { z } from "zod";
 
+import { isAssetManifestId } from "@/assets/identity";
+import { articleTitleHeadingIssue } from "@/content/runtime-mdx-plugins";
+
 const identifierSchema = z
   .string()
   .trim()
@@ -66,6 +69,10 @@ const articleFields = {
     .trim()
     .min(1, "Enter an author name")
     .max(100, "Author names must be 100 characters or fewer"),
+  assetManifestId: z
+    .string()
+    .refine(isAssetManifestId, "The asset manifest is invalid")
+    .optional(),
 };
 
 const articleRequestSchema = z
@@ -74,17 +81,12 @@ const articleRequestSchema = z
     z.strictObject({ mode: z.literal("update"), id: identifierSchema, ...articleFields }),
   ])
   .superRefine((article, context) => {
-    const firstContentLine = article.mdx
-      .replace(/^\uFEFF/, "")
-      .split(/\r?\n/)
-      .find((line) => line.trim().length > 0)
-      ?.trim();
-
-    if (firstContentLine !== `# ${article.title}`) {
+    const headingIssue = articleTitleHeadingIssue(article.mdx, article.title);
+    if (headingIssue) {
       context.addIssue({
         code: "custom",
         path: ["mdx"],
-        message: "Start the MDX with a level-one heading that exactly matches the article title",
+        message: headingIssue,
       });
     }
   });
@@ -107,7 +109,8 @@ export type ContentFieldErrors = Partial<
     | "mdx"
     | "status"
     | "isFaq"
-    | "authorName",
+    | "authorName"
+    | "assetManifestId",
     string
   >
 >;
@@ -155,6 +158,7 @@ const contentFieldNames = {
   status: true,
   isFaq: true,
   authorName: true,
+  assetManifestId: true,
 } as const;
 
 function parseRequest<T>(

@@ -1,16 +1,31 @@
 // ABOUTME: Implements the OPAS repository for Postgres-compatible Drizzle databases.
 // ABOUTME: Shares identical queries between Docker Postgres and Neon deployments.
 import { and, asc, count, eq, gte, lt, notExists, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import { articleEventRetentionStart } from "@/analytics/records";
-import type { Repository } from "@/db/repository";
+import {
+  AssetValidationError,
+  prepareAsset,
+  prepareAssetSelection,
+} from "@/db/assets";
+import type {
+  ArticleAssetSelection,
+  ArticleSubmission,
+  KnowledgeImport,
+  KnowledgeImportArticle,
+  Repository,
+} from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
 import {
   articleFeedback,
+  articleAssets,
   articles,
   articleViews,
+  assetManifests,
+  assets,
   categories,
   searchMisses,
   themes,
@@ -31,6 +46,7 @@ const articleFields = {
   status: articles.status,
   isFaq: articles.isFaq,
   authorName: articles.authorName,
+  position: articles.position,
   publishedAt: articles.publishedAt,
   createdAt: articles.createdAt,
   updatedAt: articles.updatedAt,
@@ -45,6 +61,7 @@ const publishedArticleFields = {
   mdx: articles.mdx,
   isFaq: articles.isFaq,
   authorName: articles.authorName,
+  position: articles.position,
   publishedAt: articles.publishedAt,
   createdAt: articles.createdAt,
   updatedAt: articles.updatedAt,
@@ -65,6 +82,278 @@ function compareText(left: string, right: string) {
   }
 
   return 0;
+}
+
+function isNeonDatabase(
+  database: PostgresDatabase,
+): database is NeonHttpDatabase<typeof schema> {
+  return "batch" in database;
+}
+
+async function executeAtomically(database: PostgresDatabase, statements: SQL[]) {
+  if (statements.length === 0) {
+    return;
+  }
+
+  if (isNeonDatabase(database)) {
+    const queries = statements.map((statement) => database.execute(statement));
+    type Query = (typeof queries)[number];
+    await database.batch(queries as [Query, ...Query[]]);
+    return;
+  }
+
+  await database.transaction(async (transaction) => {
+    for (const statement of statements) {
+      await transaction.execute(statement);
+    }
+  });
+}
+
+function orphanAssetCleanup(workspaceId: string) {
+  return sql`
+    delete from assets
+    where workspace_id = ${workspaceId}
+      and not exists (
+        select 1 from article_assets where article_assets.asset_id = assets.id
+      )
+      and not exists (
+        select 1 from asset_manifest_items where asset_manifest_items.asset_id = assets.id
+      )
+  `;
+}
+
+function discardManifestStatements(workspaceId: string, manifestId: string) {
+  return [
+    sql`delete from asset_manifests where id = ${manifestId} and workspace_id = ${workspaceId}`,
+    orphanAssetCleanup(workspaceId),
+  ];
+}
+
+function articleAttachmentStatements(
+  article: ArticleSubmission,
+  selection: ArticleAssetSelection,
+  checkedAt: Date,
+) {
+  const { manifestId, hashes } = prepareAssetSelection(selection);
+  const serializedHashes = JSON.stringify(hashes);
+  const attachedAssets = sql`
+    with requested(hash) as (
+      select distinct value
+      from jsonb_array_elements_text(${serializedHashes}::jsonb)
+    ),
+    allowed(asset_id, hash) as (
+      select assets.id, assets.hash
+      from assets
+      inner join requested on requested.hash = assets.hash
+      where assets.workspace_id = ${article.workspaceId}
+        and (
+          exists (
+            select 1
+            from article_assets
+            where article_assets.article_id = ${article.id}
+              and article_assets.workspace_id = ${article.workspaceId}
+              and article_assets.asset_id = assets.id
+          )
+          or exists (
+            select 1
+            from asset_manifests
+            inner join asset_manifest_items
+              on asset_manifest_items.manifest_id = asset_manifests.id
+             and asset_manifest_items.workspace_id = asset_manifests.workspace_id
+            where asset_manifests.id = ${manifestId ?? null}
+              and asset_manifests.workspace_id = ${article.workspaceId}
+              and asset_manifests.expires_at > ${checkedAt}
+              and asset_manifest_items.asset_id = assets.id
+          )
+        )
+    ),
+    attachment_rows(article_id, asset_id, workspace_id) as (
+      select ${article.id}, allowed.asset_id, ${article.workspaceId}
+      from allowed
+      union all
+      select ${article.id}, null::text, ${article.workspaceId}
+      where not exists (
+        select 1 from articles
+        where articles.id = ${article.id}
+          and articles.workspace_id = ${article.workspaceId}
+      )
+        or (select count(*) from requested) <> (select count(*) from allowed)
+        or (
+          ${manifestId ?? null}::text is not null
+          and not exists (
+            select 1 from asset_manifests
+            where asset_manifests.id = ${manifestId ?? null}
+              and asset_manifests.workspace_id = ${article.workspaceId}
+              and asset_manifests.expires_at > ${checkedAt}
+          )
+        )
+    )
+    insert into article_assets (article_id, asset_id, workspace_id)
+    select article_id, asset_id, workspace_id from attachment_rows
+    on conflict do nothing
+  `;
+  const removedAssets = sql`
+    with requested(hash) as (
+      select distinct value
+      from jsonb_array_elements_text(${serializedHashes}::jsonb)
+    )
+    delete from article_assets
+    where article_id = ${article.id}
+      and workspace_id = ${article.workspaceId}
+      and not exists (
+        select 1
+        from assets
+        inner join requested on requested.hash = assets.hash
+        where assets.id = article_assets.asset_id
+          and assets.workspace_id = article_assets.workspace_id
+      )
+  `;
+
+  return [
+    attachedAssets,
+    removedAssets,
+    ...(manifestId
+      ? [
+          sql`delete from asset_manifests where id = ${manifestId} and workspace_id = ${article.workspaceId}`,
+        ]
+      : []),
+    orphanAssetCleanup(article.workspaceId),
+  ];
+}
+
+function validImportManifestStatement(
+  workspaceId: string,
+  manifestId: string,
+  checkedAt: Date,
+) {
+  return sql`
+    insert into asset_manifest_items (manifest_id, asset_id, workspace_id)
+    select null, null, ${workspaceId}
+    where not exists (
+      select 1
+      from asset_manifests
+      where id = ${manifestId}
+        and workspace_id = ${workspaceId}
+        and expires_at > ${checkedAt}
+    )
+  `;
+}
+
+function validImportCategoryStatement(
+  workspaceId: string,
+  categoryId: string,
+) {
+  return sql`
+    insert into asset_manifest_items (manifest_id, asset_id, workspace_id)
+    select null, null, ${workspaceId}
+    where not exists (
+      select 1
+      from categories
+      where id = ${categoryId}
+        and workspace_id = ${workspaceId}
+    )
+  `;
+}
+
+function importArticleAttachmentStatement(
+  workspaceId: string,
+  manifestId: string,
+  article: KnowledgeImportArticle,
+  checkedAt: Date,
+) {
+  const { hashes } = prepareAssetSelection({ hashes: article.assetHashes });
+  const serializedHashes = JSON.stringify(hashes);
+
+  return sql`
+    with requested(hash) as (
+      select distinct value
+      from jsonb_array_elements_text(${serializedHashes}::jsonb)
+    ),
+    allowed(asset_id, hash) as (
+      select assets.id, assets.hash
+      from assets
+      inner join requested on requested.hash = assets.hash
+      inner join asset_manifest_items
+        on asset_manifest_items.asset_id = assets.id
+       and asset_manifest_items.workspace_id = assets.workspace_id
+      inner join asset_manifests
+        on asset_manifests.id = asset_manifest_items.manifest_id
+       and asset_manifests.workspace_id = asset_manifest_items.workspace_id
+      where assets.workspace_id = ${workspaceId}
+        and asset_manifests.id = ${manifestId}
+        and asset_manifests.expires_at > ${checkedAt}
+    ),
+    attachment_rows(article_id, asset_id, workspace_id) as (
+      select ${article.id}, allowed.asset_id, ${workspaceId}
+      from allowed
+      union all
+      select null::text, null::text, ${workspaceId}
+      where not exists (
+        select 1
+        from articles
+        where id = ${article.id}
+          and workspace_id = ${workspaceId}
+      )
+        or (select count(*) from requested) <> (select count(*) from allowed)
+    )
+    insert into article_assets (article_id, asset_id, workspace_id)
+    select article_id, asset_id, workspace_id from attachment_rows
+    on conflict do nothing
+  `;
+}
+
+function knowledgeImportStatements(
+  database: PostgresDatabase,
+  knowledgeImport: KnowledgeImport,
+  checkedAt: Date,
+) {
+  const { workspaceId, manifestId } = knowledgeImport;
+  const statements: SQL[] = [
+    validImportManifestStatement(workspaceId, manifestId, checkedAt),
+  ];
+
+  for (const category of knowledgeImport.categories) {
+    statements.push(
+      database
+        .insert(categories)
+        .values({ ...category, workspaceId })
+        .getSQL(),
+    );
+  }
+
+  for (const article of knowledgeImport.articles) {
+    statements.push(
+      validImportCategoryStatement(workspaceId, article.categoryId),
+      database
+        .insert(articles)
+        .values({
+          id: article.id,
+          workspaceId,
+          categoryId: article.categoryId,
+          slug: article.slug,
+          title: article.title,
+          mdx: article.mdx,
+          status: article.status,
+          isFaq: article.isFaq,
+          authorName: article.authorName,
+          position: article.position,
+          publishedAt: article.publishedAt,
+        })
+        .getSQL(),
+      importArticleAttachmentStatement(
+        workspaceId,
+        manifestId,
+        article,
+        checkedAt,
+      ),
+    );
+  }
+
+  statements.push(
+    sql`delete from asset_manifests where id = ${manifestId} and workspace_id = ${workspaceId}`,
+    orphanAssetCleanup(workspaceId),
+  );
+  return statements;
 }
 
 export function createPostgresRepository(database: PostgresDatabase): Repository {
@@ -93,8 +382,14 @@ export function createPostgresRepository(database: PostgresDatabase): Repository
       return database
         .select(publishedArticleFields)
         .from(articles)
+        .innerJoin(categories, eq(articles.categoryId, categories.id))
         .where(and(eq(articles.workspaceId, workspaceId), eq(articles.status, "published")))
-        .orderBy(asc(articles.title), asc(articles.id));
+        .orderBy(
+          asc(categories.position),
+          asc(categories.id),
+          asc(articles.position),
+          asc(articles.id),
+        );
     },
 
     async listCategories(workspaceId) {
@@ -157,8 +452,14 @@ export function createPostgresRepository(database: PostgresDatabase): Repository
       return database
         .select(articleFields)
         .from(articles)
+        .innerJoin(categories, eq(articles.categoryId, categories.id))
         .where(eq(articles.workspaceId, workspaceId))
-        .orderBy(asc(articles.title), asc(articles.id));
+        .orderBy(
+          asc(categories.position),
+          asc(categories.id),
+          asc(articles.position),
+          asc(articles.id),
+        );
     },
 
     async getArticle(workspaceId, id) {
@@ -171,12 +472,41 @@ export function createPostgresRepository(database: PostgresDatabase): Repository
       return article ?? null;
     },
 
-    async createArticle(article) {
-      await database.insert(articles).values(article);
+    async createArticle(article, assetSelection) {
+      const insert = database
+        .insert(articles)
+        .values({ ...article, position: article.position ?? 0 });
+
+      if (!assetSelection) {
+        await insert;
+        return;
+      }
+
+      try {
+        await executeAtomically(database, [
+          insert.getSQL(),
+          ...articleAttachmentStatements(article, assetSelection, new Date()),
+        ]);
+      } catch (error) {
+        if (assetSelection.manifestId) {
+          try {
+            await executeAtomically(
+              database,
+              discardManifestStatements(article.workspaceId, assetSelection.manifestId),
+            );
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [error, cleanupError],
+              "The article save and staged asset cleanup both failed.",
+            );
+          }
+        }
+        throw error;
+      }
     },
 
-    async updateArticle(article) {
-      await database
+    async updateArticle(article, assetSelection) {
+      const update = database
         .update(articles)
         .set({
           categoryId: article.categoryId,
@@ -186,18 +516,210 @@ export function createPostgresRepository(database: PostgresDatabase): Repository
           status: article.status,
           isFaq: article.isFaq,
           authorName: article.authorName,
+          position: article.position,
           publishedAt: article.publishedAt,
           updatedAt: new Date(),
         })
         .where(
           and(eq(articles.workspaceId, article.workspaceId), eq(articles.id, article.id)),
         );
+
+      if (!assetSelection) {
+        await update;
+        return;
+      }
+
+      try {
+        await executeAtomically(database, [
+          update.getSQL(),
+          ...articleAttachmentStatements(article, assetSelection, new Date()),
+        ]);
+      } catch (error) {
+        if (assetSelection.manifestId) {
+          try {
+            await executeAtomically(
+              database,
+              discardManifestStatements(article.workspaceId, assetSelection.manifestId),
+            );
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [error, cleanupError],
+              "The article save and staged asset cleanup both failed.",
+            );
+          }
+        }
+        throw error;
+      }
     },
 
     async deleteArticle(workspaceId, id) {
-      await database
-        .delete(articles)
-        .where(and(eq(articles.workspaceId, workspaceId), eq(articles.id, id)));
+      await executeAtomically(database, [
+        sql`delete from articles where workspace_id = ${workspaceId} and id = ${id}`,
+        orphanAssetCleanup(workspaceId),
+      ]);
+    },
+
+    async createAssetManifest(workspaceId, expiresAt) {
+      const createdAt = new Date();
+      if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= createdAt) {
+        throw new AssetValidationError("Asset manifests must expire in the future.");
+      }
+
+      const manifest = {
+        id: `asset_manifest_${crypto.randomUUID()}`,
+        workspaceId,
+        expiresAt,
+        createdAt,
+      };
+      await database.insert(assetManifests).values(manifest);
+      return manifest;
+    },
+
+    async stageAsset(workspaceId, manifestId, upload) {
+      const prepared = await prepareAsset(upload);
+      const assetId = `asset_${crypto.randomUUID()}`;
+      const checkedAt = new Date();
+      const insert = database
+        .insert(assets)
+        .values({ id: assetId, workspaceId, ...prepared })
+        .onConflictDoNothing({ target: [assets.workspaceId, assets.hash] });
+      const attach = sql`
+        with valid(manifest_id, asset_id, workspace_id) as (
+          select asset_manifests.id, assets.id, asset_manifests.workspace_id
+          from asset_manifests
+          inner join assets on assets.workspace_id = asset_manifests.workspace_id
+          where asset_manifests.id = ${manifestId}
+            and asset_manifests.workspace_id = ${workspaceId}
+            and asset_manifests.expires_at > ${checkedAt}
+            and assets.hash = ${prepared.hash}
+            and assets.media_type = ${prepared.mediaType}
+            and assets.byte_size = ${prepared.byteSize}
+        ),
+        manifest_rows(manifest_id, asset_id, workspace_id) as (
+          select manifest_id, asset_id, workspace_id from valid
+          union all
+          select null::text, null::text, ${workspaceId}
+          where not exists (select 1 from valid)
+        )
+        insert into asset_manifest_items (manifest_id, asset_id, workspace_id)
+        select manifest_id, asset_id, workspace_id from manifest_rows
+        on conflict do nothing
+      `;
+
+      await executeAtomically(database, [insert.getSQL(), attach]);
+      const asset = await this.getAsset(workspaceId, prepared.hash);
+      if (!asset) {
+        throw new Error("The staged asset could not be read after storage.");
+      }
+      return asset;
+    },
+
+    async getAsset(workspaceId, hash) {
+      const [asset] = await database
+        .select({
+          workspaceId: assets.workspaceId,
+          hash: assets.hash,
+          mediaType: assets.mediaType,
+          byteSize: assets.byteSize,
+          content: assets.content,
+          createdAt: assets.createdAt,
+        })
+        .from(assets)
+        .where(and(eq(assets.workspaceId, workspaceId), eq(assets.hash, hash)))
+        .limit(1);
+
+      return asset ? { ...asset, content: new Uint8Array(asset.content) } : null;
+    },
+
+    async getPublishedAsset(workspaceId, hash) {
+      const [asset] = await database
+        .select({
+          workspaceId: assets.workspaceId,
+          hash: assets.hash,
+          mediaType: assets.mediaType,
+          byteSize: assets.byteSize,
+          content: assets.content,
+          createdAt: assets.createdAt,
+        })
+        .from(assets)
+        .innerJoin(
+          articleAssets,
+          and(
+            eq(articleAssets.assetId, assets.id),
+            eq(articleAssets.workspaceId, assets.workspaceId),
+          ),
+        )
+        .innerJoin(
+          articles,
+          and(
+            eq(articles.id, articleAssets.articleId),
+            eq(articles.workspaceId, articleAssets.workspaceId),
+          ),
+        )
+        .where(
+          and(
+            eq(assets.workspaceId, workspaceId),
+            eq(assets.hash, hash),
+            eq(articles.status, "published"),
+          ),
+        )
+        .limit(1);
+
+      return asset ? { ...asset, content: new Uint8Array(asset.content) } : null;
+    },
+
+    async listArticleAssetHashes(workspaceId, articleId) {
+      const rows = await database
+        .select({ hash: assets.hash })
+        .from(articleAssets)
+        .innerJoin(assets, eq(articleAssets.assetId, assets.id))
+        .where(
+          and(
+            eq(articleAssets.workspaceId, workspaceId),
+            eq(articleAssets.articleId, articleId),
+          ),
+        )
+        .orderBy(asc(assets.hash));
+      return rows.map(({ hash }) => hash);
+    },
+
+    async discardAssetManifest(workspaceId, manifestId) {
+      await executeAtomically(
+        database,
+        discardManifestStatements(workspaceId, manifestId),
+      );
+    },
+
+    async cleanupExpiredAssets(workspaceId, expiredAt) {
+      await executeAtomically(database, [
+        sql`delete from asset_manifests where workspace_id = ${workspaceId} and expires_at <= ${expiredAt}`,
+        orphanAssetCleanup(workspaceId),
+      ]);
+    },
+
+    async activateKnowledgeImport(knowledgeImport) {
+      try {
+        await executeAtomically(
+          database,
+          knowledgeImportStatements(database, knowledgeImport, new Date()),
+        );
+      } catch (error) {
+        try {
+          await executeAtomically(
+            database,
+            discardManifestStatements(
+              knowledgeImport.workspaceId,
+              knowledgeImport.manifestId,
+            ),
+          );
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            "The knowledge import and staged asset cleanup both failed.",
+          );
+        }
+        throw error;
+      }
     },
 
     async getTheme(workspaceId) {

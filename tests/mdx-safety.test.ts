@@ -1,12 +1,17 @@
-// ABOUTME: Verifies that database-backed article MDX cannot introduce executable code.
-// ABOUTME: Guards the parser-based component, expression, module, and URL allowlists.
+// ABOUTME: Verifies the shared article syntax and executable-code safety contract.
+// ABOUTME: Guards GFM parity plus component, expression, module, heading, and URL policies.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   ArticleMdxValidationError,
   validateArticleMdx,
 } from "@/content/mdx-safety";
+import {
+  articleMdxCompiler,
+  parseArticleMarkdown,
+} from "@/content/runtime-mdx-plugins";
 
 async function rejectsArticleMdx(source: string, message: RegExp) {
   await assert.rejects(validateArticleMdx(source), (error: unknown) => {
@@ -30,6 +35,66 @@ export const value = <Unsafe run={globalThis.alert(1)} />;
 `;
 
   assert.equal(await validateArticleMdx(source), source);
+});
+
+test("the shared syntax contract gives Node and browser compilation identical GFM tables", async () => {
+  const source = `# Support matrix
+
+| Channel | Available |
+| :-- | --: |
+| Email | Yes |
+| Phone | No |
+`;
+  const tree = parseArticleMarkdown(source);
+  const table = tree.children.find((node) => node.type === "table");
+
+  assert.ok(table);
+  assert.deepEqual(table.align, ["left", "right"]);
+  assert.equal(await validateArticleMdx(source, "Support matrix"), source);
+
+  const compiler = await articleMdxCompiler;
+  const { body: NodeArticle } = await compiler.compile({ source });
+  const nodeHtml = renderToStaticMarkup(await NodeArticle({}));
+  const compiled = String(await compiler.compileFile(source));
+  const { default: BrowserArticle } = await compiler.render(compiled);
+  const browserHtml = renderToStaticMarkup(await BrowserArticle({}));
+
+  assert.equal(browserHtml, nodeHtml);
+  assert.match(nodeHtml, /<table>/u);
+  assert.match(nodeHtml, /<th style="text-align:left">Channel<\/th>/u);
+  assert.match(nodeHtml, /<td style="text-align:right">Yes<\/td>/u);
+});
+
+test("title validation rejects missing, displaced, mismatched, and secondary H1 headings", async () => {
+  const bomSource = "\uFEFF# Support matrix\r\n\r\nAnswer.\r\n";
+  assert.equal(await validateArticleMdx(bomSource, "Support matrix"), bomSource);
+
+  const cases = [
+    {
+      source: "## Support matrix\n\nNo title heading.",
+      message: /exactly one level-one heading/u,
+    },
+    {
+      source: "## Before the title\n\n# Support matrix",
+      message: /first content block/u,
+    },
+    {
+      source: "Intro before the title.\n\n# Support matrix",
+      message: /first content block/u,
+    },
+    {
+      source: "# Another title\n\nAnswer.",
+      message: /exactly match the article title/u,
+    },
+    {
+      source: "# Support matrix\n\nAnswer.\n\n# Another title",
+      message: /exactly one level-one heading/u,
+    },
+  ];
+
+  for (const { source, message } of cases) {
+    await assert.rejects(validateArticleMdx(source, "Support matrix"), message);
+  }
 });
 
 test("module imports and exports are rejected", async () => {

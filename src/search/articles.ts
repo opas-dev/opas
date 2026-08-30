@@ -86,6 +86,7 @@ function snapshotSignature(
         status: "status" in article ? article.status : "published",
         isFaq: article.isFaq,
         authorName: article.authorName,
+        position: article.position,
         publishedAt: timestamp(article.publishedAt),
         createdAt: timestamp(article.createdAt),
         updatedAt: timestamp(article.updatedAt),

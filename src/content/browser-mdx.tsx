@@ -1,16 +1,40 @@
 // ABOUTME: Executes sanitized compiled MDX in the browser for the Cloudflare D1 target.
-// ABOUTME: Keeps request-time dynamic evaluation out of workerd while preserving live content.
+// ABOUTME: Maps private preview assets without changing canonical stored content.
 "use client";
 
 import { executeMdx } from "@fumadocs/mdx-remote/client";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useEffect, useState } from "react";
 
+import { authenticatedAssetUrl } from "@/assets/identity";
+
 type BrowserMdxProps = {
+  authenticatedAssets?: boolean;
   compiled: string;
 };
 
-export function BrowserMdx({ compiled }: BrowserMdxProps) {
+function AuthenticatedImage({ alt = "", src, ...props }: ComponentProps<"img">) {
+  return (
+    // MDX images have author-controlled intrinsic dimensions, so Next Image cannot size them safely.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      {...props}
+      alt={alt}
+      src={typeof src === "string" ? authenticatedAssetUrl(src) : src}
+    />
+  );
+}
+
+function AuthenticatedLink({ href, ...props }: ComponentProps<"a">) {
+  return (
+    <a
+      {...props}
+      href={typeof href === "string" ? authenticatedAssetUrl(href) : href}
+    />
+  );
+}
+
+export function BrowserMdx({ authenticatedAssets = false, compiled }: BrowserMdxProps) {
   const [content, setContent] = useState<ReactNode>(
     <p className="mdx-runtime-status" role="status">
       Rendering this answer…
@@ -22,7 +46,11 @@ export function BrowserMdx({ compiled }: BrowserMdxProps) {
 
     executeMdx(compiled)
       .then(async (module) => {
-        const rendered = await module.default({});
+        const rendered = await module.default(
+          authenticatedAssets
+            ? { components: { a: AuthenticatedLink, img: AuthenticatedImage } }
+            : {},
+        );
 
         if (active) {
           setContent(rendered);
@@ -41,7 +69,7 @@ export function BrowserMdx({ compiled }: BrowserMdxProps) {
     return () => {
       active = false;
     };
-  }, [compiled]);
+  }, [authenticatedAssets, compiled]);
 
   return content;
 }

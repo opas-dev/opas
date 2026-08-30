@@ -59,6 +59,7 @@ function publishedArticle(
 Open **Settings** and choose Security.`,
     isFaq: true,
     authorName: "Ada Lovelace",
+    position: 0,
     publishedAt,
     createdAt,
     updatedAt,
@@ -141,6 +142,44 @@ test("normalizes article Markdown and derives plain, concise publication text", 
   assert.doesNotMatch(description, /[*#]/);
 });
 
+test("keeps GFM table semantics intact in article and aggregate Markdown exports", () => {
+  const source = `# Support matrix
+
+| Channel | Available |
+| :-- | --: |
+| Email | Yes |
+| Phone | No |`;
+  const tableArticle = publication(
+    publishedArticle({
+      title: "Support matrix",
+      slug: "support-matrix",
+      mdx: source,
+      isFaq: false,
+    }),
+  );
+
+  assert.equal(tableArticle.markdown, `${source}\n`);
+  assert.equal(
+    tableArticle.bodyMarkdown,
+    `| Channel | Available |
+| :-- | --: |
+| Email | Yes |
+| Phone | No |`,
+  );
+  assert.equal(tableArticle.plainText, "Channel Available Email Yes Phone No");
+  assert.equal(
+    llmsFullText([tableArticle], siteUrl),
+    `# Support matrix
+Source: ${siteUrl}/account-guides/support-matrix
+
+| Channel | Available |
+| :-- | --: |
+| Email | Yes |
+| Phone | No |
+`,
+  );
+});
+
 test("joins only published safe records from the requested workspace in stable order", () => {
   const billingCategory = category({
     id: "category_billing",
@@ -164,7 +203,14 @@ test("joins only published safe records from the requested workspace in stable o
       }),
     ],
     articles: [
-      publishedArticle(),
+      publishedArticle({ position: 5 }),
+      publishedArticle({
+        id: "article_account_first",
+        slug: "account-first",
+        title: "Account first",
+        mdx: "# Account first\n\nOrdered before the reset article.",
+        position: 1,
+      }),
       publishedArticle({
         id: "article_billing",
         categoryId: billingCategory.id,
@@ -195,6 +241,11 @@ test("joins only published safe records from the requested workspace in stable o
         id: "article_billing",
         path: "/billing/read-an-invoice",
         markdownPath: "/billing/read-an-invoice.md",
+      },
+      {
+        id: "article_account_first",
+        path: "/account-guides/account-first",
+        markdownPath: "/account-guides/account-first.md",
       },
       {
         id: "article_reset",

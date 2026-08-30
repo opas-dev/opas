@@ -1,8 +1,8 @@
 // ABOUTME: Projects database articles into safe public metadata and agent-readable documents.
 // ABOUTME: Keeps SEO, Markdown, and llms outputs deterministic across database dialects.
-import { fromMarkdown } from "mdast-util-from-markdown";
 import { toString } from "mdast-util-to-string";
 
+import { parseArticleMarkdown } from "@/content/runtime-mdx-plugins";
 import type { Article, Category, PublishedArticle } from "@/db/repository";
 import {
   absoluteSiteUrl,
@@ -59,6 +59,23 @@ function markdownText(value: string) {
   return collapseWhitespace(value).replace(/([\\\[\]])/gu, "\\$1");
 }
 
+function publicationNodeText(value: unknown): string {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  const node = value as { children?: unknown; type?: unknown };
+  if (node.type === "table" && Array.isArray(node.children)) {
+    return node.children.map(publicationNodeText).join(" ");
+  }
+
+  if (node.type === "tableRow" && Array.isArray(node.children)) {
+    return node.children.map(publicationNodeText).join(" ");
+  }
+
+  return toString(node as Parameters<typeof toString>[0]);
+}
+
 function sortedPublications(publications: readonly PublicArticle[]) {
   return [...publications].sort((left, right) => {
     const categoryPosition = left.category.position - right.category.position;
@@ -73,8 +90,8 @@ function sortedPublications(publications: readonly PublicArticle[]) {
       return categoryId;
     }
 
-    const articleTitle = compareText(left.article.title, right.article.title);
-    return articleTitle || compareText(left.article.id, right.article.id);
+    const articlePosition = left.article.position - right.article.position;
+    return articlePosition || compareText(left.article.id, right.article.id);
   });
 }
 
@@ -90,7 +107,7 @@ export function articleMarkdownBody(source: string, title: string) {
     return "";
   }
 
-  const tree = fromMarkdown(markdown);
+  const tree = parseArticleMarkdown(markdown);
   const firstNode = tree.children[0];
   const headingEnd = firstNode?.position?.end.offset;
 
@@ -107,9 +124,9 @@ export function articleMarkdownBody(source: string, title: string) {
 }
 
 export function articlePlainText(source: string, title: string) {
-  const markdown = fromMarkdown(normalizeArticleMarkdown(source));
+  const markdown = parseArticleMarkdown(normalizeArticleMarkdown(source));
   const plainText = collapseWhitespace(
-    markdown.children.map((node) => toString(node)).join(" "),
+    markdown.children.map(publicationNodeText).join(" "),
   );
   const normalizedTitle = collapseWhitespace(title);
 

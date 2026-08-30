@@ -88,6 +88,7 @@ test("article requests normalize checkbox and publication fields", () => {
       status: "published",
       isFaq: "on",
       authorName: "  OPAS  ",
+      assetManifestId: "asset_manifest_123e4567-e89b-42d3-a456-426614174000",
     }),
   );
 
@@ -103,8 +104,29 @@ test("article requests normalize checkbox and publication fields", () => {
       status: "published",
       isFaq: true,
       authorName: "OPAS",
+      assetManifestId: "asset_manifest_123e4567-e89b-42d3-a456-426614174000",
     },
   });
+});
+
+test("article requests accept only server-issued asset manifest ids", () => {
+  const result = parseArticleRequest(
+    formData({
+      mode: "create",
+      categoryId: "category_1",
+      title: "Reset a password",
+      slug: "reset-a-password",
+      mdx: "# Reset a password",
+      status: "draft",
+      authorName: "OPAS",
+      assetManifestId: "asset_manifest_other-workspace",
+    }),
+  );
+
+  assert.equal(result.success, false);
+  if (!result.success) {
+    assert.equal(result.fieldErrors.assetManifestId, "The asset manifest is invalid");
+  }
 });
 
 test("article requests reject unsafe slugs and forged fields", () => {
@@ -161,7 +183,29 @@ test("article MDX begins with the canonical database title", () => {
   if (!result.success) {
     assert.equal(
       result.fieldErrors.mdx,
-      "Start the MDX with a level-one heading that exactly matches the article title",
+      "The level-one heading must exactly match the article title",
+    );
+  }
+});
+
+test("article requests reject a second level-one heading before reaching persistence", () => {
+  const result = parseArticleRequest(
+    formData({
+      mode: "create",
+      categoryId: "category_1",
+      title: "Reset a password",
+      slug: "reset-a-password",
+      mdx: "# Reset a password\n\nFollow these steps.\n\n# Contact support",
+      status: "draft",
+      authorName: "OPAS",
+    }),
+  );
+
+  assert.equal(result.success, false);
+  if (!result.success) {
+    assert.equal(
+      result.fieldErrors.mdx,
+      "Article MDX must contain exactly one level-one heading",
     );
   }
 });

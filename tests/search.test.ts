@@ -54,6 +54,7 @@ function publishedArticle(
 Open account settings and choose **Security**. Follow the recovery link to continue.`,
     isFaq: false,
     authorName: "OPAS",
+    position: 0,
     publishedAt: createdAt,
     createdAt,
     updatedAt: createdAt,

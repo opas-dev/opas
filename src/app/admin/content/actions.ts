@@ -11,7 +11,12 @@ import {
   parseRecordRequest,
   type ContentFieldErrors,
 } from "@/app/admin/content/validation";
+import {
+  failedArticleAssetManifestStatus,
+  type ArticleAssetManifestStatus,
+} from "@/app/admin/content/article-asset-state";
 import { requireAdmin } from "@/auth/admin";
+import { referencedArticleAssetHashes } from "@/content/article-assets";
 import {
   ArticleMdxValidationError,
   validateArticleMdx,
@@ -24,6 +29,7 @@ export type ContentActionState = {
   message: string;
   revision: number;
   fieldErrors?: ContentFieldErrors;
+  assetManifestStatus?: ArticleAssetManifestStatus;
 };
 
 function databaseErrorDetails(error: unknown) {
@@ -45,12 +51,14 @@ function errorState(
   previousState: ContentActionState,
   message: string,
   fieldErrors?: ContentFieldErrors,
+  assetManifestStatus?: ContentActionState["assetManifestStatus"],
 ): ContentActionState {
   return {
     status: "error",
     message,
     revision: previousState.revision + 1,
     fieldErrors,
+    assetManifestStatus,
   };
 }
 
@@ -179,7 +187,7 @@ export async function saveArticleAction(
   }
 
   try {
-    await validateArticleMdx(request.data.mdx);
+    await validateArticleMdx(request.data.mdx, request.data.title);
   } catch (error) {
     const message =
       error instanceof ArticleMdxValidationError
@@ -209,6 +217,10 @@ export async function saveArticleAction(
   const id = existing?.id ?? `article_${crypto.randomUUID()}`;
   const publishedAt =
     existing?.publishedAt ?? (request.data.status === "published" ? new Date() : null);
+  const assetSelection = {
+    manifestId: request.data.assetManifestId,
+    hashes: referencedArticleAssetHashes(request.data.mdx),
+  };
 
   try {
     const article = {
@@ -225,15 +237,36 @@ export async function saveArticleAction(
     };
 
     if (request.data.mode === "create") {
-      await repository.createArticle(article);
+      await repository.createArticle(article, assetSelection);
     } else {
-      await repository.updateArticle(article);
+      await repository.updateArticle(article, assetSelection);
     }
   } catch (error) {
     console.error("Article persistence failed.", databaseErrorDetails(error));
+    const assetManifestStatus = failedArticleAssetManifestStatus(
+      request.data.assetManifestId,
+      error,
+    );
+
+    if (assetManifestStatus) {
+      const message =
+        assetManifestStatus === "discarded"
+          ? "The article was not saved. Its staged image session was discarded; re-upload each unsaved image still in the source or remove it before retrying."
+          : "The article was not saved and staged-image cleanup could not be confirmed. Re-upload each unsaved image still in the source or remove it before retrying.";
+      return errorState(
+        previousState,
+        message,
+        {
+          mdx:
+            "The previous image staging session cannot be reused. Re-upload or remove its unsaved images.",
+        },
+        assetManifestStatus,
+      );
+    }
+
     return errorState(
       previousState,
-      "The article could not be saved. Check that its URL slug is unique.",
+      "The article could not be saved. Check its URL slug and remove any image that is no longer staged for this article.",
     );
   }
 

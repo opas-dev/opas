@@ -1,5 +1,15 @@
 // ABOUTME: Validates database-backed article MDX before its generated code can execute.
 // ABOUTME: Rejects executable syntax, unsafe URLs, and unregistered components.
+import type { Pluggable } from "unified";
+
+import {
+  articleImageUrlIssue,
+  articleLinkUrlIssue,
+} from "@/content/article-url-policy";
+import {
+  articleTitleHeadingIssue,
+  createArticleMdxCompiler,
+} from "@/content/runtime-mdx-plugins";
 
 type MdxNode = {
   attributes?: unknown;
@@ -17,8 +27,6 @@ type MdxNode = {
 };
 
 const articleMdxComponentNames = new Set<string>();
-const linkProtocols = new Set(["http:", "https:", "mailto:", "tel:"]);
-const imageProtocols = new Set(["https:"]);
 
 export class ArticleMdxValidationError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -40,19 +48,6 @@ function locationSuffix(node: MdxNode) {
 
 function rejectMdx(message: string, node: MdxNode): never {
   throw new ArticleMdxValidationError(`${message}${locationSuffix(node)}`);
-}
-
-function hasAllowedProtocol(value: string, protocols: ReadonlySet<string>) {
-  const normalized = value.replace(/[\u0000-\u0020]/g, "");
-  const protocolMatch = /^([a-z][a-z\d+.-]*:)/i.exec(normalized);
-
-  return protocolMatch === null || protocols.has(protocolMatch[1].toLowerCase());
-}
-
-function hasAllowedImageUrl(value: string) {
-  const normalized = value.replace(/[\u0000-\u0020]/g, "");
-
-  return !/^[\\/]{2}/.test(normalized) && hasAllowedProtocol(normalized, imageProtocols);
 }
 
 function inspectAttributes(node: MdxNode) {
@@ -100,14 +95,18 @@ function inspectNode(value: unknown): void {
     }
   }
 
-  if (node.type === "link" && typeof node.url === "string" && !hasAllowedProtocol(node.url, linkProtocols)) {
+  if (
+    node.type === "link" &&
+    typeof node.url === "string" &&
+    articleLinkUrlIssue(node.url)
+  ) {
     rejectMdx("This link protocol is not allowed in article MDX", node);
   }
 
   if (
     (node.type === "image" || node.type === "definition") &&
     typeof node.url === "string" &&
-    !hasAllowedImageUrl(node.url)
+    articleImageUrlIssue(node.url)
   ) {
     rejectMdx("This image protocol is not allowed in article MDX", node);
   }
@@ -125,20 +124,23 @@ function protectArticleMdx() {
   };
 }
 
-const validationCompiler = import("@fumadocs/mdx-remote").then(({ createCompiler }) =>
-  createCompiler({
-    preset: "minimal",
-    outputFormat: "function-body",
-    remarkPlugins: [protectArticleMdx],
-  }),
-);
+const validationCompiler = createArticleMdxCompiler([
+  protectArticleMdx as Pluggable,
+]);
 
-export async function validateArticleMdx(source: string) {
+export async function validateArticleMdx(source: string, title?: string) {
   try {
     if (/^\uFEFF?[ \t]*---(?:\r?\n|$)/.test(source)) {
       throw new ArticleMdxValidationError(
         "Frontmatter is not allowed; article metadata belongs in the editor fields",
       );
+    }
+
+    if (title !== undefined) {
+      const headingIssue = articleTitleHeadingIssue(source, title);
+      if (headingIssue) {
+        throw new ArticleMdxValidationError(headingIssue);
+      }
     }
 
     await (await validationCompiler).compileFile(source);

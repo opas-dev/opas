@@ -15,6 +15,13 @@
       "when": 1787849366239,
       "tag": "0001_opposite_centennial",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788069144042,
+      "tag": "0002_tan_ezekiel",
+      "breakpoints": true
     }
   ]
 }

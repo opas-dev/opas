@@ -42,7 +42,7 @@ export default async function NewArticlePage() {
           categories={categories.map(({ id, name }) => ({ id, name }))}
           article={{
             categoryId: categories[0].id,
-            title: "",
+            title: "Untitled article",
             slug: "",
             mdx: "# Untitled article\n\nWrite a clear answer here.",
             status: "draft",

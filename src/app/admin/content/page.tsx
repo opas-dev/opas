@@ -51,14 +51,22 @@ export default async function ContentAdminPage() {
               remain private until you publish them.
             </p>
           </div>
-          {categories.length > 0 ? (
+          <div className="flex flex-wrap gap-3">
             <Link
-              href="/admin/content/articles/new"
-              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground no-underline"
+              href="/admin/content/import"
+              className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border border-border bg-surface px-4 text-sm font-semibold text-foreground no-underline"
             >
-              New article
+              Import knowledge
             </Link>
-          ) : null}
+            {categories.length > 0 ? (
+              <Link
+                href="/admin/content/articles/new"
+                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground no-underline"
+              >
+                New article
+              </Link>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-10 grid gap-12 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] lg:items-start">

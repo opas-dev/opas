@@ -1,19 +1,13 @@
 // ABOUTME: Compiles authenticated article previews without blocking the Server Action mutation queue.
 // ABOUTME: Applies the same MDX safety boundary used by storage and public rendering.
-import { createCompiler } from "@fumadocs/mdx-remote";
-
 import { requireAdmin } from "@/auth/admin";
 import {
   ArticleMdxValidationError,
   validateArticleMdx,
 } from "@/content/mdx-safety";
+import { articleMdxCompiler } from "@/content/runtime-mdx-plugins";
 
 export const runtime = "nodejs";
-
-const previewCompiler = createCompiler({
-  preset: "minimal",
-  outputFormat: "function-body",
-});
 
 export async function POST(request: Request) {
   await requireAdmin();
@@ -34,11 +28,15 @@ export async function POST(request: Request) {
     !body ||
     typeof body !== "object" ||
     Array.isArray(body) ||
-    Object.keys(body).length !== 1 ||
+    Object.keys(body).length !== 2 ||
     !("source" in body) ||
     typeof body.source !== "string" ||
     body.source.length === 0 ||
-    body.source.length > 100_000
+    body.source.length > 100_000 ||
+    !("title" in body) ||
+    typeof body.title !== "string" ||
+    body.title.trim().length === 0 ||
+    body.title.trim().length > 160
   ) {
     return Response.json(
       { message: "Enter up to 100 KB of article MDX to preview." },
@@ -47,8 +45,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const source = await validateArticleMdx(body.source);
-    const compiled = String(await previewCompiler.compileFile(source));
+    const source = await validateArticleMdx(body.source, body.title);
+    const compiler = await articleMdxCompiler;
+    const compiled = String(await compiler.compileFile(source));
     return Response.json({ compiled });
   } catch (error) {
     return Response.json(
