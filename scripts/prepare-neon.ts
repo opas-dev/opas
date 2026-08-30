@@ -1,25 +1,32 @@
 // ABOUTME: Prepares a Neon deployment by applying Postgres migrations and missing demo records.
 // ABOUTME: Initializes missing evidence through a direct connection without printing its string.
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { Pool } from "pg";
+import { Pool, type PoolConfig } from "pg";
 
 import { initializeAllMissingArticleEvidence } from "../src/content/article-evidence-initialization";
 import { demoIds } from "../src/db/demo";
 import { createPostgresRepository } from "../src/db/postgres/repository";
 import { seedPostgres } from "../src/db/postgres/seed";
 import * as schema from "../src/db/schema/postgres";
+import { requireNeonDirectConnectionString } from "./neon-connections";
 
-function requireConnectionString() {
-  const connectionString = process.env.NEON_DATABASE_URL?.trim();
+export { requireNeonDirectConnectionString };
 
-  if (!connectionString) {
-    throw new Error("NEON_DATABASE_URL is required to prepare the Neon database");
-  }
-
-  return connectionString;
+export function neonPoolConfiguration(connectionString: string): PoolConfig {
+  const url = new URL(connectionString);
+  return {
+    database: decodeURI(url.pathname.slice(1)),
+    enableChannelBinding: true,
+    host: url.hostname,
+    password: decodeURIComponent(url.password),
+    port: Number(url.port || "5432"),
+    ssl: { rejectUnauthorized: true },
+    user: decodeURIComponent(url.username),
+  };
 }
 
 function safeErrorMessage(error: unknown, connectionString: string) {
@@ -55,8 +62,8 @@ async function main() {
   let connectionString = "";
 
   try {
-    connectionString = requireConnectionString();
-    const pool = new Pool({ connectionString });
+    connectionString = requireNeonDirectConnectionString();
+    const pool = new Pool(neonPoolConfiguration(connectionString));
 
     try {
       const database = drizzle(pool, { schema });
@@ -82,4 +89,8 @@ async function main() {
   }
 }
 
-void main();
+const invokedModule = process.argv[1]
+  ? pathToFileURL(resolve(process.argv[1])).href
+  : undefined;
+
+if (import.meta.url === invokedModule) void main();

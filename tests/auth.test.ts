@@ -95,7 +95,7 @@ test("signed sessions reject altered, malformed, and differently signed tokens",
   assert.equal(await verifyAdminSessionToken(undefined, sessionSecret, issuedAt), null);
 });
 
-test("Proxy matcher covers only administrator routes", () => {
+test("Proxy matcher covers administrator routes and the dedicated embed document", () => {
   for (const url of ["/admin", "/admin/login", "/admin/theme", "/admin/content"]) {
     assert.equal(
       unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig: {}, url }),
@@ -104,7 +104,15 @@ test("Proxy matcher covers only administrator routes", () => {
     );
   }
 
-  for (const url of ["/", "/spike", "/api/health"]) {
+  for (const url of ["/embed", "/embed?parentOrigin=https%3A%2F%2Fdocs.example.test"]) {
+    assert.equal(
+      unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig: {}, url }),
+      true,
+      url,
+    );
+  }
+
+  for (const url of ["/", "/spike", "/embed.js", "/embed-child", "/api/health"]) {
     assert.equal(
       unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig: {}, url }),
       false,

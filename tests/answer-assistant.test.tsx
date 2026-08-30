@@ -33,6 +33,7 @@ function streamResponse(parts: readonly string[]) {
 }
 
 const metadata = JSON.stringify({
+  conversationId: "123e4567-e89b-42d3-a456-426614174000",
   generation: {
     model: "fixture-answer-v1",
     provider: "openai-compatible",
@@ -73,6 +74,10 @@ test("parses fragmented cited-answer records without exposing uncited content", 
   );
 
   assert.equal(result.phase, "complete");
+  assert.equal(
+    result.conversationId,
+    "123e4567-e89b-42d3-a456-426614174000",
+  );
   assert.equal(result.blocks.length, 1);
   assert.deepEqual(result.blocks[0], {
     citation: JSON.parse(citation).citation,
@@ -206,6 +211,8 @@ test("keeps narrow-layout and reduced-motion behavior explicit", async () => {
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
   assert.match(css, /min-height: 2\.75rem/u);
   assert.match(source, /currentPagePath: safeCurrentPage\.path/u);
+  assert.match(source, /activeAnswer\.current\.conversationId = snapshot\.conversationId/u);
+  assert.doesNotMatch(source, /conversationId: turn\.conversationId/u);
   assert.doesNotMatch(source, /conversationHistory\(safeCurrentPage/u);
   assert.doesNotMatch(source, /dangerouslySetInnerHTML|RuntimeMdx|<img\b/u);
 });

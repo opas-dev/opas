@@ -49,6 +49,7 @@ export type RetrievalEvaluationAdapter = {
   provider?: string | null;
   model?: string | null;
   costBasis?: string | null;
+  prepareSourceEmbeddings?(): Promise<void>;
   rebuild?(): Promise<void>;
   warmup?(): Promise<void>;
   retrieve(request: {
@@ -95,6 +96,7 @@ export type CompletedRetrievalTargetReport = {
   perClass: Record<SavedQuestionClassification, Fraction>;
   recallAt5: Fraction & { rate: number };
   warmP95Ms: number;
+  sourceEmbeddingP95Ms: number | null;
   rebuildP95Ms: number | null;
   peakMemoryBytes: number | null;
   memoryMeasurement: string | null;
@@ -121,6 +123,7 @@ export type RetrievalEvaluationReport = {
 type RetrievalEvaluationOptions = {
   fixture: RetrievalEvaluationFixture;
   targets: readonly RetrievalEvaluationTarget[];
+  sourceEmbeddingSamples?: number;
   rebuildSamples?: number;
   now?: () => number;
   readMemoryBytes?: () => number;
@@ -136,6 +139,7 @@ const classifications: readonly SavedQuestionClassification[] = [
 ];
 const hashPattern = /^[a-f0-9]{64}$/u;
 const maximumRebuildSamples = 100;
+const maximumSourceEmbeddingSamples = 100;
 const expectedOutcomes = new Set(["answer", "abstain", "either"]);
 
 export class RetrievalEvaluationError extends Error {
@@ -280,7 +284,7 @@ function boundedRebuildSamples(value: number | undefined) {
   const samples = value ?? 20;
   if (
     !Number.isInteger(samples) ||
-    samples < 0 ||
+    samples < 1 ||
     samples > maximumRebuildSamples
   ) {
     throw new RetrievalEvaluationError("Evaluation rebuild sample count is invalid");
@@ -288,9 +292,24 @@ function boundedRebuildSamples(value: number | undefined) {
   return samples;
 }
 
+function boundedSourceEmbeddingSamples(value: number | undefined) {
+  const samples = value ?? 20;
+  if (
+    !Number.isInteger(samples) ||
+    samples < 1 ||
+    samples > maximumSourceEmbeddingSamples
+  ) {
+    throw new RetrievalEvaluationError(
+      "Evaluation source-embedding sample count is invalid",
+    );
+  }
+  return samples;
+}
+
 async function evaluateTarget(
   fixture: RetrievalEvaluationFixture,
   adapter: RetrievalEvaluationAdapter,
+  sourceEmbeddingSamples: number,
   rebuildSamples: number,
   now: () => number,
   readMemoryBytes: (() => number) | undefined,
@@ -303,6 +322,15 @@ async function evaluateTarget(
       peakMemoryBytes = Math.max(peakMemoryBytes ?? 0, current);
     }
   };
+  const sourceEmbeddingDurations: number[] = [];
+  if (adapter.prepareSourceEmbeddings) {
+    for (let index = 0; index < sourceEmbeddingSamples; index += 1) {
+      const startedAt = now();
+      await adapter.prepareSourceEmbeddings();
+      sourceEmbeddingDurations.push(measuredDuration(startedAt, now()));
+      sampleMemory();
+    }
+  }
   const rebuildDurations: number[] = [];
   if (adapter.rebuild) {
     for (let index = 0; index < rebuildSamples; index += 1) {
@@ -387,6 +415,7 @@ async function evaluateTarget(
           : rounded(recallNumerator / recallDenominator),
     },
     warmP95Ms: percentile95(retrievalDurations) ?? 0,
+    sourceEmbeddingP95Ms: percentile95(sourceEmbeddingDurations),
     rebuildP95Ms: percentile95(rebuildDurations),
     peakMemoryBytes,
     memoryMeasurement: readMemoryBytes
@@ -414,6 +443,7 @@ export function notConfiguredRetrievalTarget({
 export async function runRetrievalEvaluation({
   fixture,
   targets,
+  sourceEmbeddingSamples: requestedSourceEmbeddingSamples,
   rebuildSamples: requestedRebuildSamples,
   now = () => performance.now(),
   readMemoryBytes,
@@ -421,6 +451,9 @@ export async function runRetrievalEvaluation({
 }: RetrievalEvaluationOptions): Promise<RetrievalEvaluationReport> {
   validateFixture(fixture);
   validateTargets(targets);
+  const sourceEmbeddingSamples = boundedSourceEmbeddingSamples(
+    requestedSourceEmbeddingSamples,
+  );
   const rebuildSamples = boundedRebuildSamples(requestedRebuildSamples);
   const reports: RetrievalEvaluationReport["targets"][number][] = [];
   for (const target of targets) {
@@ -432,6 +465,7 @@ export async function runRetrievalEvaluation({
       await evaluateTarget(
         fixture,
         target,
+        sourceEmbeddingSamples,
         rebuildSamples,
         now,
         readMemoryBytes,

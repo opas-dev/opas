@@ -3,9 +3,10 @@
 import "server-only";
 
 import type { Repository } from "@/db/repository";
+import { resolveDatabaseDriver } from "@/db/driver";
 
 export async function getRepository(): Promise<Repository> {
-  const driver = process.env.OPAS_DATABASE_DRIVER ?? "postgres";
+  const driver = resolveDatabaseDriver();
 
   if (driver === "d1") {
     const [{ getD1Database }, { createSqliteRepository }] = await Promise.all([
@@ -31,5 +32,5 @@ export async function getRepository(): Promise<Repository> {
     return createPostgresRepository(getPostgresDatabase());
   }
 
-  throw new Error(`Unsupported OPAS_DATABASE_DRIVER: ${driver}`);
+  throw new Error("Unsupported database driver");
 }

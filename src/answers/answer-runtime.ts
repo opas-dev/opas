@@ -12,6 +12,7 @@ import type {
 } from "@/ai/embeddings";
 import {
   createGenerationAdapter,
+  generationUsesWorkersAiBinding,
   generationPublicMetadata,
   type GenerationAdapterConfiguration,
   type GenerationEnvironment,
@@ -21,9 +22,15 @@ import type { WorkersAiGenerationBinding } from "@/ai/generation";
 import {
   AnswerError,
   createAnswerService,
+  maximumAnswerOutputTokens,
   type AnswerEvidencePolicy,
   type AnswerService,
 } from "@/answers/answer";
+import {
+  createAnswerAdmissionPolicy,
+  createAnswerInferenceAdmission,
+  type AnswerAdmissionEnvironment,
+} from "@/answers/admission";
 import {
   createAnswerGuardrails,
   type AnswerGuardrailEnvironment,
@@ -32,6 +39,7 @@ import type { EmbeddingGeneration, Repository } from "@/db/repository";
 import {
   createEvidenceRetriever,
   createRepositoryEvidenceSource,
+  type EvidenceRetrievalResult,
 } from "@/search/evidence";
 
 export const answerEvidencePolicy: Readonly<AnswerEvidencePolicy> =
@@ -46,17 +54,19 @@ export const answerEvidencePolicyCalibration = Object.freeze({
     "4297d85a9c014d8f8a2f2fc275091bdc31af84ef6220c5d01e5b67ac3c5eb712",
   provenance: "synthetic" as const,
   requiredAnswerScoreFloor: 1,
-  unsupportedScoreCeiling: 0.5,
-  minimumScoreMidpoint: 0.75,
-  minimumScoreRounding: "down-to-one-decimal" as const,
-  conflictingArticleGapCeiling: 0.064479,
-  conflictingArticleGapRounding: "up-to-two-decimals" as const,
+  unsupportedScoreCeiling: 1 / 3,
+  minimumScoreMidpoint: 2 / 3,
+  minimumScoreGuard: answerEvidencePolicy.minimumScore,
+  conflictingArticleGapCeiling: 0,
+  conflictingArticleGapGuard:
+    answerEvidencePolicy.minimumScoreGapAcrossArticles,
   designPartnerCalibration: "pending" as const,
 });
 
 export type AnswerRuntimeEnvironment = GenerationEnvironment &
   EmbeddingEnvironment &
-  AnswerGuardrailEnvironment;
+  AnswerGuardrailEnvironment &
+  AnswerAdmissionEnvironment;
 
 export type AnswerRuntime = Readonly<{
   metadata: PublicGenerationMetadata;
@@ -79,6 +89,16 @@ export type AnswerRuntimeDependencies = {
   getRepository?: () => Promise<Repository>;
   getWorkersAiBinding?: () => Promise<WorkersAiBinding | undefined>;
 };
+
+export type RetainedAnswerRuntimeDependencies = Pick<
+  AnswerRuntimeDependencies,
+  | "createGenerationAdapter"
+  | "environment"
+  | "fetch"
+  | "getRepository"
+  | "getWorkersAiBinding"
+  | "workersAiBinding"
+>;
 
 function exactEmbeddingMetadata(
   generation: EmbeddingGeneration | null,
@@ -155,7 +175,8 @@ async function interruptible<T>(operation: Promise<T>, signal?: AbortSignal) {
 export async function createConfiguredAnswerRuntime(
   dependencies: AnswerRuntimeDependencies = {},
 ): Promise<AnswerRuntime> {
-  const environment = dependencies.environment ?? process.env;
+  const environment =
+    dependencies.environment ?? (process.env as AnswerRuntimeEnvironment);
   const guardrails = createAnswerGuardrails(
     environment.OPAS_ANSWER_TOPIC_GUARDRAILS === ""
       ? undefined
@@ -164,9 +185,12 @@ export async function createConfiguredAnswerRuntime(
   if (guardrails.status === "unavailable") {
     throw new AnswerError("configuration", "Answer guardrails are unavailable");
   }
-  const databaseDriver = environment.OPAS_DATABASE_DRIVER ?? "postgres";
+  const admissionPolicy = createAnswerAdmissionPolicy(
+    environment,
+    maximumAnswerOutputTokens,
+  );
   const workersAiBinding =
-    databaseDriver === "d1"
+    generationUsesWorkersAiBinding(environment)
       ? dependencies.workersAiBinding ??
         (await (dependencies.getWorkersAiBinding ??
           cloudflareWorkersAiBinding)())
@@ -194,6 +218,10 @@ export async function createConfiguredAnswerRuntime(
   );
 
   const service = createAnswerService({
+    admission: createAnswerInferenceAdmission({
+      policy: admissionPolicy,
+      repository,
+    }),
     evidencePolicy: answerEvidencePolicy,
     generation,
     guardrails,
@@ -241,6 +269,66 @@ export async function createConfiguredAnswerRuntime(
     },
   });
 
+  return Object.freeze({
+    metadata: generationPublicMetadata(generation),
+    service,
+  });
+}
+
+export async function createConfiguredRetainedAnswerRuntime(
+  evidence: readonly EvidenceRetrievalResult[],
+  dependencies: RetainedAnswerRuntimeDependencies = {},
+): Promise<AnswerRuntime> {
+  if (!Array.isArray(evidence)) {
+    throw new AnswerError("invalid-evidence", "Retained evidence is invalid");
+  }
+  const environment =
+    dependencies.environment ?? (process.env as AnswerRuntimeEnvironment);
+  const guardrails = createAnswerGuardrails(
+    environment.OPAS_ANSWER_TOPIC_GUARDRAILS === ""
+      ? undefined
+      : environment.OPAS_ANSWER_TOPIC_GUARDRAILS,
+  );
+  if (guardrails.status === "unavailable") {
+    throw new AnswerError("configuration", "Answer guardrails are unavailable");
+  }
+  const admissionPolicy = createAnswerAdmissionPolicy(
+    environment,
+    maximumAnswerOutputTokens,
+  );
+  const workersAiBinding = generationUsesWorkersAiBinding(environment)
+    ? dependencies.workersAiBinding ??
+      (await (dependencies.getWorkersAiBinding ?? cloudflareWorkersAiBinding)())
+    : undefined;
+  const generation = (
+    dependencies.createGenerationAdapter ?? createGenerationAdapter
+  )({
+    environment,
+    fetch: dependencies.fetch,
+    workersAiBinding,
+  });
+  const repository = await (dependencies.getRepository ?? selectedRepository)();
+  const retainedEvidence = Object.freeze(
+    evidence.map((result) =>
+      Object.freeze({
+        ...result,
+        headingPath: Object.freeze([...result.headingPath]),
+        sourceLineRange: Object.freeze({ ...result.sourceLineRange }),
+      }),
+    ),
+  );
+  const service = createAnswerService({
+    admission: createAnswerInferenceAdmission({
+      policy: admissionPolicy,
+      repository,
+    }),
+    evidencePolicy: answerEvidencePolicy,
+    generation,
+    guardrails,
+    async retriever() {
+      return retainedEvidence;
+    },
+  });
   return Object.freeze({
     metadata: generationPublicMetadata(generation),
     service,

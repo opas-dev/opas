@@ -5,12 +5,15 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
+import { NextRequest } from "next/server";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import nextConfig from "../next.config";
+import { config as proxyConfig, proxy } from "@/proxy";
 import { handleAnswerRequest } from "@/answers/answer-route";
 import type { AnswerRuntime } from "@/answers/answer-runtime";
 import { EmbedAssistant } from "@/app/embed/embed-assistant";
+import { metadata as embedPageMetadata } from "@/app/embed/page";
 import {
   embedParentOrigins,
   maximumEmbedParentOrigins,
@@ -91,29 +94,40 @@ test("accepts only canonical exact HTTP(S) parent origins and fails closed", () 
   );
 });
 
-test("overrides frame ancestors only for the dedicated embed route", async () => {
-  const previous = process.env.OPAS_EMBED_PARENT_ORIGINS;
-  process.env.OPAS_EMBED_PARENT_ORIGINS = `${parentOrigin},${secondParentOrigin}`;
+test("gives the dedicated embed route one runtime frame-parent policy", async () => {
+  const environment = process.env as Record<string, string | undefined>;
+  const previous = environment.OPAS_EMBED_PARENT_ORIGINS;
+  environment.OPAS_EMBED_PARENT_ORIGINS = `${parentOrigin},${secondParentOrigin}`;
 
   try {
     const createHeaders = nextConfig.headers;
     if (!createHeaders) assert.fail("Next.js must define route headers");
     const rules = await createHeaders();
     const globalRule = rules.find(({ source }) => source === "/:path*");
+    const globalCspRule = rules.find(
+      ({ source }) => source === "/:path((?!embed$).*)",
+    );
     const embedRule = rules.find(({ source }) => source === "/embed");
     assert.ok(globalRule);
-    assert.ok(embedRule);
-    assert.ok(rules.indexOf(embedRule) > rules.indexOf(globalRule));
+    assert.ok(globalCspRule);
+    assert.equal(embedRule, undefined);
 
-    const globalCsp = globalRule.headers.find(
-      ({ key }) => key === "Content-Security-Policy",
-    )?.value;
-    const embedCsp = embedRule.headers.find(
-      ({ key }) => key === "Content-Security-Policy",
-    )?.value;
+    const embedResponse = await proxy(
+      new NextRequest("https://help.example.test/embed"),
+    );
+    const embedCsp = embedResponse.headers.get("content-security-policy");
+    const composedEmbedPolicies = [embedCsp].filter(
+      (value): value is string => value !== null,
+    );
 
-    assert.equal(globalCsp, contentSecurityPolicy);
-    assert.match(globalCsp ?? "", /frame-ancestors 'none'/u);
+    assert.equal(
+      globalCspRule.headers.find(
+        ({ key }) => key === "Content-Security-Policy",
+      )?.value,
+      contentSecurityPolicy,
+    );
+    assert.equal(composedEmbedPolicies.length, 1);
+    assert.deepEqual(proxyConfig, { matcher: ["/admin/:path*", "/embed"] });
     assert.equal(
       embedCsp,
       createEmbedContentSecurityPolicy([parentOrigin, secondParentOrigin]),
@@ -122,11 +136,14 @@ test("overrides frame ancestors only for the dedicated embed route", async () =>
       embedCsp ?? "",
       new RegExp(`frame-ancestors ${parentOrigin} ${secondParentOrigin}$`, "u"),
     );
+    assert.equal(embedCsp?.match(/frame-ancestors/gu)?.length, 1);
+    assert.doesNotMatch(embedCsp ?? "", /frame-ancestors 'none'/u);
     assert.doesNotMatch(embedCsp ?? "", /unsafe-eval/u);
     assert.match(embedCsp ?? "", /img-src 'none'/u);
+    assert.deepEqual(embedPageMetadata.icons, { icon: [] });
   } finally {
-    if (previous === undefined) delete process.env.OPAS_EMBED_PARENT_ORIGINS;
-    else process.env.OPAS_EMBED_PARENT_ORIGINS = previous;
+    if (previous === undefined) delete environment.OPAS_EMBED_PARENT_ORIGINS;
+    else environment.OPAS_EMBED_PARENT_ORIGINS = previous;
   }
 });
 

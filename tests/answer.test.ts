@@ -12,6 +12,12 @@ import {
   type AnswerRetriever,
 } from "@/answers/answer";
 import {
+  AnswerAdmissionError,
+  type AnswerInferenceAdmission,
+  type AnswerInferenceOutcome,
+} from "@/answers/admission";
+import {
+  createGenerationFallbackAdapter,
   GenerationError,
   type GenerationAdapter,
   type GenerationEvent,
@@ -90,12 +96,14 @@ function answerService(
   results: readonly EvidenceRetrievalResult[],
   run: (request: GenerationRequest) => AsyncIterable<GenerationEvent>,
   onRetrieve?: (request: Parameters<AnswerRetriever>[0]) => void,
+  admission?: AnswerInferenceAdmission,
 ) {
   const retriever: AnswerRetriever = async (request) => {
     onRetrieve?.(request);
     return results;
   };
   return createAnswerService({
+    admission,
     evidencePolicy: {
       minimumScore: 0.7,
       minimumScoreGapAcrossArticles: 0.05,
@@ -103,6 +111,64 @@ function answerService(
     generation: generator(run),
     retriever,
   });
+}
+
+function admissionFixture() {
+  const reservations: Array<{
+    maximumOutputTokens: number;
+    model: string;
+    provider: string;
+    workspaceId: string;
+  }> = [];
+  const settlements: Array<{
+    outcome: AnswerInferenceOutcome;
+    usage?: {
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+    };
+  }> = [];
+  const admission: AnswerInferenceAdmission = {
+    async reserve(request) {
+      reservations.push(request);
+      return {
+        lease: {
+          id: "answer-lease-stream",
+          workspaceId: request.workspaceId,
+          provider: request.provider,
+          model: request.model,
+          maximumOutputTokens: request.maximumOutputTokens,
+          reservedMicrodollars: 100,
+          chargedMicrodollars: null,
+          status: "active",
+          inputTokens: null,
+          outputTokens: null,
+          startedAt: new Date("2026-08-30T12:00:00.000Z"),
+          expiresAt: new Date("2026-08-30T12:01:00.000Z"),
+          reconciledAt: null,
+        },
+        async reconcile(settlement) {
+          settlements.push(settlement);
+          return {
+            id: "answer-lease-stream",
+            workspaceId: request.workspaceId,
+            provider: request.provider,
+            model: request.model,
+            maximumOutputTokens: request.maximumOutputTokens,
+            reservedMicrodollars: 100,
+            chargedMicrodollars: 10,
+            status: settlement.outcome,
+            inputTokens: settlement.usage?.inputTokens ?? null,
+            outputTokens: settlement.usage?.outputTokens ?? null,
+            startedAt: new Date("2026-08-30T12:00:00.000Z"),
+            expiresAt: new Date("2026-08-30T12:01:00.000Z"),
+            reconciledAt: new Date("2026-08-30T12:00:01.000Z"),
+          };
+        },
+      };
+    },
+  };
+  return { admission, reservations, settlements };
 }
 
 test("streams safe answer blocks and maps opaque IDs to canonical retrieved metadata", async () => {
@@ -181,11 +247,17 @@ test("streams safe answer blocks and maps opaque IDs to canonical retrieved meta
 });
 
 test("abstains before generation when retrieved evidence is weak", async () => {
+  const fixture = admissionFixture();
   let providerCalls = 0;
-  const service = answerService([evidence({ score: 0.69 })], () => {
-    providerCalls += 1;
-    return providerEvents([]);
-  });
+  const service = answerService(
+    [evidence({ score: 0.69 })],
+    () => {
+      providerCalls += 1;
+      return providerEvents([]);
+    },
+    undefined,
+    fixture.admission,
+  );
 
   assert.deepEqual(
     await collect(
@@ -203,6 +275,7 @@ test("abstains before generation when retrieved evidence is weak", async () => {
     ],
   );
   assert.equal(providerCalls, 0);
+  assert.equal(fixture.reservations.length, 0);
 });
 
 test("abstains before generation when distinct current articles compete inside the calibrated gap", async () => {
@@ -535,4 +608,308 @@ test("preserves the caller signal and exact provider failure", async () => {
       ),
     (error: unknown) => error === failure,
   );
+});
+
+test("reserves before provider inference and reconciles usage before finish", async () => {
+  const fixture = admissionFixture();
+  let providerCalls = 0;
+  const service = answerService(
+    [evidence()],
+    () => {
+      providerCalls += 1;
+      assert.equal(fixture.reservations.length, 1);
+      return providerEvents([
+        '{"type":"content","markdown":"Open settings."}\n' +
+          '{"type":"citation","id":"C1"}\n',
+      ]);
+    },
+    undefined,
+    fixture.admission,
+  );
+
+  const events = await collect(
+    service.stream({
+      maximumOutputTokens: 256,
+      question: "How do I reset my password?",
+      workspaceId: "workspace-demo",
+    }),
+  );
+
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(fixture.reservations, [
+    {
+      maximumOutputTokens: 256,
+      model: "fixture-answer-model",
+      provider: "openai-compatible",
+      workspaceId: "workspace-demo",
+    },
+  ]);
+  assert.deepEqual(fixture.settlements, [
+    {
+      outcome: "completed",
+      usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+    },
+  ]);
+  assert.equal(events.at(-1)?.type, "finish");
+});
+
+test("cross-provider fallback stays inside one reservation and one reconciliation", async () => {
+  const fixture = admissionFixture();
+  let primaryCalls = 0;
+  let fallbackCalls = 0;
+  const observedProviders: Array<{ model: string; provider: string }> = [];
+  const primary: GenerationAdapter = {
+    ...generator(() =>
+      (async function* () {
+        primaryCalls += 1;
+        throw new GenerationError(
+          "provider-unavailable",
+          "Primary provider unavailable",
+        );
+      })(),
+    ),
+    metadata: {
+      model: "workers-primary-v1",
+      provider: "cloudflare-workers-ai",
+      retentionDisclosure: "Primary requests are not retained.",
+    },
+  };
+  const fallback = generator(() => {
+    fallbackCalls += 1;
+    return providerEvents([
+      '{"type":"content","markdown":"Open settings."}\n' +
+        '{"type":"citation","id":"C1"}\n',
+    ]);
+  });
+  const generation = createGenerationFallbackAdapter({ fallback, primary });
+  const service = createAnswerService({
+    admission: fixture.admission,
+    evidencePolicy: {
+      minimumScore: 0.7,
+      minimumScoreGapAcrossArticles: 0.05,
+    },
+    generation,
+    retriever: async () => [evidence()],
+  });
+
+  const events = await collect(
+    service.stream({
+      maximumOutputTokens: 256,
+      observeProvider(metadata) {
+        observedProviders.push(metadata);
+        throw new Error("Observer failures are contained");
+      },
+      question: "How do I reset my password?",
+      workspaceId: "workspace-demo",
+    }),
+  );
+
+  assert.equal(primaryCalls, 1);
+  assert.equal(fallbackCalls, 1);
+  assert.deepEqual(observedProviders, [
+    { model: "workers-primary-v1", provider: "cloudflare-workers-ai" },
+    { model: "fixture-answer-model", provider: "openai-compatible" },
+  ]);
+  assert.ok(observedProviders.every(Object.isFrozen));
+  assert.deepEqual(fixture.reservations, [
+    {
+      maximumOutputTokens: 256,
+      model: "workers-primary-v1",
+      provider: "cloudflare-workers-ai",
+      workspaceId: "workspace-demo",
+    },
+  ]);
+  assert.deepEqual(fixture.settlements, [
+    {
+      generation: {
+        model: "fixture-answer-model",
+        provider: "openai-compatible",
+      },
+      outcome: "completed",
+      usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+    },
+  ]);
+  assert.equal(events.at(-1)?.type, "finish");
+  assert.match(generation.metadata.retentionDisclosure, /openai-compatible/u);
+});
+
+test("reconciles cancellation, timeout, invalid output, and provider failure once", async (context) => {
+  await context.test("cancellation", async () => {
+    const fixture = admissionFixture();
+    const controller = new AbortController();
+    const service = answerService(
+      [evidence()],
+      async function* (request) {
+        yield {
+          text:
+            '{"type":"content","markdown":"Open settings."}\n' +
+            '{"type":"citation","id":"C1"}\n',
+          type: "text",
+        };
+        if (request.signal?.aborted) {
+          throw new GenerationError("cancelled", "Generation cancelled");
+        }
+        await new Promise<void>((_resolve, reject) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => reject(new GenerationError("cancelled", "Generation cancelled")),
+            { once: true },
+          );
+        });
+      },
+      undefined,
+      fixture.admission,
+    );
+    const iterator = service
+      .stream({
+        question: "How do I reset my password?",
+        signal: controller.signal,
+        workspaceId: "workspace-demo",
+      })
+      [Symbol.asyncIterator]();
+    assert.equal((await iterator.next()).value?.type, "content");
+    assert.equal((await iterator.next()).value?.type, "citation");
+    controller.abort();
+    await assert.rejects(iterator.next(), /cancelled/u);
+    assert.deepEqual(fixture.settlements, [
+      { outcome: "cancelled", usage: undefined },
+    ]);
+  });
+
+  for (const fixtureCase of [
+    {
+      name: "timeout",
+      error: new GenerationError("timeout", "Generation timed out"),
+      outcome: "timeout" as const,
+    },
+    {
+      name: "provider failure",
+      error: new GenerationError(
+        "provider-unavailable",
+        "Generation provider unavailable",
+      ),
+      outcome: "failed" as const,
+    },
+  ]) {
+    await context.test(fixtureCase.name, async () => {
+      const fixture = admissionFixture();
+      let providerCalls = 0;
+      const service = answerService(
+        [evidence()],
+        async function* () {
+          providerCalls += 1;
+          throw fixtureCase.error;
+        },
+        undefined,
+        fixture.admission,
+      );
+      await assert.rejects(
+        collect(
+          service.stream({
+            question: "How do I reset my password?",
+            workspaceId: "workspace-demo",
+          }),
+        ),
+        (error) => error === fixtureCase.error,
+      );
+      assert.equal(providerCalls, 1);
+      assert.equal(fixture.reservations.length, 1);
+      assert.deepEqual(fixture.settlements, [
+        { outcome: fixtureCase.outcome, usage: undefined },
+      ]);
+    });
+  }
+
+  await context.test("invalid output after provider finish", async () => {
+    const fixture = admissionFixture();
+    const service = answerService(
+      [evidence()],
+      () => providerEvents(['{"type":"content","markdown":"Uncited."}\n']),
+      undefined,
+      fixture.admission,
+    );
+    await assert.rejects(
+      collect(
+        service.stream({
+          question: "How do I reset my password?",
+          workspaceId: "workspace-demo",
+        }),
+      ),
+      (error) => error instanceof AnswerError && error.category === "invalid-output",
+    );
+    assert.deepEqual(fixture.settlements, [
+      {
+        outcome: "invalid-output",
+        usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+      },
+    ]);
+  });
+
+  await context.test("provider output after finish", async () => {
+    const fixture = admissionFixture();
+    const service = answerService(
+      [evidence()],
+      async function* () {
+        yield {
+          text:
+            '{"type":"content","markdown":"Open settings."}\n' +
+            '{"type":"citation","id":"C1"}\n',
+          type: "text",
+        };
+        yield {
+          reason: "stop",
+          type: "finish",
+          usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+        };
+        yield { text: "unexpected", type: "text" };
+      },
+      undefined,
+      fixture.admission,
+    );
+
+    await assert.rejects(
+      collect(
+        service.stream({
+          question: "How do I reset my password?",
+          workspaceId: "workspace-demo",
+        }),
+      ),
+      (error) => error instanceof AnswerError && error.category === "invalid-output",
+    );
+    assert.deepEqual(fixture.settlements, [
+      {
+        outcome: "invalid-output",
+        usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+      },
+    ]);
+  });
+});
+
+test("admission denial never reaches the configured provider", async () => {
+  let providerCalls = 0;
+  const service = answerService(
+    [evidence()],
+    () => {
+      providerCalls += 1;
+      return providerEvents([]);
+    },
+    undefined,
+    {
+      async reserve() {
+        throw new AnswerAdmissionError("denied");
+      },
+    },
+  );
+
+  await assert.rejects(
+    collect(
+      service.stream({
+        question: "How do I reset my password?",
+        workspaceId: "workspace-demo",
+      }),
+    ),
+    (error) =>
+      error instanceof AnswerAdmissionError && error.category === "denied",
+  );
+  assert.equal(providerCalls, 0);
 });

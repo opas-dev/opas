@@ -1,15 +1,83 @@
 // ABOUTME: Verifies that Cloudflare bootstrap configuration cannot escape OPAS resources.
 // ABOUTME: Guards the maintained custom domain, workers.dev fallback, and matching Worker/D1 targets.
 import assert from "node:assert/strict";
+import {
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  readFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { validateCloudflareConfig } from "../scripts/bootstrap-cloudflare";
+import {
+  cloudflareCommandEnvironment,
+  prepareCloudflareTargetSnapshot,
+  readCloudflareTarget,
+  requiredCloudflareSecretNames,
+  validateCloudflareConfig,
+  validateCloudflareSecrets,
+} from "../scripts/bootstrap-cloudflare";
+
+test("preserves command discovery while pinning the validated Cloudflare account", () => {
+  const accountId = "f8801c7e8853a113a25f8b52fd9ceec1";
+  assert.deepEqual(
+    cloudflareCommandEnvironment(accountId, {
+      GITHUB_TOKEN: "must-not-reach-subprocesses",
+      CF_ACCOUNT_ID: accountId,
+      HOME: "/tmp/operator-home",
+      PATH: "/usr/bin:/bin",
+    }),
+    {
+      CLOUDFLARE_ACCOUNT_ID: accountId,
+      CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: "false",
+      HOME: "/tmp/operator-home",
+      PATH: "/usr/bin:/bin",
+    },
+  );
+  assert.throws(() =>
+    cloudflareCommandEnvironment(accountId, {
+      CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
+      PATH: "/usr/bin:/bin",
+    }),
+  );
+  assert.throws(() =>
+    cloudflareCommandEnvironment(accountId, {
+      CF_ACCOUNT_ID: "b".repeat(32),
+      PATH: "/usr/bin:/bin",
+    }),
+  );
+});
+
+test("routes every remote Cloudflare package command through target validation", () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  const runner = readFileSync("scripts/run-cloudflare.ts", "utf8");
+
+  for (const name of ["cf:deploy", "cf:dry-run", "cf:migrate", "cf:seed"]) {
+    assert.match(packageJson.scripts[name], /scripts\/run-cloudflare\.ts/u);
+  }
+  assert.match(runner, /readCloudflareTarget/u);
+  assert.match(runner, /cloudflareCommandEnvironment/u);
+});
+
+test("the maintained config declares the canonical base secret set", () => {
+  const target = readCloudflareTarget("wrangler.jsonc");
+  assert.deepEqual(target.secretNames, requiredCloudflareSecretNames());
+});
 
 function validConfig() {
   return {
     name: "opas-mvp",
     account_id: "f8801c7e8853a113a25f8b52fd9ceec1",
     main: "custom-worker.ts",
+    assets: {
+      binding: "ASSETS",
+      directory: ".open-next/assets",
+    },
     workers_dev: true,
     routes: [
       {
@@ -26,43 +94,119 @@ function validConfig() {
     ai: {
       binding: "AI",
     },
+    secrets: {
+      required: requiredCloudflareSecretNames(),
+    },
+    send_email: [
+      {
+        name: "SUPPORT_EMAIL",
+        allowed_sender_addresses: ["hello@opas.dev"],
+      },
+    ],
     triggers: {
-      crons: ["* * * * *"],
+      crons: ["* * * * *", "15 0 * * *"],
     },
     vars: {
       OPAS_DATABASE_DRIVER: "d1",
+      OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS: "1000000",
+      OPAS_ANSWER_ANALYTICS_RETENTION_DAYS: "30",
+      OPAS_ANSWER_INPUT_MICRODOLLARS_PER_MILLION_TOKENS: "152000",
+      OPAS_ANSWER_LEASE_MILLISECONDS: "45000",
+      OPAS_ANSWER_MAXIMUM_CONCURRENCY: "4",
+      OPAS_ANSWER_MAXIMUM_INPUT_TOKENS: "32000",
+      OPAS_ANSWER_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS: "287000",
       OPAS_GENERATION_GATEWAY_ID: "opas-answers",
       OPAS_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fp8",
       OPAS_GENERATION_RETENTION_DISCLOSURE:
         "OPAS retains only configured redacted conversation records; AI Gateway logging is disabled and response caching is bypassed.",
+      OPAS_ANALYTICS_REDACTION_PATTERNS: "[]",
+      OPAS_EMBED_PARENT_ORIGINS: "https://opas.dev,https://www.opas.dev",
+      OPAS_HANDOFF_DAILY_LIMIT: "100",
+      OPAS_HANDOFF_FROM_EMAIL: "hello@opas.dev",
+      OPAS_HANDOFF_PROVIDER: "cloudflare-email",
+      OPAS_HANDOFF_RETENTION_DAYS: "30",
       OPAS_SITE_URL: "https://demo.opas.dev",
     },
     d1_databases: [
       {
         binding: "DB",
         database_name: "opas-mvp",
-        database_id: "database-id",
+        database_id: "00000000-0000-4000-8000-000000000001",
+        preview_database_id: "DB",
         migrations_dir: "drizzle/sqlite",
       },
     ],
   };
 }
 
+test("rejects symlinked configs before a bootstrap or remote data command", () => {
+  const workspace = mkdtempSync(join(tmpdir(), "opas-config-test-"));
+  const target = join(workspace, "target.jsonc");
+  writeFileSync(target, `${JSON.stringify(validConfig())}\n`);
+  symlinkSync(target, join(workspace, "linked.jsonc"));
+
+  try {
+    assert.throws(
+      () => readCloudflareTarget("linked.jsonc", workspace),
+      /without symbolic-link traversal/,
+    );
+  } finally {
+    rmSync(workspace, { force: true, recursive: true });
+  }
+});
+
+test("keeps remote data inputs on one validated private snapshot", () => {
+  const workspace = mkdtempSync(join(tmpdir(), "opas data snapshot test-"));
+  const configPath = join(workspace, "wrangler.jsonc");
+  writeFileSync(configPath, `${JSON.stringify(validConfig())}\n`);
+  const target = readCloudflareTarget("wrangler.jsonc", workspace);
+  const snapshot = prepareCloudflareTargetSnapshot(target, workspace);
+
+  try {
+    const changed = validConfig();
+    changed.vars.OPAS_GENERATION_MODEL = "changed-after-validation";
+    writeFileSync(configPath, `${JSON.stringify(changed)}\n`);
+    assert.equal(
+      (snapshot.target.config.vars as Record<string, unknown>)
+        .OPAS_GENERATION_MODEL,
+      validConfig().vars.OPAS_GENERATION_MODEL,
+    );
+    assert.notEqual(snapshot.target.configPath, target.configPath);
+  } finally {
+    snapshot.dispose();
+    rmSync(workspace, { force: true, recursive: true });
+  }
+});
+
 function workersDevConfig() {
   const config = validConfig();
+  const workerName = "opas-stage-audit";
 
   return {
-    name: config.name,
-    account_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    name: workerName,
+    account_id: config.account_id,
     main: config.main,
-    services: config.services,
+    assets: config.assets,
+    services: [
+      {
+        binding: "WORKER_SELF_REFERENCE",
+        service: workerName,
+      },
+    ],
     ai: config.ai,
+    secrets: config.secrets,
+    send_email: config.send_email,
     triggers: config.triggers,
     vars: {
       ...config.vars,
-      OPAS_SITE_URL: "https://opas-mvp.example.workers.dev",
+      OPAS_SITE_URL: `https://${workerName}.example.workers.dev`,
     },
-    d1_databases: config.d1_databases,
+    d1_databases: [
+      {
+        ...config.d1_databases[0],
+        database_name: workerName,
+      },
+    ],
   };
 }
 
@@ -77,7 +221,10 @@ test("accepts the maintained custom domain with workers.dev fallback", () => {
 test("retains the scoped workers.dev-only bootstrap path", () => {
   const target = validateCloudflareConfig(workersDevConfig());
 
-  assert.equal(target.siteOrigin, "https://opas-mvp.example.workers.dev");
+  assert.equal(
+    target.siteOrigin,
+    "https://opas-stage-audit.example.workers.dev",
+  );
 });
 
 test("rejects protected, unrelated, and cross-wired resources", () => {
@@ -85,6 +232,43 @@ test("rejects protected, unrelated, and cross-wired resources", () => {
     Object.assign(validConfig(), { name: "opas-landing" }),
     Object.assign(validConfig(), { name: "customer-worker" }),
     Object.assign(validConfig(), { account_id: "another-account" }),
+    Object.assign(validConfig(), {
+      account_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    }),
+    Object.assign(validConfig(), {
+      assets: { binding: "ASSETS", directory: "/tmp/operator-home" },
+    }),
+    Object.assign(validConfig(), {
+      text_blobs: { credentials: "/tmp/operator-home/.env" },
+    }),
+    Object.assign(validConfig(), {
+      build: { command: "node /tmp/injected.cjs" },
+    }),
+    Object.assign(validConfig(), {
+      d1_databases: [
+        {
+          ...validConfig().d1_databases[0],
+          remote: true,
+        },
+      ],
+    }),
+    Object.assign(validConfig(), {
+      services: [
+        validConfig().services[0],
+        { binding: "LANDING", service: "opas-landing", remote: true },
+      ],
+    }),
+    Object.assign(validConfig(), {
+      d1_databases: [
+        {
+          binding: "DB",
+          database_name: "opas-mvp",
+          database_id: "unrelated-resource-id",
+          preview_database_id: "DB",
+          migrations_dir: "drizzle/sqlite",
+        },
+      ],
+    }),
     Object.assign(validConfig(), { workers_dev: false }),
     Object.assign(validConfig(), {
       vars: {
@@ -97,7 +281,8 @@ test("rejects protected, unrelated, and cross-wired resources", () => {
         {
           binding: "DB",
           database_name: "opas-another-database",
-          database_id: "database-id",
+          database_id: "00000000-0000-4000-8000-000000000001",
+          preview_database_id: "DB",
           migrations_dir: "drizzle/sqlite",
         },
       ],
@@ -107,7 +292,8 @@ test("rejects protected, unrelated, and cross-wired resources", () => {
         {
           binding: "DB",
           database_name: "opas-mvp",
-          database_id: "database-id",
+          database_id: "00000000-0000-4000-8000-000000000001",
+          preview_database_id: "DB",
           migrations_dir: "drizzle/another-directory",
         },
       ],
@@ -127,11 +313,149 @@ test("requires the scheduled custom Worker and fixed Workers AI binding", () => 
     Object.assign(validConfig(), { triggers: undefined }),
     Object.assign(validConfig(), { triggers: { crons: [] } }),
     Object.assign(validConfig(), { triggers: { crons: ["*/5 * * * *"] } }),
+    Object.assign(validConfig(), { triggers: { crons: ["* * * * *"] } }),
+    Object.assign(validConfig(), {
+      triggers: { crons: ["15 0 * * *", "* * * * *"] },
+    }),
   ];
 
   for (const config of cases) {
     assert.throws(() => validateCloudflareConfig(config));
   }
+});
+
+test("requires one fixed support email binding and a secret-only destination", () => {
+  const secretVariableCases = [
+    "ADMIN_EMAIL",
+    "ADMIN_PASSWORD",
+    "ADMIN_SESSION_SECRET",
+    "OPAS_HANDOFF_TO_EMAIL",
+  ].map((name) =>
+    Object.assign(validConfig(), {
+      vars: {
+        ...validConfig().vars,
+        [name]: "must-remain-encrypted",
+      },
+    }),
+  );
+  const cases = [
+    Object.assign(validConfig(), { send_email: undefined }),
+    Object.assign(validConfig(), {
+      send_email: [
+        {
+          name: "ANOTHER_EMAIL",
+          allowed_sender_addresses: ["hello@opas.dev"],
+        },
+      ],
+    }),
+    Object.assign(validConfig(), {
+      send_email: [
+        {
+          name: "SUPPORT_EMAIL",
+          allowed_sender_addresses: ["attacker@example.com"],
+        },
+      ],
+    }),
+    Object.assign(validConfig(), {
+      vars: {
+        ...validConfig().vars,
+        OPAS_GENERATION_FALLBACK_API_KEY: "must-remain-encrypted",
+      },
+    }),
+    ...secretVariableCases,
+  ];
+
+  for (const config of cases) {
+    assert.throws(() => validateCloudflareConfig(config));
+  }
+});
+
+test("requires the exact secret names for base and fallback deployments", () => {
+  const base = validConfig();
+  assert.deepEqual(
+    validateCloudflareConfig(base).secretNames,
+    requiredCloudflareSecretNames(),
+  );
+
+  for (const required of [
+    requiredCloudflareSecretNames().slice(1),
+    [...requiredCloudflareSecretNames(), "STALE_SECRET"],
+    [...requiredCloudflareSecretNames()].reverse(),
+  ]) {
+    assert.throws(() =>
+      validateCloudflareConfig(
+        Object.assign(validConfig(), { secrets: { required } }),
+      ),
+    );
+  }
+});
+
+test("validates the support destination with the encrypted deployment secrets", () => {
+  const environment = {
+    ADMIN_EMAIL: "admin@opas.dev",
+    ADMIN_PASSWORD: "password",
+    ADMIN_SESSION_SECRET: "s".repeat(32),
+    OPAS_HANDOFF_TO_EMAIL: "support@example.com",
+  };
+  assert.deepEqual(validateCloudflareSecrets(environment), environment);
+
+  for (const destination of [
+    "",
+    "support@localhost",
+    "support@example.com\r\nBcc: attacker@example.com",
+  ]) {
+    assert.throws(() =>
+      validateCloudflareSecrets({
+        ...environment,
+        OPAS_HANDOFF_TO_EMAIL: destination,
+      }),
+    );
+  }
+});
+
+test("keeps opt-in Cloudflare fallback credentials in encrypted secrets", () => {
+  const config = validConfig();
+  Object.assign(config.vars, {
+    OPAS_ANSWER_FALLBACK_INPUT_MICRODOLLARS_PER_MILLION_TOKENS: "400000",
+    OPAS_ANSWER_FALLBACK_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS: "600000",
+    OPAS_ANSWER_LEASE_MILLISECONDS: "65000",
+    OPAS_GENERATION_FALLBACK_ENABLED: "true",
+    OPAS_GENERATION_FALLBACK_MODEL: "portable-fallback-v1",
+    OPAS_GENERATION_FALLBACK_PROVIDER: "openai-compatible",
+    OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE:
+      "The fallback provider does not retain requests.",
+  });
+  config.secrets.required = requiredCloudflareSecretNames(config.vars);
+  assert.doesNotThrow(() => validateCloudflareConfig(config));
+  assert.deepEqual(
+    validateCloudflareConfig(config).secretNames,
+    requiredCloudflareSecretNames(config.vars),
+  );
+
+  const environment = {
+    ADMIN_EMAIL: "admin@opas.dev",
+    ADMIN_PASSWORD: "password",
+    ADMIN_SESSION_SECRET: "s".repeat(32),
+    OPAS_GENERATION_FALLBACK_API_KEY: "fallback-private-key",
+    OPAS_GENERATION_FALLBACK_ENDPOINT:
+      "https://fallback.example.com/v1/chat/completions",
+    OPAS_HANDOFF_TO_EMAIL: "support@example.com",
+  };
+  assert.deepEqual(validateCloudflareSecrets(environment, config.vars), {
+    ADMIN_EMAIL: "admin@opas.dev",
+    ADMIN_PASSWORD: "password",
+    ADMIN_SESSION_SECRET: "s".repeat(32),
+    OPAS_GENERATION_FALLBACK_API_KEY: "fallback-private-key",
+    OPAS_GENERATION_FALLBACK_ENDPOINT:
+      "https://fallback.example.com/v1/chat/completions",
+    OPAS_HANDOFF_TO_EMAIL: "support@example.com",
+  });
+  assert.throws(() =>
+    validateCloudflareSecrets(
+      { ...environment, OPAS_GENERATION_FALLBACK_ENDPOINT: "" },
+      config.vars,
+    ),
+  );
 });
 
 test("requires valid Cloudflare answer variables and validates optional topic rules", () => {
@@ -147,9 +471,13 @@ test("requires valid Cloudflare answer variables and validates optional topic ru
     .OPAS_GENERATION_GATEWAY_ID;
   const missingModel = validConfig();
   delete (missingModel.vars as Record<string, unknown>).OPAS_GENERATION_MODEL;
+  const missingAdmission = validConfig();
+  delete (missingAdmission.vars as Record<string, unknown>)
+    .OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS;
   const cases = [
     missingGateway,
     missingModel,
+    missingAdmission,
     Object.assign(validConfig(), {
       vars: {
         ...validConfig().vars,
@@ -160,6 +488,18 @@ test("requires valid Cloudflare answer variables and validates optional topic ru
       vars: {
         ...validConfig().vars,
         OPAS_GENERATION_RETENTION_DISCLOSURE: "",
+      },
+    }),
+    Object.assign(validConfig(), {
+      vars: {
+        ...validConfig().vars,
+        OPAS_ANSWER_MAXIMUM_CONCURRENCY: "4.0",
+      },
+    }),
+    Object.assign(validConfig(), {
+      vars: {
+        ...validConfig().vars,
+        OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS: "1",
       },
     }),
     Object.assign(validConfig(), {
@@ -217,6 +557,9 @@ test("rejects protected and unrelated custom routes", () => {
 });
 
 test("limits the maintained custom domain to its exact account and Worker", () => {
+  const missingRoute = validConfig();
+  delete (missingRoute as Partial<typeof missingRoute>).routes;
+  assert.throws(() => validateCloudflareConfig(missingRoute));
   assert.throws(() =>
     validateCloudflareConfig(
       Object.assign(validConfig(), { account_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }),

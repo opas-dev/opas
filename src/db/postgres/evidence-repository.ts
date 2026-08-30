@@ -1,6 +1,6 @@
 // ABOUTME: Stores versioned evidence, embeddings, jobs, and evaluations in Postgres and Neon.
 // ABOUTME: Keeps publication invalidation and retry checkpoints atomic within each deployment driver.
-import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -20,9 +20,11 @@ import {
   validateEmbeddingJobRetry,
   validateEmbeddingJobWorkRequest,
   validateEvaluationRunCompletion,
+  validateEvaluationRunResultsUpdate,
   validateEvaluationRunStart,
   validateEvidenceCandidateRevalidation,
   validateEvidenceCommit,
+  validateEvidenceReviewRequest,
   validateQuestionSet,
 } from "@/db/evidence";
 import type {
@@ -2060,6 +2062,20 @@ export function createPostgresEvidenceRepository(
         : null;
     },
 
+    async listQuestionSets(workspaceId, limit) {
+      validateEvidenceReviewRequest(workspaceId, limit);
+      const rows = await database
+        .select()
+        .from(savedQuestionSets)
+        .where(eq(savedQuestionSets.workspaceId, workspaceId))
+        .orderBy(desc(savedQuestionSets.createdAt), asc(savedQuestionSets.id))
+        .limit(limit);
+      return rows.map((questionSet) => ({
+        ...questionSet,
+        questions: questionSet.questions as readonly SavedQuestion[],
+      }));
+    },
+
     async startEvaluationRun(run) {
       validateEvaluationRunStart(run);
       await database.insert(evaluationRuns).values({
@@ -2092,6 +2108,24 @@ export function createPostgresEvidenceRepository(
       }
     },
 
+    async updateEvaluationRunResults(update) {
+      validateEvaluationRunResultsUpdate(update);
+      const updated = await database
+        .update(evaluationRuns)
+        .set({ results: update.results })
+        .where(
+          and(
+            eq(evaluationRuns.workspaceId, update.workspaceId),
+            eq(evaluationRuns.id, update.id),
+            eq(evaluationRuns.status, "completed"),
+          ),
+        )
+        .returning();
+      if (updated.length !== 1) {
+        throw new Error("Completed evaluation record was not found");
+      }
+    },
+
     async getEvaluationRun(workspaceId, id) {
       const [run] = await database
         .select()
@@ -2099,6 +2133,16 @@ export function createPostgresEvidenceRepository(
         .where(and(eq(evaluationRuns.workspaceId, workspaceId), eq(evaluationRuns.id, id)))
         .limit(1);
       return run ?? null;
+    },
+
+    async listEvaluationRuns(workspaceId, limit) {
+      validateEvidenceReviewRequest(workspaceId, limit);
+      return database
+        .select()
+        .from(evaluationRuns)
+        .where(eq(evaluationRuns.workspaceId, workspaceId))
+        .orderBy(desc(evaluationRuns.startedAt), asc(evaluationRuns.id))
+        .limit(limit);
     },
   };
 }

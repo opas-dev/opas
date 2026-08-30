@@ -1,15 +1,18 @@
-# OPAS
+# OPAS Answers
 
-OPAS is an open-source help center for the AI era: theme it at runtime, deploy it anywhere, and own both the content and the agent-readable surfaces.
+OPAS Answers is an open-source help center and source-grounded answer system: theme it at runtime, deploy it anywhere, and own the knowledge, answer pipeline, and agent-readable surfaces.
 
 - Runtime theming stores brand colors, fonts, radii, and the logo in the database and applies them without a rebuild.
-- Database-backed MDX gives administrators one authoring and publishing workflow across every deployment target.
+- Database-backed Markdown gives administrators visual and source authoring, safe preview, and one publishing workflow across every deployment target.
+- Markdown and GitBook imports preserve shallow navigation, source order, links, and bounded content-addressed images with dry-run and rollback reports.
 - Search, sitemap, Article and FAQ structured data, `/llms.txt`, `/llms-full.txt`, and per-article Markdown are built in.
-- Grounded answers stream from current published evidence with server-owned citations and deterministic abstention.
+- Native and embeddable answers stream from current published evidence with server-owned citations, deterministic abstention, and contextual support handoff.
+- Saved evaluations, answer outcomes, redacted traces, and content-gap analytics turn failed questions into a measurable knowledge-improvement queue.
+- Read-only MCP search and read tools expose the current published help corpus to compatible agents.
 - Anonymous helpfulness feedback and 30-day aggregate analytics avoid cookies and persisted requester metadata.
 - The same application supports Docker with Postgres, Vercel with Neon, and Cloudflare Workers with D1.
 
-OPAS v0.1 is the first verified release. The implementation plan and verification record live in [progress.md](progress.md); the product and architecture brief is in [docs/brief.md](docs/brief.md), and the source-backed next-release plan is in [docs/competitive-roadmap.md](docs/competitive-roadmap.md).
+OPAS v0.1 remains the latest verified release. This `0.2.0` development line is OPAS Answers; its remaining deployment and design-partner verification gates are tracked in [progress.md](progress.md). The original product and architecture brief is in [docs/brief.md](docs/brief.md), and the source-backed v0.2 product plan is in [docs/competitive-roadmap.md](docs/competitive-roadmap.md).
 
 ## Live targets
 
@@ -36,7 +39,7 @@ pnpm install --frozen-lockfile
 
 ## Docker quickstart
 
-Copy the single environment template and set `ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET`. Keep `OPAS_SITE_URL` aligned with the public port; the template already uses `http://localhost:3000`. The assistant needs the three non-secret generation endpoint, model, and retention-disclosure fields and, when required, `OPAS_GENERATION_API_KEY`. Without them, `/api/answers` returns unavailable while articles and search keep working. Embedding settings and a separate 32-byte `CRON_SECRET` are optional: answers use lexical published-evidence retrieval until a matching embedding generation becomes active, and the recovery sidecar stays idle while embedding recovery is unconfigured.
+Copy the single environment template and set `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, and a separate 32-byte `CRON_SECRET`; the cleanup sidecar requires the cron secret to enforce physical retention. Keep `OPAS_SITE_URL` aligned with the public port; the template already uses `http://localhost:3000`. The assistant needs the three non-secret generation endpoint, model, and retention-disclosure fields and, when required, `OPAS_GENERATION_API_KEY`. It also needs the six strict `OPAS_ANSWER_*` concurrency, rolling-budget, token-price, input-limit, and lease settings shown in the template. Prices are integer microdollars per one million provider-reported tokens; copy the selected provider's current prices rather than guessing them. Cross-provider fallback is disabled by default. Enabling it requires the complete `OPAS_GENERATION_FALLBACK_*` provider contract, both fallback token prices, an opposite provider, and a lease of at least 65 seconds; the browser disclosure names both vendors and models. Without a complete valid generation and admission contract, `/api/answers` returns unavailable while articles and search keep working. Answer analytics default to 30 days and can be shortened or disabled; explicit handoff contact/context has its own 30-day default. Configure support handoff with either `cloudflare-rest-email` or a fixed HTTPS `webhook`; leaving `OPAS_HANDOFF_PROVIDER` blank keeps the form fail-closed without affecting answers. Embedding provider settings remain optional: answers use lexical published-evidence retrieval until a matching embedding generation becomes active.
 
 ```sh
 cp .env.example .env
@@ -55,7 +58,7 @@ The public site is at [localhost:3000](http://localhost:3000) and administration
 
 ## Cloudflare quickstart
 
-Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and the `demo.opas.dev` custom domain. Its workers.dev endpoint remains enabled as a fallback. A fork can set its own explicit account ID and matching `opas-*` names for a workers.dev deployment. Copy `.env.example` to the gitignored `.env`, set the administrator credentials, then run:
+Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and the `demo.opas.dev` custom domain. Its workers.dev endpoint remains enabled as a fallback. A fork can set its own explicit account ID and matching `opas-*` names for a workers.dev deployment. Copy `.env.example` to the gitignored `.env`, set the administrator credentials and verified `OPAS_HANDOFF_TO_EMAIL` destination, then run:
 
 ```sh
 pnpm exec wrangler login
@@ -78,7 +81,7 @@ vercel pull --environment=production --yes
 vercel project update opas-mvp --framework nextjs --node-version 22.x --yes
 pnpm vercel:build https://opas-mvp-timo-bejans-projects.vercel.app
 pnpm neon:prepare
-vercel deploy --prebuilt --prod --skip-domain
+pnpm vercel:deploy https://opas-mvp-timo-bejans-projects.vercel.app
 ```
 
 Smoke-test the staged deployment and complete the browser MDX, client-navigation, console, and runtime-theme checks before promoting it. `vercel.json` keeps the function in `fra1`, close to the documented Neon region. The complete environment, verification, promotion, and rollback procedure is in [docs/deploy-vercel.md](docs/deploy-vercel.md).
@@ -106,7 +109,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and contributi
 ## Roadmap
 
 - v0.1: shipped across Docker/Postgres, primary Cloudflare/D1 production, and the live Vercel/Neon compatibility target with runtime theming, MDX authoring, search, discovery surfaces, and privacy-light analytics.
-- v0.2 — OPAS Answers: Markdown/GitBook migration, Markdown-native WYSIWYG authoring, published-source RAG with citations and abstention, native and embeddable chat, support handoff, answer evaluation, content-gap analytics, and read-only MCP.
+- v0.2 — OPAS Answers (current development line): Markdown/GitBook migration, Markdown-native WYSIWYG authoring, published-source RAG with citations and abstention, native and embeddable chat, support handoff, answer evaluation, content-gap analytics, and read-only MCP. Production rollout and design-partner evaluation remain release gates.
 - Next: revisions, signed previews, multiple administrators, review roles, GitHub sync, permission-scoped private knowledge, and demand-backed AI-agent traffic analytics.
 - Commercial edition: managed AI usage, organization connectors, SAML and SCIM, audit logs, advanced permissions, multi-brand operation, and white-label controls in the isolated `/ee` directory.
 

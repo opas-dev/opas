@@ -20,6 +20,7 @@ import type {
   Repository,
 } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
+import { createSqliteAnswerInferenceRepository } from "@/db/sqlite/answer-inference-repository";
 import {
   articleEvidenceCommitStatements,
   articleEvidenceInvalidationStatements,
@@ -399,6 +400,7 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
   const executableDatabase = database as DrizzleD1Database<typeof schema>;
 
   return {
+    ...createSqliteAnswerInferenceRepository(database),
     ...createSqliteEvidenceRepository(database),
     async checkHealth() {
       await executableDatabase.run(sql`select 1`);

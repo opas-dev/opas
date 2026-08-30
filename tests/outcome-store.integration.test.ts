@@ -1,0 +1,427 @@
+// ABOUTME: Runs analytics, public-write, and handoff-retention contracts on every SQL path.
+// ABOUTME: Verifies atomic races, monotonic outcomes, expiry filtering, and physical deletion.
+import assert from "node:assert/strict";
+import path from "node:path";
+import test from "node:test";
+
+import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import Database from "better-sqlite3";
+import { drizzle as createSqliteDatabase } from "drizzle-orm/better-sqlite3";
+import { migrate as migrateSqlite } from "drizzle-orm/better-sqlite3/migrator";
+import { drizzle as createD1Database } from "drizzle-orm/d1";
+import type { AnyD1Database } from "drizzle-orm/d1";
+import { drizzle as createPostgresDatabase } from "drizzle-orm/node-postgres";
+import { migrate as migratePostgres } from "drizzle-orm/node-postgres/migrator";
+import { Pool } from "pg";
+
+import { createPostgresConversationAnalyticsStore } from "@/db/postgres/conversation-analytics-store";
+import { createPostgresPublicWriteAdmissionStore } from "@/db/postgres/public-write-admission-store";
+import { createPostgresSupportHandoffStore } from "@/db/postgres/support-handoff-store";
+import * as postgresSchema from "@/db/schema/postgres";
+import * as sqliteSchema from "@/db/schema/sqlite";
+import { createSqliteConversationAnalyticsStore } from "@/db/sqlite/conversation-analytics-store";
+import { createSqlitePublicWriteAdmissionStore } from "@/db/sqlite/public-write-admission-store";
+import { createSqliteSupportHandoffStore } from "@/db/sqlite/support-handoff-store";
+import type { HandoffStorageRecord, HandoffStore } from "@/handoff/service";
+import {
+  createHandoffWriteAdmission,
+  type PublicWriteAdmissionStore,
+} from "@/outcomes/admission";
+import {
+  createConversationAnalyticsPolicy,
+  prepareConversationAnalyticsRecord,
+  type ConversationAnalyticsRecord,
+  type ConversationOutcome,
+} from "@/outcomes/records";
+import type {
+  ConversationAnalyticsStore,
+} from "@/outcomes/store";
+
+const workspaceId = "workspace_demo";
+const current = new Date("2026-08-30T12:00:00.000Z");
+const id = "123e4567-e89b-42d3-a456-426614174000";
+
+function analyticsRecord(
+  recordId: string,
+  outcome: ConversationOutcome,
+  overrides: Partial<ConversationAnalyticsRecord> = {},
+) {
+  const policy = createConversationAnalyticsPolicy({});
+  if (policy.status !== "enabled") throw new Error("Expected analytics policy");
+  const record = prepareConversationAnalyticsRecord(
+    {
+      conversation: [
+        { content: "Email reader@example.com, password=x", role: "user" },
+        { content: "Use the published settings page.", role: "assistant" },
+      ],
+      costMicrodollars: 7,
+      durationMilliseconds: 500,
+      firstTokenMilliseconds: outcome === "abstained" ? null : 275,
+      id: recordId,
+      inputTokens: 20,
+      model: "fixture-model",
+      outcome,
+      outputTokens: 10,
+      provider: "openai-compatible",
+      reason: `${outcome}-reason`,
+      retrievalTrace: [
+        {
+          articleContentHash: "a".repeat(64),
+          articleId: "article_password",
+          canonicalUrl: "https://help.example.com/account/reset-password",
+          contentHash: "b".repeat(64),
+          excerpt: "Reset password for reader@company from account settings.",
+          headingPath: ["Account", "Reset password"],
+          indexGeneration: 3,
+          mode: "hybrid",
+          ordinal: 0,
+          score: 0.91,
+          sourceId: "chunk_password",
+          sourceLineRange: { end: 9, start: 4 },
+          title: "Reset your password",
+        },
+      ],
+      startedAt: new Date("2026-08-30T11:59:59.500Z"),
+      updatedAt: current,
+      workspaceId,
+    },
+    policy,
+  );
+  if (!record) throw new Error("Expected analytics record");
+  return Object.freeze({ ...record, ...overrides });
+}
+
+function scope(readAt = current, retentionStartedAt = new Date("2026-07-31T12:00:00.000Z")) {
+  return Object.freeze({ readAt, retentionStartedAt });
+}
+
+function reservationId(index: number) {
+  return `${index.toString(16).padStart(8, "0")}-e89b-42d3-a456-426614174000`;
+}
+
+function handoffRecord(recordId: string, createdAt: Date): HandoffStorageRecord {
+  return Object.freeze({
+    contact: Object.freeze({ email: "reader@example.com" }),
+    context: Object.freeze({
+      citations: Object.freeze([]),
+      outcome: "abstained" as const,
+      pageUrl: "https://customer.example.com/account",
+      question: "How do I reset my password?",
+      transcript: Object.freeze([
+        Object.freeze({ content: "Question", role: "user" as const }),
+      ]),
+    }),
+    createdAt,
+    id: recordId,
+    payloadHash: "a".repeat(64),
+    status: "pending" as const,
+    workspaceId,
+  });
+}
+
+type StoreSet = Readonly<{
+  analytics: ConversationAnalyticsStore;
+  corruptAnalyticsTrace(id: string): Promise<void>;
+  handoffs: HandoffStore;
+  publicWrites: PublicWriteAdmissionStore;
+  rawAnalyticsCount(): Promise<number>;
+  rawHandoffCount(): Promise<number>;
+  rawPublicWriteCount(): Promise<number>;
+}>;
+
+async function exerciseStores(name: string, stores: StoreSet) {
+  assert.equal(await stores.analytics.put(analyticsRecord(id, "answered")), true);
+  assert.equal(
+    await stores.analytics.updateOutcome({
+      id,
+      outcome: "low-rated",
+      reason: "reader reason",
+      scope: scope(),
+      updatedAt: new Date("2026-08-30T12:00:01.000Z"),
+      workspaceId,
+    }),
+    true,
+  );
+  await stores.analytics.put(
+    analyticsRecord(id, "answered", {
+      reason: "late answered",
+      updatedAt: new Date("2026-08-30T12:00:02.000Z"),
+    }),
+  );
+  let retained = await stores.analytics.get(workspaceId, id, scope());
+  assert.equal(retained?.outcome, "low-rated", `${name} lost a low rating`);
+  assert.equal(retained?.reason, "reader reason");
+  assert.equal(retained?.firstTokenMilliseconds, 275);
+  assert.equal(retained?.conversation[0]?.content.includes("reader@example.com"), false);
+  assert.equal(retained?.retrievalTrace[0]?.excerpt.includes("reader@company"), false);
+  assert.deepEqual(retained?.retrievalTrace[0]?.headingPath, [
+    "Account",
+    "Reset password",
+  ]);
+  assert.deepEqual(retained?.retrievalTrace[0]?.sourceLineRange, {
+    end: 9,
+    start: 4,
+  });
+
+  await stores.analytics.put(
+    analyticsRecord(id, "escalated", {
+      reason: "support-handoff",
+      updatedAt: new Date("2026-08-30T12:00:03.000Z"),
+    }),
+  );
+  for (const outcome of ["abandoned", "low-rated"] as const) {
+    assert.equal(
+      await stores.analytics.updateOutcome({
+        id,
+        outcome,
+        reason: "late outcome",
+        scope: scope(),
+        updatedAt: new Date("2026-08-30T12:00:04.000Z"),
+        workspaceId,
+      }),
+      false,
+    );
+  }
+  await stores.analytics.put(
+    analyticsRecord(id, "abandoned", {
+      reason: "pagehide",
+      updatedAt: new Date("2026-08-30T12:00:05.000Z"),
+    }),
+  );
+  retained = await stores.analytics.get(workspaceId, id, scope());
+  assert.equal(retained?.outcome, "escalated", `${name} overwrote escalation`);
+  assert.equal(retained?.reason, "support-handoff");
+
+  const raceId = "abcdef01-e89b-42d3-a456-426614174001";
+  await Promise.all(
+    (["abandoned", "abstained", "answered", "low-rated", "escalated"] as const)
+      .map((outcome, index) =>
+        stores.analytics.put(
+          analyticsRecord(raceId, outcome, {
+            reason: outcome,
+            updatedAt: new Date(current.getTime() + index),
+          }),
+        ),
+      ),
+  );
+  assert.equal(
+    (await stores.analytics.get(workspaceId, raceId, scope()))?.outcome,
+    "escalated",
+    `${name} did not reconcile concurrent outcomes deterministically`,
+  );
+
+  const collisionId = "123e4567-e89b-42d3-a456-426614174999";
+  assert.equal(
+    await stores.analytics.put(analyticsRecord(collisionId, "answered")),
+    false,
+    `${name} exceeded the deterministic daily slot bound`,
+  );
+
+  const expiredId = "fedcba98-e89b-42d3-a456-426614174002";
+  const expired = analyticsRecord(expiredId, "answered", {
+    bucketDay: "20260601",
+    expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+    startedAt: new Date("2026-06-01T12:00:00.000Z"),
+    updatedAt: new Date("2026-06-01T12:00:01.000Z"),
+  });
+  assert.equal(await stores.analytics.put(expired), true);
+  assert.equal(await stores.analytics.get(workspaceId, expiredId, scope()), null);
+  assert.equal(
+    await stores.analytics.cleanup({ limit: 1, scope: scope(), workspaceId }),
+    1,
+  );
+  assert.equal(await stores.rawAnalyticsCount(), 2);
+  await stores.corruptAnalyticsTrace(raceId);
+  await assert.rejects(
+    stores.analytics.get(workspaceId, raceId, scope()),
+    /Stored retrieval analytics are invalid/u,
+    `${name} accepted malformed retained provenance`,
+  );
+
+  const admission = createHandoffWriteAdmission({
+    environment: { OPAS_HANDOFF_DAILY_LIMIT: "3" },
+    now: () => current,
+    store: stores.publicWrites,
+    workspaceId,
+  });
+  const allowances = await Promise.all(
+    Array.from({ length: 12 }, (_, index) => admission.reserve(reservationId(index + 1))),
+  );
+  assert.equal(
+    allowances.filter(({ accepted }) => accepted).length,
+    3,
+    `${name} overspent the durable handoff cap`,
+  );
+  const acceptedId = reservationId(
+    allowances.findIndex(({ accepted }) => accepted) + 1,
+  );
+  assert.deepEqual(await admission.reserve(acceptedId), { accepted: true });
+  const denied = allowances.find(
+    (allowance): allowance is { accepted: false; retryAfterSeconds: number } =>
+      !allowance.accepted,
+  );
+  assert.equal(denied?.retryAfterSeconds, 86_400);
+  assert.equal(await stores.rawPublicWriteCount(), 3);
+  assert.equal(
+    await stores.publicWrites.cleanup(
+      workspaceId,
+      new Date("2026-10-01T12:00:00.000Z"),
+      2,
+    ),
+    2,
+  );
+  assert.equal(await stores.rawPublicWriteCount(), 1);
+
+  const oldHandoffId = "323e4567-e89b-42d3-a456-426614174000";
+  const activeHandoffId = "423e4567-e89b-42d3-a456-426614174000";
+  await stores.handoffs.reserve(
+    handoffRecord(oldHandoffId, new Date("2026-07-01T00:00:00.000Z")),
+  );
+  await stores.handoffs.reserve(handoffRecord(activeHandoffId, current));
+  assert.equal(
+    await stores.handoffs.cleanup(
+      workspaceId,
+      new Date("2026-07-31T12:00:00.000Z"),
+      1,
+    ),
+    1,
+  );
+  assert.equal(await stores.rawHandoffCount(), 1);
+}
+
+type D1Bound = Readonly<{
+  all(): Promise<unknown>;
+  first<T>(): Promise<T | null>;
+  run(): Promise<unknown>;
+  execute(): unknown;
+}>;
+
+function createD1Facade(client: Database.Database) {
+  const result = (results: unknown[], changes = 0) => ({
+    meta: { changes },
+    results,
+    success: true,
+  });
+  const d1 = {
+    prepare(source: string) {
+      return {
+        bind(...parameters: unknown[]): D1Bound {
+          const returnsRows = /^\s*(?:select|with)\b/iu.test(source) || /\breturning\b/iu.test(source);
+          const execute = () => {
+            if (returnsRows) return result(client.prepare(source).all(...parameters) as unknown[]);
+            const changed = client.prepare(source).run(...parameters);
+            return result([], changed.changes);
+          };
+          return {
+            async all() {
+              return execute();
+            },
+            execute,
+            async first<T>() {
+              return (client.prepare(source).get(...parameters) as T | undefined) ?? null;
+            },
+            async run() {
+              return execute();
+            },
+          };
+        },
+      };
+    },
+    async batch(statements: readonly D1Bound[]) {
+      return client.transaction((items: readonly D1Bound[]) =>
+        items.map((statement) => statement.execute()),
+      )(statements);
+    },
+  } as unknown as AnyD1Database;
+  return createD1Database(d1, { schema: sqliteSchema });
+}
+
+function migratedSqlite() {
+  const client = new Database(":memory:");
+  client.pragma("foreign_keys = ON");
+  const database = createSqliteDatabase(client, { schema: sqliteSchema });
+  migrateSqlite(database, { migrationsFolder: path.join(process.cwd(), "drizzle/sqlite") });
+  client
+    .prepare("insert into workspaces (id, slug, name) values (?, ?, ?)")
+    .run(workspaceId, "demo", "Demo");
+  return { client, database };
+}
+
+function sqliteStores(
+  client: Database.Database,
+  database: Parameters<typeof createSqliteConversationAnalyticsStore>[0],
+): StoreSet {
+  const count = async (table: string) =>
+    Number((client.prepare(`select count(*) as count from ${table}`).get() as { count: number }).count);
+  return {
+    analytics: createSqliteConversationAnalyticsStore(database),
+    async corruptAnalyticsTrace(recordId) {
+      client
+        .prepare(
+          "update conversation_analytics set retrieval_trace = ? where id = ? and workspace_id = ?",
+        )
+        .run(JSON.stringify([{ sourceId: "invalid" }]), recordId, workspaceId);
+    },
+    handoffs: createSqliteSupportHandoffStore(database),
+    publicWrites: createSqlitePublicWriteAdmissionStore(database),
+    rawAnalyticsCount: () => count("conversation_analytics"),
+    rawHandoffCount: () => count("support_handoffs"),
+    rawPublicWriteCount: () => count("public_write_reservations"),
+  };
+}
+
+test("portable privacy stores pass on local SQLite", async () => {
+  const { client, database } = migratedSqlite();
+  try {
+    await exerciseStores("SQLite", sqliteStores(client, database));
+  } finally {
+    client.close();
+  }
+});
+
+test("portable privacy stores pass through D1 client semantics", async () => {
+  const { client } = migratedSqlite();
+  try {
+    await exerciseStores("D1", sqliteStores(client, createD1Facade(client)));
+  } finally {
+    client.close();
+  }
+});
+
+test(
+  "portable privacy stores serialize real Postgres races",
+  { timeout: 120_000 },
+  async () => {
+    const container = await new PostgreSqlContainer("postgres:18.6-alpine").start();
+    const pool = new Pool({ connectionString: container.getConnectionUri(), max: 20 });
+    const database = createPostgresDatabase(pool, { schema: postgresSchema });
+    try {
+      await migratePostgres(database, {
+        migrationsFolder: path.join(process.cwd(), "drizzle/postgres"),
+      });
+      await pool.query(
+        "insert into workspaces (id, slug, name) values ($1, $2, $3)",
+        [workspaceId, "demo", "Demo"],
+      );
+      const count = async (table: string) =>
+        Number((await pool.query(`select count(*)::integer as count from ${table}`)).rows[0].count);
+      await exerciseStores("Postgres", {
+        analytics: createPostgresConversationAnalyticsStore(database),
+        async corruptAnalyticsTrace(recordId) {
+          await pool.query(
+            "update conversation_analytics set retrieval_trace = $1::jsonb where id = $2 and workspace_id = $3",
+            [JSON.stringify([{ sourceId: "invalid" }]), recordId, workspaceId],
+          );
+        },
+        handoffs: createPostgresSupportHandoffStore(database),
+        publicWrites: createPostgresPublicWriteAdmissionStore(database),
+        rawAnalyticsCount: () => count("conversation_analytics"),
+        rawHandoffCount: () => count("support_handoffs"),
+        rawPublicWriteCount: () => count("public_write_reservations"),
+      });
+    } finally {
+      await pool.end();
+      await container.stop();
+    }
+  },
+);

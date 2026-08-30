@@ -17,6 +17,11 @@ import {
   type CompletedAnswerTurn,
   type CurrentPageContext,
 } from "@/app/answer-stream";
+import {
+  prepareSupportHandoffContext,
+  SupportHandoff,
+  type SupportHandoffContext,
+} from "@/app/support-handoff";
 
 import {
   constrainSearchInput,
@@ -46,6 +51,7 @@ type SearchState = {
 
 const searchDelay = 300;
 const maximumConversationQuestions = 4;
+const maximumFeedbackReasonCharacters = 240;
 const defaultSuggestedQuestions = [
   "How do I get started?",
   "How can I customize the help center?",
@@ -53,6 +59,7 @@ const defaultSuggestedQuestions = [
 
 type SearchProps = Readonly<{
   currentPage?: CurrentPageContext;
+  handoffPageUrl?: string;
   suggestedQuestions?: readonly string[];
 }>;
 
@@ -64,14 +71,25 @@ type AssistantTurn = Omit<AnswerStreamSnapshot, "phase"> &
   }>;
 
 type ActiveAnswer = {
+  conversationId: string | null;
   controller: AbortController;
   id: number;
 };
 
-function pendingTurn(id: number, question: string): AssistantTurn {
+type AnswerRating = "helpful" | "unhelpful";
+type FeedbackDetail = Readonly<{
+  phase: "error" | "idle" | "sending" | "success";
+  reason: string;
+}>;
+
+function pendingTurn(
+  id: number,
+  question: string,
+): AssistantTurn {
   return {
     abstention: null,
     blocks: [],
+    conversationId: null,
     failure: null,
     finish: null,
     id,
@@ -79,6 +97,30 @@ function pendingTurn(id: number, question: string): AssistantTurn {
     phase: "loading",
     question,
   };
+}
+
+export async function sendAnswerOutcome(
+  conversationId: string,
+  outcome: "abandoned" | "low-rated",
+  reason?: string,
+) {
+  try {
+    const response = await fetch("/api/answers/outcomes", {
+      body: JSON.stringify({ conversationId, outcome, ...(reason ? { reason } : {}) }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json; charset=utf-8",
+      },
+      keepalive: true,
+      method: "POST",
+    });
+    return response.status === 202 && !response.redirected;
+  } catch {
+    // Outcome analytics are optional and cannot affect the answer experience.
+    return false;
+  }
 }
 
 function completedTurn(turn: AssistantTurn): CompletedAnswerTurn | null {
@@ -92,6 +134,54 @@ function completedTurn(turn: AssistantTurn): CompletedAnswerTurn | null {
     return { answer: turn.abstention.message, question: turn.question };
   }
   return null;
+}
+
+function normalizedHandoffPageUrl(value: string | undefined) {
+  const candidate =
+    value ?? (typeof window === "undefined" ? "" : window.location.href);
+  if (!candidate) return null;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password
+  ) {
+    return null;
+  }
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function supportHandoffContext(
+  turns: readonly AssistantTurn[],
+  currentTurn: AssistantTurn,
+  outcome: SupportHandoffContext["outcome"],
+  pageUrl: string,
+): SupportHandoffContext {
+  const transcript = turns.flatMap((turn) => {
+    const completed = completedTurn(turn);
+    return completed
+      ? [
+          Object.freeze({ content: completed.question, role: "user" as const }),
+          Object.freeze({ content: completed.answer, role: "assistant" as const }),
+        ]
+      : [];
+  });
+  return prepareSupportHandoffContext(Object.freeze({
+    citations: Object.freeze(
+      currentTurn.blocks.map(({ citation }) => citation),
+    ),
+    outcome,
+    pageUrl,
+    question: currentTurn.question,
+    transcript: Object.freeze(transcript),
+  }));
 }
 
 function answerStatus(turn: AssistantTurn | undefined) {
@@ -164,6 +254,7 @@ function describeSearch(state: SearchState, query: string) {
 
 export function Search({
   currentPage,
+  handoffPageUrl,
   suggestedQuestions = defaultSuggestedQuestions,
 }: SearchProps = {}) {
   const [query, setQuery] = useState("");
@@ -175,6 +266,12 @@ export function Search({
     results: [],
   });
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
+  const [answerRatings, setAnswerRatings] = useState<
+    Readonly<Record<number, AnswerRating>>
+  >({});
+  const [feedbackDetails, setFeedbackDetails] = useState<
+    Readonly<Record<number, FeedbackDetail>>
+  >({});
   const activeAnswer = useRef<ActiveAnswer | null>(null);
   const nextTurnId = useRef(1);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -188,6 +285,7 @@ export function Search({
   const safeCurrentPage = isValidCurrentPageContext(currentPage)
     ? currentPage
     : undefined;
+  const supportPageUrl = normalizedHandoffPageUrl(handoffPageUrl);
   const suggestions = Array.from(
     new Set(
       suggestedQuestions
@@ -204,6 +302,13 @@ export function Search({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      if (activeAnswer.current?.conversationId) {
+        void sendAnswerOutcome(
+          activeAnswer.current.conversationId,
+          "abandoned",
+          "page-closed",
+        );
+      }
       activeAnswer.current?.controller.abort();
     };
   }, []);
@@ -278,7 +383,11 @@ export function Search({
         turn.id === id
           ? "id" in update
             ? update
-            : { ...update, id, question: turn.question }
+            : {
+                ...update,
+                id,
+                question: turn.question,
+              }
           : turn,
       ),
     );
@@ -305,7 +414,7 @@ export function Search({
     setFollowUp("");
 
     const controller = new AbortController();
-    activeAnswer.current = { controller, id };
+    activeAnswer.current = { controller, conversationId: null, id };
     void (async () => {
       try {
         const response = await fetch("/api/answers", {
@@ -325,7 +434,12 @@ export function Search({
         });
         const result = await consumeAnswerResponse(response, {
           onSnapshot: (snapshot) => {
-            if (activeAnswer.current?.id === id) replaceTurn(id, snapshot);
+            if (activeAnswer.current?.id === id) {
+              if (snapshot.conversationId) {
+                activeAnswer.current.conversationId = snapshot.conversationId;
+              }
+              replaceTurn(id, snapshot);
+            }
           },
           signal: controller.signal,
         });
@@ -355,6 +469,13 @@ export function Search({
     const request = activeAnswer.current;
     if (!request) return;
     request.controller.abort();
+    if (request.conversationId) {
+      void sendAnswerOutcome(
+        request.conversationId,
+        "abandoned",
+        "user-cancelled",
+      );
+    }
     setTurns((current) =>
       current.map((turn) =>
         turn.id === request.id
@@ -369,6 +490,8 @@ export function Search({
     setTurns([]);
     setQuery("");
     setFollowUp("");
+    setAnswerRatings({});
+    setFeedbackDetails({});
     setSearch({ phase: "idle", query: "", results: [] });
     window.requestAnimationFrame(() => searchInput.current?.focus());
   }
@@ -518,13 +641,34 @@ export function Search({
           ) : null}
 
           <ol className="answer-turns" aria-label="Assistant conversation">
-            {turns.map((turn, turnIndex) => (
-              <li key={turn.id}>
-                <article aria-labelledby={`answer-question-${turn.id}`}>
-                  <h3 id={`answer-question-${turn.id}`}>
-                    <span>Question {turnIndex + 1}</span>
-                    {turn.question}
-                  </h3>
+            {turns.map((turn, turnIndex) => {
+              const latest = turn.id === latestTurn?.id;
+              const rating = answerRatings[turn.id];
+              const feedbackDetail = feedbackDetails[turn.id] ?? {
+                phase: "idle" as const,
+                reason: "",
+              };
+              const outcome =
+                turn.phase === "abstained"
+                  ? "abstained"
+                  : rating === "unhelpful"
+                    ? "low-rated"
+                    : "user-requested";
+              const handoffContext = supportPageUrl
+                ? supportHandoffContext(
+                    turns.slice(0, turnIndex + 1),
+                    turn,
+                    outcome,
+                    supportPageUrl,
+                  )
+                : null;
+              return (
+                <li key={turn.id}>
+                  <article aria-labelledby={`answer-question-${turn.id}`}>
+                    <h3 id={`answer-question-${turn.id}`}>
+                      <span>Question {turnIndex + 1}</span>
+                      {turn.question}
+                    </h3>
 
                   {turn.phase === "loading" && turn.blocks.length === 0 ? (
                     <div className="answer-skeleton" aria-hidden="true">
@@ -569,9 +713,153 @@ export function Search({
                       {turn.metadata.retentionDisclosure}
                     </p>
                   ) : null}
-                </article>
-              </li>
-            ))}
+
+                  {latest && turn.phase === "complete" ? (
+                    <fieldset className="answer-feedback">
+                      <legend>Was this answer helpful?</legend>
+                      <div>
+                        <button
+                          type="button"
+                          aria-pressed={rating === "helpful"}
+                          onClick={() =>
+                            setAnswerRatings((current) => ({
+                              ...current,
+                              [turn.id]: "helpful",
+                            }))
+                          }
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={rating === "unhelpful"}
+                          onClick={() => {
+                            setAnswerRatings((current) => ({
+                              ...current,
+                              [turn.id]: "unhelpful",
+                            }));
+                            setFeedbackDetails((current) =>
+                              current[turn.id]
+                                ? current
+                                : {
+                                    ...current,
+                                    [turn.id]: { phase: "idle", reason: "" },
+                                  },
+                            );
+                            if (turn.conversationId) {
+                              void sendAnswerOutcome(
+                                turn.conversationId,
+                                "low-rated",
+                                "not-helpful",
+                              );
+                            }
+                          }}
+                        >
+                          No
+                        </button>
+                        {rating === "helpful" ? (
+                          <p role="status">Thanks for the feedback.</p>
+                        ) : null}
+                      </div>
+                      {rating === "unhelpful" && turn.conversationId ? (
+                        <form
+                          className="answer-feedback-detail"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            const reason = feedbackDetail.reason.trim();
+                            if (
+                              !reason ||
+                              feedbackDetail.phase === "sending" ||
+                              feedbackDetail.phase === "success"
+                            ) {
+                              return;
+                            }
+                            setFeedbackDetails((current) => ({
+                              ...current,
+                              [turn.id]: { ...feedbackDetail, phase: "sending" },
+                            }));
+                            void sendAnswerOutcome(
+                              turn.conversationId!,
+                              "low-rated",
+                              reason,
+                            ).then((accepted) => {
+                              setFeedbackDetails((current) => ({
+                                ...current,
+                                [turn.id]: {
+                                  ...feedbackDetail,
+                                  phase: accepted ? "success" : "error",
+                                },
+                              }));
+                            });
+                          }}
+                        >
+                          <label htmlFor={`answer-feedback-reason-${turn.id}`}>
+                            What could be better? <span>Optional</span>
+                          </label>
+                          <textarea
+                            id={`answer-feedback-reason-${turn.id}`}
+                            maxLength={maximumFeedbackReasonCharacters}
+                            rows={3}
+                            value={feedbackDetail.reason}
+                            disabled={
+                              feedbackDetail.phase === "sending" ||
+                              feedbackDetail.phase === "success"
+                            }
+                            onChange={(event) =>
+                              setFeedbackDetails((current) => ({
+                                ...current,
+                                [turn.id]: {
+                                  phase: "idle",
+                                  reason: event.target.value,
+                                },
+                              }))
+                            }
+                          />
+                          <button
+                            type="submit"
+                            disabled={
+                              !feedbackDetail.reason.trim() ||
+                              feedbackDetail.phase === "sending" ||
+                              feedbackDetail.phase === "success"
+                            }
+                          >
+                            {feedbackDetail.phase === "error"
+                              ? "Try feedback again"
+                              : feedbackDetail.phase === "sending"
+                                ? "Sending…"
+                                : feedbackDetail.phase === "success"
+                                  ? "Feedback sent"
+                                  : "Send feedback"}
+                          </button>
+                          <p role="status" aria-live="polite">
+                            {feedbackDetail.phase === "success"
+                              ? "Thanks — your optional detail was recorded."
+                              : feedbackDetail.phase === "error"
+                                ? "We couldn’t record that detail. You can try again."
+                                : ""}
+                          </p>
+                        </form>
+                      ) : null}
+                    </fieldset>
+                  ) : null}
+
+                  {latest &&
+                  turn.conversationId &&
+                  handoffContext &&
+                  (turn.phase === "complete" || turn.phase === "abstained") ? (
+                    <SupportHandoff
+                      context={handoffContext}
+                      emphasized={
+                        turn.phase === "abstained" || rating === "unhelpful"
+                      }
+                      requestKey={`${turn.id}-${outcome}`}
+                      conversationId={turn.conversationId}
+                    />
+                  ) : null}
+                  </article>
+                </li>
+              );
+            })}
           </ol>
 
           <div className="answer-actions">

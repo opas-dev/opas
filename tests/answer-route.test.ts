@@ -23,6 +23,7 @@ const answerUrl = "https://help.example.test/api/answers";
 const privateValue = "private-provider-key-and-prompt";
 const articleHash = "a".repeat(64);
 const chunkHash = "b".repeat(64);
+const conversationId = "123e4567-e89b-42d3-a456-426614174000";
 const safeProviderOutput =
   '{"type":"content","markdown":"Open **Account settings**."}\n' +
   '{"type":"citation","id":"C1"}\n';
@@ -147,6 +148,41 @@ async function completeRecordChunks(response: Response) {
   return parsed;
 }
 
+test("starts the analytics clock before admission and runtime construction", async () => {
+  const requestStartedAt = new Date("2026-08-30T12:00:00.000Z");
+  const order: string[] = [];
+  let recorderStartedAt: Date | undefined;
+  const response = await handleAnswerRequest(answerRequest(), {
+    consumeAllowance: async () => {
+      order.push("allowance");
+      return { accepted: true };
+    },
+    createConversationId: () => conversationId,
+    createRecorder(options) {
+      order.push("recorder");
+      recorderStartedAt = options.startedAt;
+      return Object.freeze({
+        abandon: async () => {},
+        observeEvent: async () => {},
+        observeProvider: () => {},
+        observeRetrieval: () => {},
+      });
+    },
+    createRuntime: async () => {
+      order.push("runtime");
+      return runtime(outputGeneration([safeProviderOutput]));
+    },
+    now: () => {
+      order.push("clock");
+      return requestStartedAt;
+    },
+  });
+
+  await response.text();
+  assert.deepEqual(order, ["clock", "allowance", "runtime", "recorder"]);
+  assert.equal(recorderStartedAt, requestStartedAt);
+});
+
 test("Cloudflare and OpenAI-compatible fixtures expose the same NDJSON answer contract", async (context) => {
   const workersCalls: unknown[][] = [];
   const fixtures: Array<{ name: string; generation: GenerationAdapter }> = [
@@ -207,6 +243,7 @@ test("Cloudflare and OpenAI-compatible fixtures expose the same NDJSON answer co
   for (const fixture of fixtures) {
     await context.test(fixture.name, async () => {
       const response = await handleAnswerRequest(answerRequest(), {
+        createConversationId: () => conversationId,
         createRuntime: async () => runtime(fixture.generation),
       });
       const streamed = await completeRecordChunks(response);
@@ -242,6 +279,7 @@ test("Cloudflare and OpenAI-compatible fixtures expose the same NDJSON answer co
         },
       ]);
       assert.equal(streamed[0]?.type, "metadata");
+      assert.equal(streamed[0]?.conversationId, conversationId);
       assert.deepEqual(streamed[0]?.generation, fixture.generation.metadata);
       assert.doesNotMatch(JSON.stringify(streamed), new RegExp(privateValue, "u"));
     });
@@ -267,8 +305,9 @@ test("rejects non-POST, non-JSON, malformed UTF-8, malformed JSON, and unknown f
     answerRequest(new Uint8Array([0xc3, 0x28])),
     answerRequest("{"),
     answerRequest(JSON.stringify({ question: "Help", workspaceId: "other" })),
+    answerRequest(JSON.stringify({ conversationId, question: "Help" })),
   ];
-  const statuses = [405, 415, 400, 400, 400];
+  const statuses = [405, 415, 400, 400, 400, 400];
 
   for (const [index, request] of fixtures.entries()) {
     await context.test(String(statuses[index]), async () => {
@@ -346,6 +385,7 @@ test("emits only a sanitized in-stream error after a previously validated cited 
 
 test("propagates request cancellation and emits no private provider failure", async () => {
   let providerAborted = false;
+  let recordedReason: string | null = null;
   let markProviderWaiting: () => void = () => {};
   const providerWaiting = new Promise<void>((resolve) => {
     markProviderWaiting = resolve;
@@ -374,7 +414,18 @@ test("propagates request cancellation and emits no private provider failure", as
   );
   const response = await handleAnswerRequest(
     answerRequest(undefined, undefined, requestController.signal),
-    { createRuntime: async () => runtime(generation) },
+    {
+      createRecorder: () =>
+        Object.freeze({
+          async abandon(reason: string) {
+            recordedReason = reason;
+          },
+          observeEvent: async () => {},
+          observeProvider: () => {},
+          observeRetrieval: () => {},
+        }),
+      createRuntime: async () => runtime(generation),
+    },
   );
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -392,6 +443,7 @@ test("propagates request cancellation and emits no private provider failure", as
   streamed += decoder.decode(failed.value, { stream: true });
 
   assert.equal(providerAborted, true);
+  assert.equal(recordedReason, "cancelled");
   assert.match(streamed, /"code":"cancelled"/u);
   assert.doesNotMatch(streamed, new RegExp(privateValue, "u"));
 });
@@ -408,6 +460,7 @@ test("contains runtime configuration and provider outages without logging reques
   });
 
   await context.test("provider outage", async () => {
+    let recordedReason: string | null = null;
     const generation = fixtureGeneration(() =>
       (async function* (): AsyncIterable<GenerationEvent> {
         throw new GenerationError(
@@ -417,10 +470,20 @@ test("contains runtime configuration and provider outages without logging reques
       })(),
     );
     const response = await handleAnswerRequest(answerRequest(), {
+      createRecorder: () =>
+        Object.freeze({
+          async abandon(reason: string) {
+            recordedReason = reason;
+          },
+          observeEvent: async () => {},
+          observeProvider: () => {},
+          observeRetrieval: () => {},
+        }),
       createRuntime: async () => runtime(generation),
     });
     const body = await response.text();
     assert.equal(response.status, 503);
+    assert.equal(recordedReason, "request-failed");
     assert.deepEqual(JSON.parse(body), { error: "unavailable" });
     assert.doesNotMatch(body, new RegExp(privateValue, "u"));
   });

@@ -8,6 +8,7 @@ import {
   useActionState,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -19,6 +20,11 @@ import {
   type ContentActionState,
 } from "@/app/admin/content/actions";
 import { articleAssetManifestNeedsReset } from "@/app/admin/content/article-asset-state";
+import { ArticleDeletionConfirmation } from "@/app/admin/content/article-authoring-controls";
+import {
+  articleEditorNavigationNeedsConfirmation,
+  articleEditorSnapshot,
+} from "@/app/admin/content/article-editor-safety";
 import {
   inspectArticleVisualSource,
   joinArticleSource,
@@ -138,16 +144,45 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
   const [preview, setPreview] = useState<ArticlePreviewResult>(initialPreview);
   const [previewPending, setPreviewPending] = useState(false);
   const [assetUploadPending, setAssetUploadPending] = useState(false);
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState(() =>
+    articleEditorSnapshot({
+      title: article.title,
+      categoryId: article.categoryId,
+      slug: article.slug,
+      authorName: article.authorName,
+      status: article.status,
+      isFaq: article.isFaq,
+      source: article.mdx,
+    }),
+  );
   const activeRef = useRef(false);
   const assetManifestRef = useRef<string | undefined>(undefined);
   const assetUploadCountRef = useRef(0);
   const assetUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const submittedSnapshotRef = useRef<string | null>(null);
+  const navigationApprovedRef = useRef(false);
   const [saveState, saveAction, saving] = useActionState(saveArticleAction, initialActionState);
   const [, startSaving] = useTransition();
   const [deleteState, deleteAction, deleting] = useActionState(
     deleteArticleAction,
     initialActionState,
   );
+
+  const currentSnapshot = useMemo(
+    () =>
+      articleEditorSnapshot({
+        title,
+        categoryId,
+        slug,
+        authorName,
+        status,
+        isFaq,
+        source,
+      }),
+    [authorName, categoryId, isFaq, slug, source, status, title],
+  );
+  const hasUnsavedChanges = currentSnapshot !== savedSnapshot;
 
   const discardAssetManifest = useCallback((manifestId: string) => {
     void fetch("/admin/content/assets", {
@@ -192,6 +227,70 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
       assetManifestRef.current = undefined;
     }
   }, [saveState]);
+
+  useEffect(() => {
+    if (saveState.status === "success" && submittedSnapshotRef.current) {
+      setSavedSnapshot(submittedSnapshotRef.current);
+      submittedSnapshotRef.current = null;
+    }
+  }, [saveState.revision, saveState.status]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      return;
+    }
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (navigationApprovedRef.current) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = true;
+    }
+
+    function handleDocumentClick(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const link = target.closest<HTMLAnchorElement>("a[href]");
+      if (
+        !link ||
+        !articleEditorNavigationNeedsConfirmation({
+          currentUrl: window.location.href,
+          href: link.href,
+          button: event.button,
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          download: link.hasAttribute("download"),
+          target: link.target,
+        })
+      ) {
+        return;
+      }
+
+      if (!window.confirm("You have unsaved article changes. Leave without saving?")) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      navigationApprovedRef.current = true;
+      window.setTimeout(() => {
+        navigationApprovedRef.current = false;
+      }, 0);
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleDocumentClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleDocumentClick, true);
+    };
+  }, [hasUnsavedChanges]);
 
   const stageImage: NonNullable<StageArticleImage> = useCallback(async (file) => {
     assetUploadCountRef.current += 1;
@@ -301,6 +400,7 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
     if (manifestId) {
       formData.set("assetManifestId", manifestId);
     }
+    submittedSnapshotRef.current = currentSnapshot;
 
     startSaving(() => {
       saveAction(formData);
@@ -520,7 +620,7 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
                     tabIndex={editorMode === "visual" ? 0 : -1}
                     onClick={() => setEditorMode("visual")}
                     onKeyDown={handleEditorTabKeyDown}
-                    className="min-h-9 rounded-sm px-3 text-sm font-semibold aria-selected:bg-background aria-selected:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    className="min-h-11 rounded-sm px-3 text-sm font-semibold aria-selected:bg-background aria-selected:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Visual
                   </button>
@@ -533,7 +633,7 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
                     tabIndex={editorMode === "source" ? 0 : -1}
                     onClick={() => setEditorMode("source")}
                     onKeyDown={handleEditorTabKeyDown}
-                    className="min-h-9 rounded-sm px-3 text-sm font-semibold aria-selected:bg-background aria-selected:text-primary"
+                    className="min-h-11 rounded-sm px-3 text-sm font-semibold aria-selected:bg-background aria-selected:text-primary"
                   >
                     Source
                   </button>
@@ -630,11 +730,15 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
                   : "Create article"}
           </button>
           <p
-            className={`m-0 text-sm ${saveState.status === "error" ? "text-danger" : saveState.status === "success" ? "text-success" : "text-muted"}`}
+            className={`m-0 text-sm ${saveState.status === "error" ? "text-danger" : !hasUnsavedChanges && saveState.status === "success" ? "text-success" : "text-muted"}`}
             role={saveState.status === "error" ? "alert" : "status"}
             aria-live="polite"
           >
-            {saveState.message || "Changes are stored immediately when saved."}
+            {saving
+              ? "Saving changes…"
+              : hasUnsavedChanges
+                ? "Unsaved changes."
+                : saveState.message || "All changes are saved."}
           </p>
         </div>
       </form>
@@ -648,21 +752,15 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
             This permanently removes the article and its feedback and view records. This action
             cannot be undone.
           </p>
-          <form action={deleteAction} className="flex flex-wrap items-center gap-3">
-            <input type="hidden" name="id" value={article.id} />
-            <button
-              type="submit"
-              disabled={deleting}
-              className="min-h-11 rounded-md bg-danger px-4 text-sm font-semibold text-danger-foreground disabled:cursor-wait disabled:opacity-60"
-            >
-              {deleting ? "Deleting…" : "Delete this article"}
-            </button>
-            {deleteState.message ? (
-              <p className="m-0 text-sm text-danger" role="alert">
-                {deleteState.message}
-              </p>
-            ) : null}
-          </form>
+          <ArticleDeletionConfirmation
+            articleId={article.id}
+            confirmationOpen={deleteConfirmationOpen}
+            deleting={deleting}
+            message={deleteState.message}
+            action={deleteAction}
+            onRequestConfirmation={() => setDeleteConfirmationOpen(true)}
+            onCancel={() => setDeleteConfirmationOpen(false)}
+          />
         </section>
       ) : null}
     </div>

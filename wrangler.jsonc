@@ -21,8 +21,22 @@
   "ai": {
     "binding": "AI"
   },
+  "secrets": {
+    "required": [
+      "ADMIN_EMAIL",
+      "ADMIN_PASSWORD",
+      "ADMIN_SESSION_SECRET",
+      "OPAS_HANDOFF_TO_EMAIL"
+    ]
+  },
+  "send_email": [
+    {
+      "name": "SUPPORT_EMAIL",
+      "allowed_sender_addresses": ["hello@opas.dev"]
+    }
+  ],
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": ["* * * * *", "15 0 * * *"]
   },
   "services": [
     {
@@ -33,9 +47,22 @@
   "vars": {
     "NEXTJS_ENV": "production",
     "OPAS_DATABASE_DRIVER": "d1",
+    "OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS": "1000000",
+    "OPAS_ANSWER_ANALYTICS_RETENTION_DAYS": "30",
+    "OPAS_ANSWER_INPUT_MICRODOLLARS_PER_MILLION_TOKENS": "152000",
+    "OPAS_ANSWER_LEASE_MILLISECONDS": "45000",
+    "OPAS_ANSWER_MAXIMUM_CONCURRENCY": "4",
+    "OPAS_ANSWER_MAXIMUM_INPUT_TOKENS": "32000",
+    "OPAS_ANSWER_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS": "287000",
     "OPAS_GENERATION_GATEWAY_ID": "opas-answers",
     "OPAS_GENERATION_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
-    "OPAS_GENERATION_RETENTION_DISCLOSURE": "OPAS retains only configured redacted conversation records; Cloudflare AI Gateway logging is disabled and response caching is bypassed.",
+    "OPAS_GENERATION_RETENTION_DISCLOSURE": "Answer analytics retain configured redacted conversation records for up to 30 days; explicit support handoffs retain contact and bounded context separately. Cloudflare AI Gateway logging is disabled and response caching is bypassed.",
+    "OPAS_ANALYTICS_REDACTION_PATTERNS": "[]",
+    "OPAS_EMBED_PARENT_ORIGINS": "https://opas.dev,https://www.opas.dev",
+    "OPAS_HANDOFF_DAILY_LIMIT": "100",
+    "OPAS_HANDOFF_FROM_EMAIL": "hello@opas.dev",
+    "OPAS_HANDOFF_PROVIDER": "cloudflare-email",
+    "OPAS_HANDOFF_RETENTION_DAYS": "30",
     "OPAS_SITE_URL": "https://demo.opas.dev"
   },
   "d1_databases": [

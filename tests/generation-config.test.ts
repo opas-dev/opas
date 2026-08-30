@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   createGenerationAdapter,
+  generationUsesWorkersAiBinding,
   generationPublicMetadata,
 } from "@/ai/generation-config";
 import type {
@@ -102,6 +103,137 @@ test("treats an empty optional deployment credential as absent", async () => {
 
   assert.equal(requests.length, 1);
   assert.equal(new Headers(requests[0]?.headers).has("authorization"), false);
+});
+
+test("requires explicit complete cross-provider fallback configuration", async () => {
+  const calls: string[] = [];
+  const adapter = createGenerationAdapter({
+    environment: {
+      OPAS_DATABASE_DRIVER: "d1",
+      OPAS_GENERATION_FALLBACK_API_KEY: "fallback-private-key",
+      OPAS_GENERATION_FALLBACK_ENABLED: "true",
+      OPAS_GENERATION_FALLBACK_ENDPOINT:
+        "https://fallback.example.test/v1/chat/completions",
+      OPAS_GENERATION_FALLBACK_MODEL: "fallback-answer-v2",
+      OPAS_GENERATION_FALLBACK_PROVIDER: "openai-compatible",
+      OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE:
+        "The fallback provider retains requests for seven days.",
+      OPAS_GENERATION_GATEWAY_ID: "opas-answers",
+      OPAS_GENERATION_MODEL: workersModel,
+      OPAS_GENERATION_RETENTION_DISCLOSURE: workersDisclosure,
+    },
+    fetch: async () => {
+      calls.push("fallback");
+      return new Response(
+        sse([
+          'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+    workersAiBinding: {
+      async run() {
+        calls.push("primary");
+        throw new Error("private Workers failure");
+      },
+    } as unknown as WorkersAiGenerationBinding,
+  });
+
+  assert.deepEqual(
+    await collect(
+      adapter.stream({ messages: [{ content: "Fixture", role: "user" }] }),
+    ),
+    [
+      { text: "ok", type: "text" },
+      {
+        reason: "stop",
+        type: "finish",
+        usage: { inputTokens: null, outputTokens: null, totalTokens: null },
+      },
+    ],
+  );
+  assert.deepEqual(calls, ["primary", "fallback"]);
+  assert.deepEqual(adapter.fallbackMetadata, {
+    model: "fallback-answer-v2",
+    provider: "openai-compatible",
+    retentionDisclosure: "The fallback provider retains requests for seven days.",
+  });
+  assert.deepEqual(generationPublicMetadata(adapter), {
+    model: workersModel,
+    provider: "cloudflare-workers-ai",
+    retentionDisclosure:
+      `${workersDisclosure} If that provider fails before answer output, OPAS may use ` +
+      "openai-compatible model fallback-answer-v2. The fallback provider retains requests for seven days.",
+  });
+});
+
+test("rejects implicit, invalid, partial, and same-vendor fallback settings", () => {
+  const base = {
+    OPAS_DATABASE_DRIVER: "d1",
+    OPAS_GENERATION_GATEWAY_ID: "opas-answers",
+    OPAS_GENERATION_MODEL: workersModel,
+    OPAS_GENERATION_RETENTION_DISCLOSURE: workersDisclosure,
+  } as const;
+  const binding = {
+    async run() {
+      return sse(["data: [DONE]\n\n"]);
+    },
+  } as unknown as WorkersAiGenerationBinding;
+
+  for (const environment of [
+    {
+      ...base,
+      OPAS_GENERATION_FALLBACK_MODEL: "configured-without-opt-in",
+    },
+    {
+      ...base,
+      OPAS_GENERATION_FALLBACK_ENABLED: "TRUE",
+    },
+    {
+      ...base,
+      OPAS_GENERATION_FALLBACK_ENABLED: "true",
+      OPAS_GENERATION_FALLBACK_MODEL: "missing-provider-fields",
+      OPAS_GENERATION_FALLBACK_PROVIDER: "openai-compatible",
+    },
+    {
+      ...base,
+      OPAS_GENERATION_FALLBACK_ENABLED: "true",
+      OPAS_GENERATION_FALLBACK_ENDPOINT:
+        "https://fallback.example.test/v1/chat/completions",
+      OPAS_GENERATION_FALLBACK_GATEWAY_ID: "must-not-mix-provider-fields",
+      OPAS_GENERATION_FALLBACK_MODEL: "mixed-provider-settings",
+      OPAS_GENERATION_FALLBACK_PROVIDER: "openai-compatible",
+      OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE: "Not retained.",
+    },
+    {
+      ...base,
+      OPAS_GENERATION_FALLBACK_ENABLED: "true",
+      OPAS_GENERATION_FALLBACK_GATEWAY_ID: "other-gateway",
+      OPAS_GENERATION_FALLBACK_MODEL: "same-vendor",
+      OPAS_GENERATION_FALLBACK_PROVIDER: "cloudflare-workers-ai",
+      OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE: "Not retained.",
+    },
+  ]) {
+    assert.throws(
+      () => createGenerationAdapter({ environment, workersAiBinding: binding }),
+      /fallback|endpoint/u,
+    );
+  }
+
+  assert.equal(generationUsesWorkersAiBinding(base), true);
+  assert.equal(
+    generationUsesWorkersAiBinding({ OPAS_DATABASE_DRIVER: "postgres" }),
+    false,
+  );
+  assert.equal(
+    generationUsesWorkersAiBinding({
+      OPAS_DATABASE_DRIVER: "postgres",
+      OPAS_GENERATION_FALLBACK_ENABLED: "true",
+      OPAS_GENERATION_FALLBACK_PROVIDER: "cloudflare-workers-ai",
+    }),
+    true,
+  );
 });
 
 for (const databaseDriver of ["postgres", "neon"] as const) {

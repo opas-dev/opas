@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createGenerationFallbackAdapter,
   createOpenAiCompatibleGenerationAdapter,
   createWorkersAiGenerationAdapter,
   GenerationError,
   type GenerationErrorCategory,
+  type GenerationAdapter,
   type GenerationEvent,
   type WorkersAiGenerationBinding,
 } from "@/ai/generation";
@@ -44,6 +46,193 @@ async function collect(stream: AsyncIterable<GenerationEvent>) {
 
   return events;
 }
+
+function fixtureAdapter(
+  provider: GenerationAdapter["metadata"]["provider"],
+  model: string,
+  stream: GenerationAdapter["stream"],
+): GenerationAdapter {
+  return Object.freeze({
+    limits: Object.freeze({
+      maximumInputUtf8Bytes: 65_536,
+      maximumMessages: 16,
+      maximumOutputTokens: 1_024,
+      maximumOutputUtf8Bytes: 65_536,
+      timeoutMilliseconds: 30_000,
+    }),
+    metadata: Object.freeze({
+      model,
+      provider,
+      retentionDisclosure: `${provider} does not retain fixture requests.`,
+    }),
+    stream,
+  });
+}
+
+test("uses an explicitly disclosed cross-provider fallback only before output", async () => {
+  const calls: string[] = [];
+  const primary = fixtureAdapter(
+    "cloudflare-workers-ai",
+    "primary-v1",
+    () =>
+      (async function* () {
+        calls.push("primary");
+        throw new GenerationError(
+          "provider-unavailable",
+          "Primary provider is unavailable",
+        );
+      })(),
+  );
+  const fallback = fixtureAdapter(
+    "openai-compatible",
+    "fallback-v2",
+    () =>
+      (async function* () {
+        calls.push("fallback");
+        yield { text: "fallback answer", type: "text" } as const;
+        yield {
+          reason: "stop",
+          type: "finish",
+          usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+        } as const;
+      })(),
+  );
+  const adapter = createGenerationFallbackAdapter({ fallback, primary });
+
+  assert.deepEqual(
+    await collect(adapter.stream({ messages: [{ content: "Fixture", role: "user" }] })),
+    [
+      { text: "fallback answer", type: "text" },
+      {
+        reason: "stop",
+        type: "finish",
+        usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+      },
+    ],
+  );
+  assert.deepEqual(calls, ["primary", "fallback"]);
+  assert.deepEqual(adapter.fallbackMetadata, fallback.metadata);
+  assert.equal(adapter.metadata.provider, "cloudflare-workers-ai");
+  assert.equal(adapter.metadata.model, "primary-v1");
+  assert.match(adapter.metadata.retentionDisclosure, /openai-compatible/u);
+  assert.match(adapter.metadata.retentionDisclosure, /fallback-v2/u);
+  assert.ok(Object.isFrozen(adapter));
+  assert.ok(Object.isFrozen(adapter.fallbackMetadata));
+});
+
+test("uses fallback for every safe pre-output provider failure", async (context) => {
+  for (const category of ["provider-unavailable", "rate-limited", "timeout"] as const) {
+    await context.test(category, async () => {
+      let fallbackCalls = 0;
+      const adapter = createGenerationFallbackAdapter({
+        primary: fixtureAdapter(
+          "cloudflare-workers-ai",
+          "primary-v1",
+          () =>
+            (async function* () {
+              throw new GenerationError(category, "Primary provider failed");
+            })(),
+        ),
+        fallback: fixtureAdapter(
+          "openai-compatible",
+          "fallback-v2",
+          () =>
+            (async function* () {
+              fallbackCalls += 1;
+              yield {
+                reason: "stop",
+                type: "finish",
+                usage: { inputTokens: 1, outputTokens: 0, totalTokens: 1 },
+              } as const;
+            })(),
+        ),
+      });
+
+      assert.equal(
+        (
+          await collect(
+            adapter.stream({ messages: [{ content: "Fixture", role: "user" }] }),
+          )
+        ).at(-1)?.type,
+        "finish",
+      );
+      assert.equal(fallbackCalls, 1);
+    });
+  }
+});
+
+test("never falls back after an event or for unsafe provider failures", async (context) => {
+  for (const fixture of [
+    {
+      name: "output started",
+      primary: async function* () {
+        yield { text: "visible", type: "text" } as const;
+        throw new GenerationError(
+          "provider-unavailable",
+          "Primary provider disconnected",
+        );
+      },
+      expectedCategory: "provider-unavailable",
+    },
+    {
+      name: "authentication",
+      primary: async function* () {
+        throw new GenerationError(
+          "authentication",
+          "Primary provider authentication failed",
+        );
+      },
+      expectedCategory: "authentication",
+    },
+    {
+      name: "cancellation",
+      primary: async function* () {
+        throw new GenerationError("cancelled", "Request cancelled");
+      },
+      expectedCategory: "cancelled",
+    },
+    {
+      name: "invalid response",
+      primary: async function* () {
+        throw new GenerationError(
+          "invalid-response",
+          "Primary provider returned invalid output",
+        );
+      },
+      expectedCategory: "invalid-response",
+    },
+  ] as const) {
+    await context.test(fixture.name, async () => {
+      let fallbackCalls = 0;
+      const adapter = createGenerationFallbackAdapter({
+        primary: fixtureAdapter(
+          "cloudflare-workers-ai",
+          "primary-v1",
+          fixture.primary,
+        ),
+        fallback: fixtureAdapter(
+          "openai-compatible",
+          "fallback-v2",
+          () =>
+            (async function* () {
+              fallbackCalls += 1;
+              yield { text: "must not run", type: "text" } as const;
+            })(),
+        ),
+      });
+
+      await assert.rejects(
+        collect(
+          adapter.stream({ messages: [{ content: "Fixture", role: "user" }] }),
+        ),
+        (error) =>
+          error instanceof GenerationError &&
+          error.category === fixture.expectedCategory,
+      );
+      assert.equal(fallbackCalls, 0);
+    });
+  }
+});
 
 function generationError(category: GenerationErrorCategory, retryable: boolean) {
   return (error: unknown) => {

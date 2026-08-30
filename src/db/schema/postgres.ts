@@ -516,6 +516,247 @@ export const evaluationRuns = pgTable(
   ],
 );
 
+export const workspaceInferenceStates = pgTable(
+  "workspace_inference_states",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+export const answerInferenceLeases = pgTable(
+  "answer_inference_leases",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaceInferenceStates.workspaceId, {
+        onDelete: "cascade",
+      }),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    maximumOutputTokens: integer("maximum_output_tokens").notNull(),
+    reservedMicrodollars: integer("reserved_microdollars").notNull(),
+    chargedMicrodollars: integer("charged_microdollars"),
+    status: text("status", {
+      enum: [
+        "active",
+        "cancelled",
+        "completed",
+        "expired",
+        "failed",
+        "invalid-output",
+        "timeout",
+      ],
+    })
+      .notNull()
+      .default("active"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("answer_inference_leases_id_workspace_unique").on(
+      table.id,
+      table.workspaceId,
+    ),
+    index("answer_inference_leases_workspace_status_expires_index").on(
+      table.workspaceId,
+      table.status,
+      table.expiresAt,
+    ),
+    index("answer_inference_leases_workspace_started_index").on(
+      table.workspaceId,
+      table.startedAt,
+    ),
+    check(
+      "answer_inference_leases_identity_check",
+      sql`length(${table.provider}) between 1 and 64 and length(${table.model}) between 1 and 256`,
+    ),
+    check(
+      "answer_inference_leases_amount_check",
+      sql`${table.maximumOutputTokens} between 1 and 8192 and ${table.reservedMicrodollars} between 1 and 2000000000 and (${table.chargedMicrodollars} is null or ${table.chargedMicrodollars} between 0 and ${table.reservedMicrodollars})`,
+    ),
+    check(
+      "answer_inference_leases_usage_check",
+      sql`(${table.inputTokens} is null or ${table.inputTokens} >= 0) and (${table.outputTokens} is null or ${table.outputTokens} >= 0)`,
+    ),
+    check(
+      "answer_inference_leases_status_check",
+      sql`${table.status} in ('active', 'cancelled', 'completed', 'expired', 'failed', 'invalid-output', 'timeout')`,
+    ),
+    check(
+      "answer_inference_leases_lifecycle_check",
+      sql`(${table.status} = 'active' and ${table.chargedMicrodollars} is null and ${table.reconciledAt} is null) or (${table.status} <> 'active' and ${table.chargedMicrodollars} is not null and ${table.reconciledAt} is not null)`,
+    ),
+    check(
+      "answer_inference_leases_expiry_check",
+      sql`${table.expiresAt} > ${table.startedAt} and (${table.status} <> 'expired' or ${table.chargedMicrodollars} = ${table.reservedMicrodollars})`,
+    ),
+  ],
+);
+
+export const supportHandoffs = pgTable(
+  "support_handoffs",
+  {
+    id: text("id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    payloadHash: text("payload_hash").notNull(),
+    status: text("status", {
+      enum: ["pending", "delivered", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    contact: jsonb("contact").notNull(),
+    context: jsonb("context").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.workspaceId] }),
+    index("support_handoffs_workspace_status_created_index").on(
+      table.workspaceId,
+      table.status,
+      table.createdAt,
+    ),
+    check(
+      "support_handoffs_identity_check",
+      sql`length(${table.id}) = 36 and length(${table.payloadHash}) = 64`,
+    ),
+    check(
+      "support_handoffs_status_check",
+      sql`${table.status} in ('pending', 'delivered', 'failed')`,
+    ),
+    check(
+      "support_handoffs_lifecycle_check",
+      sql`(${table.status} = 'pending' and ${table.finishedAt} is null) or (${table.status} <> 'pending' and ${table.finishedAt} is not null)`,
+    ),
+  ],
+);
+
+export const conversationAnalytics = pgTable(
+  "conversation_analytics",
+  {
+    id: text("id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    outcome: text("outcome", {
+      enum: ["abandoned", "abstained", "answered", "escalated", "low-rated"],
+    }).notNull(),
+    reason: text("reason"),
+    conversation: jsonb("conversation").notNull(),
+    retrievalTrace: jsonb("retrieval_trace").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    durationMilliseconds: integer("duration_milliseconds").notNull(),
+    firstTokenMilliseconds: integer("first_token_milliseconds"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    costMicrodollars: integer("cost_microdollars"),
+    bucketDay: text("bucket_day").notNull(),
+    bucketSlot: integer("bucket_slot").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.workspaceId] }),
+    uniqueIndex("conversation_analytics_workspace_bucket_unique").on(
+      table.workspaceId,
+      table.bucketDay,
+      table.bucketSlot,
+    ),
+    index("conversation_analytics_workspace_expiry_index").on(
+      table.workspaceId,
+      table.expiresAt,
+    ),
+    index("conversation_analytics_workspace_started_index").on(
+      table.workspaceId,
+      table.startedAt,
+    ),
+    check(
+      "conversation_analytics_identity_check",
+      sql`length(${table.id}) = 36 and length(${table.provider}) between 1 and 64 and length(${table.model}) between 1 and 256`,
+    ),
+    check(
+      "conversation_analytics_outcome_check",
+      sql`${table.outcome} in ('abandoned', 'abstained', 'answered', 'escalated', 'low-rated')`,
+    ),
+    check(
+      "conversation_analytics_reason_check",
+      sql`${table.reason} is null or octet_length(${table.reason}) <= 256`,
+    ),
+    check(
+      "conversation_analytics_json_check",
+      sql`jsonb_typeof(${table.conversation}) = 'array' and jsonb_typeof(${table.retrievalTrace}) = 'array' and octet_length(${table.conversation}::text) <= 16384 and octet_length(${table.retrievalTrace}::text) <= 8192`,
+    ),
+    check(
+      "conversation_analytics_measurements_check",
+      sql`${table.durationMilliseconds} between 0 and 300000 and (${table.firstTokenMilliseconds} is null or ${table.firstTokenMilliseconds} between 0 and ${table.durationMilliseconds}) and (${table.inputTokens} is null or ${table.inputTokens} between 0 and 1000000) and (${table.outputTokens} is null or ${table.outputTokens} between 0 and 1000000) and (${table.costMicrodollars} is null or ${table.costMicrodollars} between 0 and 2000000000)`,
+    ),
+    check(
+      "conversation_analytics_bucket_check",
+      sql`${table.bucketDay} ~ '^[0-9]{8}$' and ${table.bucketSlot} between 0 and 1023`,
+    ),
+    check(
+      "conversation_analytics_lifecycle_check",
+      sql`${table.updatedAt} >= ${table.startedAt} and ${table.expiresAt} > ${table.startedAt}`,
+    ),
+  ],
+);
+
+export const workspacePublicWriteStates = pgTable(
+  "workspace_public_write_states",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+export const publicWriteReservations = pgTable(
+  "public_write_reservations",
+  {
+    id: text("id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspacePublicWriteStates.workspaceId, {
+        onDelete: "cascade",
+      }),
+    kind: text("kind", { enum: ["handoff"] }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.workspaceId, table.kind] }),
+    index("public_write_reservations_workspace_kind_created_index").on(
+      table.workspaceId,
+      table.kind,
+      table.createdAt,
+    ),
+    index("public_write_reservations_workspace_expiry_index").on(
+      table.workspaceId,
+      table.expiresAt,
+    ),
+    check(
+      "public_write_reservations_identity_check",
+      sql`length(${table.id}) = 36 and ${table.kind} = 'handoff'`,
+    ),
+    check(
+      "public_write_reservations_lifecycle_check",
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+  ],
+);
+
 export const themes = pgTable("themes", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id")

@@ -20,6 +20,7 @@ import type {
   Repository,
 } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
+import { createPostgresAnswerInferenceRepository } from "@/db/postgres/answer-inference-repository";
 import {
   articleEvidenceCommitStatements,
   articleEvidenceInvalidationStatements,
@@ -392,6 +393,7 @@ function knowledgeImportStatements(
 
 export function createPostgresRepository(database: PostgresDatabase): Repository {
   return {
+    ...createPostgresAnswerInferenceRepository(database),
     ...createPostgresEvidenceRepository(database),
     async checkHealth() {
       await database.execute(sql`select 1`);

@@ -17,9 +17,11 @@ import { migrate as migratePostgres } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 
 import { demoContent, demoIds, demoSeededAt } from "@/db/demo";
+import { createPostgresAnswerInferenceRepository } from "@/db/postgres/answer-inference-repository";
 import { createPostgresRepository } from "@/db/postgres/repository";
 import { seedPostgres } from "@/db/postgres/seed";
 import type {
+  AnswerInferenceReservation,
   ArticleEvidenceCommit,
   ArticleSubmission,
   KnowledgeImportArticle,
@@ -37,6 +39,21 @@ import { executeKnowledgeImport } from "@/import/execute";
 import { planKnowledgeImport } from "@/import/planner";
 
 const expectedColumns = {
+  answer_inference_leases: [
+    "id",
+    "workspace_id",
+    "provider",
+    "model",
+    "maximum_output_tokens",
+    "reserved_microdollars",
+    "charged_microdollars",
+    "status",
+    "input_tokens",
+    "output_tokens",
+    "started_at",
+    "expires_at",
+    "reconciled_at",
+  ],
   article_feedback: ["id", "article_id", "helpful", "comment", "created_at"],
   article_assets: ["article_id", "asset_id", "workspace_id", "created_at"],
   article_views: ["id", "article_id", "viewed_at"],
@@ -163,6 +180,16 @@ const expectedColumns = {
     "created_at",
   ],
   search_misses: ["id", "workspace_id", "query", "created_at"],
+  support_handoffs: [
+    "id",
+    "workspace_id",
+    "payload_hash",
+    "status",
+    "contact",
+    "context",
+    "created_at",
+    "finished_at",
+  ],
   themes: ["id", "workspace_id", "name", "config", "created_at", "updated_at"],
   workspace_index_states: [
     "workspace_id",
@@ -170,6 +197,7 @@ const expectedColumns = {
     "active_embedding_generation_id",
     "updated_at",
   ],
+  workspace_inference_states: ["workspace_id", "updated_at"],
   workspaces: ["id", "slug", "name", "created_at", "updated_at"],
 } as const;
 
@@ -932,12 +960,232 @@ async function exerciseSeedSlugConflicts(
   await seed();
 }
 
+function inferenceReservation(
+  workspaceId: string,
+  id: string,
+  startedAt: Date,
+  options: Partial<AnswerInferenceReservation> = {},
+): AnswerInferenceReservation {
+  return {
+    id,
+    workspaceId,
+    provider: "openai-compatible",
+    model: "fixture-answer-model",
+    maximumOutputTokens: 512,
+    reservedMicrodollars: 60,
+    maximumConcurrency: 3,
+    dailyBudgetMicrodollars: 1_000,
+    startedAt,
+    expiresAt: new Date(startedAt.getTime() + 60_000),
+    spendWindowStartedAt: new Date(startedAt.getTime() - dayInMilliseconds),
+    retentionStartedAt: new Date(startedAt.getTime() - 31 * dayInMilliseconds),
+    ...options,
+  };
+}
+
+async function exerciseAnswerInferenceAdmission(harness: Harness) {
+  const suffix = harness.name.toLowerCase();
+  const concurrencyWorkspace = `workspace_inference_concurrency_${suffix}`;
+  const spendWorkspace = `workspace_inference_spend_${suffix}`;
+  const expiryWorkspace = `workspace_inference_expiry_${suffix}`;
+  const retentionWorkspace = `workspace_inference_retention_${suffix}`;
+  for (const workspaceId of [
+    concurrencyWorkspace,
+    spendWorkspace,
+    expiryWorkspace,
+    retentionWorkspace,
+  ]) {
+    await harness.createWorkspace({
+      id: workspaceId,
+      slug: workspaceId,
+      name: workspaceId,
+    });
+  }
+
+  const startedAt = new Date("2026-08-30T12:00:00.000Z");
+  const raced = await Promise.all(
+    Array.from({ length: 12 }, (_, index) =>
+      harness.repository.reserveAnswerInference(
+        inferenceReservation(
+          concurrencyWorkspace,
+          `answer_lease_race_${suffix}_${index}`,
+          startedAt,
+        ),
+      ),
+    ),
+  );
+  const accepted = raced.filter((lease) => lease !== null);
+  assert.equal(
+    accepted.length,
+    3,
+    `${harness.name} exceeded the atomic inference concurrency limit`,
+  );
+  assert.ok(
+    accepted.every(
+      (lease) =>
+        lease.provider === "openai-compatible" &&
+        lease.model === "fixture-answer-model" &&
+        lease.reservedMicrodollars === 60,
+    ),
+  );
+
+  const firstLease = accepted[0]!;
+  const firstSettlement = await harness.repository.reconcileAnswerInference({
+    id: firstLease.id,
+    workspaceId: concurrencyWorkspace,
+    chargedMicrodollars: 10,
+    inputTokens: 20,
+    outputTokens: 8,
+    reconciledAt: new Date(startedAt.getTime() + 1_000),
+    status: "completed",
+  });
+  const repeatedSettlement = await harness.repository.reconcileAnswerInference({
+    id: firstLease.id,
+    workspaceId: concurrencyWorkspace,
+    chargedMicrodollars: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    reconciledAt: new Date(startedAt.getTime() + 2_000),
+    status: "failed",
+  });
+  assert.equal(firstSettlement?.status, "completed");
+  assert.equal(repeatedSettlement?.status, "completed");
+  assert.equal(repeatedSettlement?.chargedMicrodollars, 10);
+  assert.equal(repeatedSettlement?.inputTokens, 20);
+  assert.equal(repeatedSettlement?.outputTokens, 8);
+
+  assert.ok(
+    await harness.repository.reserveAnswerInference(
+      inferenceReservation(
+        concurrencyWorkspace,
+        `answer_lease_after_reconcile_${suffix}`,
+        new Date(startedAt.getTime() + 3_000),
+      ),
+    ),
+    `${harness.name} did not release reconciled inference concurrency`,
+  );
+
+  const spendFirst = await harness.repository.reserveAnswerInference(
+    inferenceReservation(
+      spendWorkspace,
+      `answer_lease_spend_first_${suffix}`,
+      startedAt,
+      { dailyBudgetMicrodollars: 100, maximumConcurrency: 10 },
+    ),
+  );
+  const spendSecond = await harness.repository.reserveAnswerInference(
+    inferenceReservation(
+      spendWorkspace,
+      `answer_lease_spend_second_${suffix}`,
+      startedAt,
+      { dailyBudgetMicrodollars: 100, maximumConcurrency: 10 },
+    ),
+  );
+  assert.ok(spendFirst);
+  assert.equal(
+    spendSecond,
+    null,
+    `${harness.name} exceeded the rolling inference spend limit`,
+  );
+
+  const expiring = await harness.repository.reserveAnswerInference(
+    inferenceReservation(
+      expiryWorkspace,
+      `answer_lease_expiring_${suffix}`,
+      startedAt,
+      {
+        dailyBudgetMicrodollars: 120,
+        expiresAt: new Date(startedAt.getTime() + 1_000),
+        maximumConcurrency: 1,
+      },
+    ),
+  );
+  assert.ok(expiring);
+  const afterExpiryAt = new Date(startedAt.getTime() + 1_001);
+  const recovered = await harness.repository.reserveAnswerInference(
+    inferenceReservation(
+      expiryWorkspace,
+      `answer_lease_recovered_${suffix}`,
+      afterExpiryAt,
+      { dailyBudgetMicrodollars: 120, maximumConcurrency: 1 },
+    ),
+  );
+  assert.ok(recovered, `${harness.name} did not recover expired lease concurrency`);
+  const expired = await harness.repository.getAnswerInferenceLease(
+    expiryWorkspace,
+    expiring.id,
+  );
+  assert.equal(expired?.status, "expired");
+  assert.equal(expired?.chargedMicrodollars, expiring.reservedMicrodollars);
+  const lateSettlement = await harness.repository.reconcileAnswerInference({
+    id: expiring.id,
+    workspaceId: expiryWorkspace,
+    chargedMicrodollars: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    reconciledAt: new Date(startedAt.getTime() + 2_000),
+    status: "completed",
+  });
+  assert.equal(lateSettlement?.status, "expired");
+  assert.equal(
+    lateSettlement?.chargedMicrodollars,
+    expiring.reservedMicrodollars,
+    `${harness.name} released possibly-spent budget after lease expiry`,
+  );
+
+  const oldStartedAt = new Date(startedAt.getTime() - 40 * dayInMilliseconds);
+  const oldLease = await harness.repository.reserveAnswerInference(
+    inferenceReservation(
+      retentionWorkspace,
+      `answer_lease_old_${suffix}`,
+      oldStartedAt,
+    ),
+  );
+  assert.ok(oldLease);
+  await harness.repository.reconcileAnswerInference({
+    id: oldLease.id,
+    workspaceId: retentionWorkspace,
+    chargedMicrodollars: 10,
+    inputTokens: 20,
+    outputTokens: 8,
+    reconciledAt: new Date(oldStartedAt.getTime() + 1_000),
+    status: "completed",
+  });
+  assert.ok(
+    await harness.repository.reserveAnswerInference(
+      inferenceReservation(
+        retentionWorkspace,
+        `answer_lease_retention_trigger_${suffix}`,
+        startedAt,
+      ),
+    ),
+  );
+  assert.equal(
+    await harness.repository.getAnswerInferenceLease(
+      retentionWorkspace,
+      oldLease.id,
+    ),
+    null,
+    `${harness.name} did not remove an expired-retention terminal lease`,
+  );
+
+  for (const workspaceId of [
+    concurrencyWorkspace,
+    spendWorkspace,
+    expiryWorkspace,
+    retentionWorkspace,
+  ]) {
+    await harness.deleteWorkspace(workspaceId);
+  }
+}
+
 async function exerciseRepository(harness: Harness) {
   await harness.seed();
   await harness.seed();
 
   assert.deepEqual(await harness.columns(), expectedColumns, `${harness.name} schema drifted`);
   assert.deepEqual(await harness.counts(), {
+    answer_inference_leases: 0,
     article_feedback: 0,
     article_assets: 0,
     article_views: 0,
@@ -953,8 +1201,10 @@ async function exerciseRepository(harness: Harness) {
     evidence_chunks: 0,
     saved_question_sets: 0,
     search_misses: 0,
+    support_handoffs: 0,
     themes: 1,
     workspace_index_states: 0,
+    workspace_inference_states: 0,
     workspaces: 1,
   });
 
@@ -962,6 +1212,7 @@ async function exerciseRepository(harness: Harness) {
     await harness.deploymentSeed();
     await harness.deploymentSeed();
     assert.deepEqual(await harness.counts(), {
+      answer_inference_leases: 0,
       article_feedback: 0,
       article_assets: 0,
       article_views: 0,
@@ -977,13 +1228,16 @@ async function exerciseRepository(harness: Harness) {
       evidence_chunks: 0,
       saved_question_sets: 0,
       search_misses: 0,
+      support_handoffs: 0,
       themes: 1,
       workspace_index_states: 0,
+      workspace_inference_states: 0,
       workspaces: 1,
     });
   }
 
   await harness.repository.checkHealth();
+  await exerciseAnswerInferenceAdmission(harness);
   await exerciseKnowledgeImport(harness);
 
   const published = await harness.repository.findPublishedArticle(
@@ -2448,6 +2702,73 @@ test("SQLite repository uses the native D1 client for atomic statement batches",
   ]);
   assert.match(preparedStatements[1].sql, /delete from assets/);
   assert.deepEqual(preparedStatements[1].parameters, ["workspace_d1_batch"]);
+
+  await repository.reserveAnswerInference(
+    inferenceReservation(
+      "workspace_d1_batch",
+      "answer_lease_d1_batch",
+      expiredAt,
+    ),
+  );
+  assert.equal(batches.length, 2);
+  assert.equal(batches[1].length, 5);
+  assert.match(batches[1][0]!.sql, /insert into workspace_inference_states/);
+  assert.match(batches[1][1]!.sql, /update workspace_inference_states/);
+  assert.match(batches[1][2]!.sql, /update answer_inference_leases/);
+  assert.match(batches[1][3]!.sql, /limit 100/);
+  assert.match(batches[1][4]!.sql, /insert into answer_inference_leases/);
+
+  await repository.reconcileAnswerInference({
+    id: "answer_lease_d1_batch",
+    workspaceId: "workspace_d1_batch",
+    chargedMicrodollars: 10,
+    inputTokens: 20,
+    outputTokens: 8,
+    reconciledAt: new Date(expiredAt.getTime() + 1_000),
+    status: "completed",
+  });
+  assert.equal(batches.length, 3);
+  assert.equal(batches[2].length, 2);
+  assert.match(batches[2][0]!.sql, /update answer_inference_leases/);
+  assert.match(batches[2][1]!.sql, /select/);
+});
+
+test("Postgres repository keeps Neon admission work in one transaction batch", async () => {
+  type Query = { statement: unknown };
+  const batches: Query[][] = [];
+  const database = {
+    execute(statement: unknown) {
+      return { statement };
+    },
+    async batch(queries: Query[]) {
+      batches.push([...queries]);
+      return queries.map(() => ({ rows: [] }));
+    },
+  };
+  const repository = createPostgresAnswerInferenceRepository(database as never);
+  const startedAt = new Date("2026-08-30T12:00:00.000Z");
+
+  await repository.reserveAnswerInference(
+    inferenceReservation(
+      "workspace_neon_batch",
+      "answer_lease_neon_batch",
+      startedAt,
+    ),
+  );
+  assert.equal(batches.length, 1);
+  assert.equal(batches[0].length, 5);
+
+  await repository.reconcileAnswerInference({
+    id: "answer_lease_neon_batch",
+    workspaceId: "workspace_neon_batch",
+    chargedMicrodollars: 10,
+    inputTokens: 20,
+    outputTokens: 8,
+    reconciledAt: new Date(startedAt.getTime() + 1_000),
+    status: "completed",
+  });
+  assert.equal(batches.length, 2);
+  assert.equal(batches[1].length, 2);
 });
 
 test("SQLite bulk publication stays below D1 query and parameter ceilings", () => {

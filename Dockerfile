@@ -30,6 +30,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle/postgres ./drizzle/postgres
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/run-embedding-recovery.mjs ./scripts/run-embedding-recovery.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/run-analytics-cleanup.mjs ./scripts/run-analytics-cleanup.mjs
 
 USER nextjs
 EXPOSE 3000

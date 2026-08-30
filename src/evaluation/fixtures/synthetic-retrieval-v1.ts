@@ -1,20 +1,12 @@
 // ABOUTME: Defines a versioned synthetic corpus and 50-question retrieval quality fixture.
 // ABOUTME: Provides deterministic vectors and local Orama targets without claiming partner evidence.
-import type {
-  ActiveChunkEmbedding,
-  EvidenceChunkRecord,
-  SavedQuestion,
-  SavedQuestionClassification,
-} from "@/db/repository";
+import type { SavedQuestion, SavedQuestionClassification } from "@/db/repository";
 import type {
   RetrievalEvaluationAdapter,
   RetrievalEvaluationFixture,
 } from "@/evaluation/retrieval";
-import {
-  createEvidenceRetriever,
-  type EvidenceCandidateIdentity,
-  type EvidenceRetrievalSource,
-} from "@/search/evidence";
+import { createEvaluationEvidenceSource } from "@/evaluation/retrieval-source";
+import { createEvidenceRetriever } from "@/search/evidence";
 
 export type SyntheticRetrievalSource = {
   id: string;
@@ -184,7 +176,6 @@ const questionRows = [
 
 const fixtureCreatedAt = new Date("2026-08-30T00:00:00.000Z");
 const fixtureWorkspaceId = "workspace_synthetic_retrieval_v1";
-const fixtureEmbeddingGenerationId = "synthetic_embedding_v1";
 const unsupportedVectorIndex = sourceRows.length;
 const embeddingDimension = sourceRows.length + 1;
 
@@ -270,100 +261,16 @@ export const syntheticRetrievalFixtureV1: RetrievalEvaluationFixture = Object.fr
   questions,
 });
 
-function evidenceRecords(fixture: RetrievalEvaluationFixture) {
-  return fixture.sources.map(
-    (source, ordinal): EvidenceChunkRecord => ({
-      id: source.id,
-      workspaceId: fixture.workspaceId,
-      articleId: source.articleId,
-      articleContentHash: source.contentHash,
-      contentHash: source.contentHash,
-      embeddingInputHash: source.contentHash,
-      indexGeneration: 1,
-      ordinal,
-      title: source.title,
-      headingPath: [source.title],
-      canonicalUrl: source.canonicalUrl,
-      markdown: `## ${source.title}\n\n${source.evidenceText}`,
-      evidenceText: source.evidenceText,
-      embeddingText: `${source.title}\n\n${source.evidenceText}`,
-      sourceLineRange: { start: 1, end: 3 },
-      publicationState: "published",
-      createdAt: fixture.createdAt,
-      updatedAt: fixture.createdAt,
-    }),
-  );
-}
-
-function embeddingRecords(
-  fixture: RetrievalEvaluationFixture,
-): ActiveChunkEmbedding[] {
-  return fixture.sources.map((source) => ({
-    workspaceId: fixture.workspaceId,
-    chunkId: source.id,
-    articleId: source.articleId,
-    contentHash: source.contentHash,
-    embeddingInputHash: source.contentHash,
-    embeddingGenerationId: fixtureEmbeddingGenerationId,
-    provider: "deterministic-fixture",
-    model: "one-hot-v1",
-    dimension: source.vector.length,
-    configurationHash: fixture.sourceContentHash,
-    vector: source.vector,
-  }));
-}
-
-function identityKey(candidate: EvidenceCandidateIdentity) {
-  return JSON.stringify([
-    candidate.chunkId,
-    candidate.articleId,
-    candidate.articleContentHash,
-    candidate.contentHash,
-  ]);
-}
-
-function staticEvidenceSource(
-  fixture: RetrievalEvaluationFixture,
-): EvidenceRetrievalSource {
-  const chunks = evidenceRecords(fixture);
-  const embeddings = embeddingRecords(fixture);
-  const identities = new Set(chunks.map((chunk) => identityKey({
-    chunkId: chunk.id,
-    articleId: chunk.articleId,
-    articleContentHash: chunk.articleContentHash,
-    contentHash: chunk.contentHash,
-  })));
-  return {
-    async getIndexingState(workspaceId) {
-      return workspaceId === fixture.workspaceId
-        ? {
-            workspaceId,
-            generation: 1,
-            activeEmbeddingGenerationId: fixtureEmbeddingGenerationId,
-            updatedAt: fixture.createdAt,
-          }
-        : null;
-    },
-    async listEvidenceChunks(workspaceId) {
-      return workspaceId === fixture.workspaceId ? chunks : [];
-    },
-    async listActiveChunkEmbeddings(workspaceId) {
-      return workspaceId === fixture.workspaceId ? embeddings : [];
-    },
-    async revalidateEvidenceCandidates({ workspaceId, generation, candidates }) {
-      if (workspaceId !== fixture.workspaceId || generation !== 1) {
-        return [];
-      }
-      return candidates.filter((candidate) => identities.has(identityKey(candidate)));
-    },
-  };
-}
-
 export function createSyntheticRetrievalTarget(
   fixture: RetrievalEvaluationFixture,
   mode: "lexical" | "hybrid",
 ): RetrievalEvaluationAdapter {
-  const source = staticEvidenceSource(fixture);
+  const source = createEvaluationEvidenceSource(fixture, {
+    configurationHash: fixture.sourceContentHash,
+    model: "one-hot-v1",
+    provider: "deterministic-fixture",
+    vectors: fixture.sources.map(({ vector }) => vector),
+  });
   let retrieve = createEvidenceRetriever(source);
   const warmupQuestion = fixture.questions.find(
     ({ classification }) => classification === "answerable",

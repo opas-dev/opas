@@ -24,6 +24,14 @@ import { syntheticRetrievalFixtureV1 } from "@/evaluation/fixtures/synthetic-ret
 import type { EvidenceRetrievalResult } from "@/search/evidence";
 
 const workspaceId = syntheticRetrievalFixtureV1.workspaceId;
+const answerAdmissionEnvironment = {
+  OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS: "1000000",
+  OPAS_ANSWER_INPUT_MICRODOLLARS_PER_MILLION_TOKENS: "152000",
+  OPAS_ANSWER_LEASE_MILLISECONDS: "45000",
+  OPAS_ANSWER_MAXIMUM_CONCURRENCY: "4",
+  OPAS_ANSWER_MAXIMUM_INPUT_TOKENS: "32000",
+  OPAS_ANSWER_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS: "287000",
+} as const;
 
 function generationAdapter(onRequest?: (request: GenerationRequest) => void) {
   const adapter: GenerationAdapter = {
@@ -312,6 +320,7 @@ test("deployment environment topic rules reach the configured answer runtime", a
         generationCalls += 1;
       }),
     environment: {
+      ...answerAdmissionEnvironment,
       OPAS_ANSWER_TOPIC_GUARDRAILS: JSON.stringify({
         allow: ["billing"],
       }),
@@ -367,6 +376,7 @@ test("an empty deployment topic placeholder leaves deterministic safety enabled"
       return generationAdapter();
     },
     environment: {
+      ...answerAdmissionEnvironment,
       OPAS_ANSWER_TOPIC_GUARDRAILS: "",
       OPAS_DATABASE_DRIVER: "postgres",
     },

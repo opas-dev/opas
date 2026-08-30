@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export const metadata: Metadata = {
+  icons: { icon: [] },
   robots: { follow: false, index: false },
   title: "Help assistant",
 };

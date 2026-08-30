@@ -2,7 +2,18 @@
 // ABOUTME: Locks title ownership, supported syntax, and shared URL policy before UI integration.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
+import {
+  ArticleDeletionConfirmation,
+  ArticleImageForm,
+  ArticleLinkForm,
+} from "../src/app/admin/content/article-authoring-controls";
+import {
+  articleEditorNavigationNeedsConfirmation,
+  articleEditorSnapshot,
+} from "../src/app/admin/content/article-editor-safety";
 import {
   articleVisualBodyIssue,
   inspectArticleVisualSource,
@@ -143,4 +154,166 @@ test("uses the same bounded URL policy for editor links and images", () => {
   for (const url of ["http://example.com/reset.png", "//example.com/reset.png", "blob:unsafe", "data:image/png;base64,unsafe"]) {
     assert.match(articleImageUrlIssue(url) ?? "", /https or a relative path/);
   }
+});
+
+test("derives unsaved state from the complete saved article snapshot", () => {
+  const values = {
+    title: "Reset your password",
+    categoryId: "category_1",
+    slug: "reset-your-password",
+    authorName: "OPAS",
+    status: "draft" as const,
+    isFaq: false,
+    source: supportedSource,
+  };
+  const saved = articleEditorSnapshot(values);
+
+  assert.equal(articleEditorSnapshot({ ...values }), saved);
+  for (const changed of [
+    { ...values, title: "Recover account access" },
+    { ...values, categoryId: "category_2" },
+    { ...values, slug: "recover-account-access" },
+    { ...values, authorName: "Support" },
+    { ...values, status: "published" as const },
+    { ...values, isFaq: true },
+    { ...values, source: `${supportedSource}\nMore guidance.\n` },
+  ]) {
+    assert.notEqual(articleEditorSnapshot(changed), saved);
+  }
+});
+
+test("prompts only for primary same-origin navigation to another document", () => {
+  const intent = {
+    currentUrl: "https://opas.dev/admin/content/articles/article_1",
+    href: "/admin/content",
+    button: 0,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    download: false,
+    target: "",
+  };
+
+  assert.equal(articleEditorNavigationNeedsConfirmation(intent), true);
+  assert.equal(
+    articleEditorNavigationNeedsConfirmation({ ...intent, href: "#article-body" }),
+    false,
+  );
+  assert.equal(
+    articleEditorNavigationNeedsConfirmation({ ...intent, href: "https://example.com/help" }),
+    false,
+  );
+  assert.equal(
+    articleEditorNavigationNeedsConfirmation({ ...intent, metaKey: true }),
+    false,
+  );
+  assert.equal(
+    articleEditorNavigationNeedsConfirmation({ ...intent, target: "_blank" }),
+    false,
+  );
+  assert.equal(
+    articleEditorNavigationNeedsConfirmation({ ...intent, download: true }),
+    false,
+  );
+});
+
+test("renders associated and keyboard-focusable link authoring fields", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ArticleLinkForm, {
+      url: "/account-guide",
+      title: "Account guide",
+      text: "Read the guide",
+      showTextField: true,
+      urlIssue: "Use an allowed URL.",
+      onUrlChange() {},
+      onTitleChange() {},
+      onTextChange() {},
+      onSubmit() {},
+      onCancel() {},
+    }),
+  );
+
+  assert.match(markup, /for="opas-editor-link-url"/u);
+  assert.match(markup, /id="opas-editor-link-url"/u);
+  assert.match(markup, /for="opas-editor-link-text"/u);
+  assert.match(markup, /id="opas-editor-link-text"/u);
+  assert.match(markup, /for="opas-editor-link-title"/u);
+  assert.match(markup, /id="opas-editor-link-title"/u);
+  assert.match(markup, /autofocus=""/u);
+  assert.match(markup, /role="alert"/u);
+});
+
+test("requires image alt text unless the author explicitly marks it decorative", () => {
+  const baseProps = {
+    source: "/api/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    altText: "Settings screen",
+    title: "",
+    canUpload: true,
+    selectedFileName: null,
+    busy: false,
+    issue: "The upload failed.",
+    focusAltText: true,
+    onFileChange() {},
+    onSourceChange() {},
+    onAltTextChange() {},
+    onTitleChange() {},
+    onDecorativeChange() {},
+    onSubmit() {},
+    onCancel() {},
+  };
+  const describedMarkup = renderToStaticMarkup(
+    createElement(ArticleImageForm, { ...baseProps, decorative: false }),
+  );
+  const decorativeMarkup = renderToStaticMarkup(
+    createElement(ArticleImageForm, { ...baseProps, altText: "", decorative: true }),
+  );
+
+  assert.match(describedMarkup, /for="opas-editor-image-file"/u);
+  assert.match(describedMarkup, /id="opas-editor-image-file"/u);
+  assert.match(describedMarkup, /for="opas-editor-image-alt"/u);
+  assert.match(
+    describedMarkup,
+    /id="opas-editor-image-alt"[^>]*required=""/u,
+  );
+  assert.match(describedMarkup, /The upload failed\./u);
+  assert.match(describedMarkup, /role="alert"/u);
+  assert.match(
+    decorativeMarkup,
+    /id="opas-editor-image-decorative"[^>]*checked=""/u,
+  );
+  assert.doesNotMatch(
+    decorativeMarkup,
+    /id="opas-editor-image-alt"[^>]*required=""/u,
+  );
+});
+
+test("renders permanent article deletion as an inline two-step confirmation", () => {
+  const props = {
+    articleId: "article_1",
+    deleting: false,
+    message: "",
+    action() {},
+    onRequestConfirmation() {},
+    onCancel() {},
+  };
+  const initialMarkup = renderToStaticMarkup(
+    createElement(ArticleDeletionConfirmation, {
+      ...props,
+      confirmationOpen: false,
+    }),
+  );
+  const confirmationMarkup = renderToStaticMarkup(
+    createElement(ArticleDeletionConfirmation, {
+      ...props,
+      confirmationOpen: true,
+    }),
+  );
+
+  assert.match(initialMarkup, /Delete this article/u);
+  assert.doesNotMatch(initialMarkup, /Yes, delete permanently/u);
+  assert.match(confirmationMarkup, /Permanently delete this article/u);
+  assert.match(confirmationMarkup, /Yes, delete permanently/u);
+  assert.match(confirmationMarkup, />Cancel</u);
+  assert.match(confirmationMarkup, /role="group"/u);
 });

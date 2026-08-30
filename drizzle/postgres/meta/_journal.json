@@ -36,6 +36,34 @@
       "when": 1788079257645,
       "tag": "0004_reflective_paladin",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788099626917,
+      "tag": "0005_harsh_tusk",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788100886374,
+      "tag": "0006_useful_celestials",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788101954377,
+      "tag": "0007_wise_onslaught",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788108735599,
+      "tag": "0008_brainy_crusher_hogan",
+      "breakpoints": true
     }
   ]
 }

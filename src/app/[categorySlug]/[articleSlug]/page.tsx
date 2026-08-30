@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ArticleActions } from "@/app/[categorySlug]/[articleSlug]/article-actions";
 import { ArticleFeedback } from "@/app/[categorySlug]/[articleSlug]/feedback";
 import { ArticleViewBeacon } from "@/app/[categorySlug]/[articleSlug]/view-beacon";
 import { PublicHeader } from "@/app/public-header";
@@ -16,6 +17,7 @@ import {
   serializeJsonLd,
 } from "@/content/publication";
 import { RuntimeMdx } from "@/content/runtime-mdx";
+import { absoluteSiteUrl } from "@/site";
 
 export const runtime = "nodejs";
 
@@ -89,6 +91,11 @@ export default async function ArticlePage({
         </nav>
         <article className="article-content">
           <RuntimeMdx source={article.mdx} />
+          <ArticleActions
+            markdown={publication.markdown}
+            markdownUrl={absoluteSiteUrl(publication.markdownPath)}
+            pageUrl={absoluteSiteUrl(publication.path)}
+          />
           <footer className="article-meta">
             <span>Written by {article.authorName}</span>
             <time dateTime={article.updatedAt.toISOString()}>

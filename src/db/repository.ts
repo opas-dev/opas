@@ -382,6 +382,54 @@ export type EvaluationRunCompletion = Pick<
   completedAt: Date;
 };
 
+export type EvaluationRunResultsUpdate = Pick<
+  EvaluationRun,
+  "id" | "results" | "workspaceId"
+>;
+
+export type AnswerInferenceLeaseStatus =
+  | "active"
+  | "cancelled"
+  | "completed"
+  | "expired"
+  | "failed"
+  | "invalid-output"
+  | "timeout";
+
+export type AnswerInferenceLease = {
+  id: string;
+  workspaceId: string;
+  provider: string;
+  model: string;
+  maximumOutputTokens: number;
+  reservedMicrodollars: number;
+  chargedMicrodollars: number | null;
+  status: AnswerInferenceLeaseStatus;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  startedAt: Date;
+  expiresAt: Date;
+  reconciledAt: Date | null;
+};
+
+export type AnswerInferenceReservation = Omit<
+  AnswerInferenceLease,
+  "chargedMicrodollars" | "inputTokens" | "outputTokens" | "reconciledAt" | "status"
+> & {
+  dailyBudgetMicrodollars: number;
+  maximumConcurrency: number;
+  retentionStartedAt: Date;
+  spendWindowStartedAt: Date;
+};
+
+export type AnswerInferenceReconciliation = Pick<
+  AnswerInferenceLease,
+  "chargedMicrodollars" | "id" | "inputTokens" | "outputTokens" | "workspaceId"
+> & {
+  reconciledAt: Date;
+  status: Exclude<AnswerInferenceLeaseStatus, "active" | "expired">;
+};
+
 export type Repository = {
   checkHealth(): Promise<void>;
   findPublishedArticle(workspaceId: string, slug: string): Promise<PublishedArticle | null>;
@@ -446,9 +494,22 @@ export type Repository = {
   ): Promise<readonly EvidenceCandidateIdentity[]>;
   saveQuestionSet(questionSet: SavedQuestionSet): Promise<void>;
   getQuestionSet(workspaceId: string, id: string): Promise<SavedQuestionSet | null>;
+  listQuestionSets(workspaceId: string, limit: number): Promise<readonly SavedQuestionSet[]>;
   startEvaluationRun(run: EvaluationRunStart): Promise<void>;
   finishEvaluationRun(completion: EvaluationRunCompletion): Promise<void>;
+  updateEvaluationRunResults(update: EvaluationRunResultsUpdate): Promise<void>;
   getEvaluationRun(workspaceId: string, id: string): Promise<EvaluationRun | null>;
+  listEvaluationRuns(workspaceId: string, limit: number): Promise<readonly EvaluationRun[]>;
+  reserveAnswerInference(
+    reservation: AnswerInferenceReservation,
+  ): Promise<AnswerInferenceLease | null>;
+  reconcileAnswerInference(
+    reconciliation: AnswerInferenceReconciliation,
+  ): Promise<AnswerInferenceLease | null>;
+  getAnswerInferenceLease(
+    workspaceId: string,
+    id: string,
+  ): Promise<AnswerInferenceLease | null>;
 } & EmbeddingWorkerRepository;
 
 export type EvidenceRepository = Pick<
@@ -476,7 +537,17 @@ export type EvidenceRepository = Pick<
   | "revalidateEvidenceCandidates"
   | "saveQuestionSet"
   | "getQuestionSet"
+  | "listQuestionSets"
   | "startEvaluationRun"
   | "finishEvaluationRun"
+  | "updateEvaluationRunResults"
   | "getEvaluationRun"
+  | "listEvaluationRuns"
+>;
+
+export type AnswerInferenceRepository = Pick<
+  Repository,
+  | "getAnswerInferenceLease"
+  | "reconcileAnswerInference"
+  | "reserveAnswerInference"
 >;

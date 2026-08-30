@@ -1,20 +1,38 @@
 // ABOUTME: Creates and deploys one guarded OPAS Worker and matching D1 database.
 // ABOUTME: Rejects configs that could mutate protected or unrelated Cloudflare resources.
-import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
-  rmdirSync,
-  unlinkSync,
+  realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import { createGenerationAdapter } from "../src/ai/generation-config";
+import { maximumAnswerOutputTokens } from "../src/answers/answer";
+import { createAnswerAdmissionPolicy } from "../src/answers/admission";
 import { createAnswerGuardrails } from "../src/answers/guardrails";
+import { normalizeHandoffEmailAddress } from "../src/handoff/payload";
+import { configuredHandoffRetentionDays } from "../src/handoff/retention";
+import { createHandoffWriteAdmission } from "../src/outcomes/admission";
+import { createConversationAnalyticsPolicy } from "../src/outcomes/records";
+import { embedParentOrigins } from "../src/embed/config";
+import {
+  cloudflareBuildEnvironment,
+  prepareCloudflareBuild,
+  prepareCloudflareProject,
+  registerCloudflareCleanup,
+  runBuiltCloudflareCommand,
+  sanitizedCloudflareEnvironment,
+} from "./cloudflare-artifact";
+import { runCloudflareProcess } from "./cloudflare-process";
 
 const protectedWorkerName = "opas-landing";
 const maintainedAccountId = "f8801c7e8853a113a25f8b52fd9ceec1";
@@ -22,6 +40,56 @@ const maintainedCustomDomain = "demo.opas.dev";
 const maintainedWorkerName = "opas-mvp";
 const opasResourcePattern = /^opas-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const cloudflareAccountPattern = /^[a-f0-9]{32}$/;
+const cloudflareDatabaseIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const allowedCloudflareConfigKeys = new Set([
+  "$schema",
+  "account_id",
+  "ai",
+  "assets",
+  "compatibility_date",
+  "compatibility_flags",
+  "d1_databases",
+  "main",
+  "name",
+  "observability",
+  "routes",
+  "secrets",
+  "send_email",
+  "services",
+  "triggers",
+  "vars",
+  "workers_dev",
+]);
+const allowedCloudflareVariableNames = new Set([
+  "NEXTJS_ENV",
+  "OPAS_ANALYTICS_REDACTION_PATTERNS",
+  "OPAS_ANSWER_ANALYTICS_RETENTION_DAYS",
+  "OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS",
+  "OPAS_ANSWER_FALLBACK_INPUT_MICRODOLLARS_PER_MILLION_TOKENS",
+  "OPAS_ANSWER_FALLBACK_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS",
+  "OPAS_ANSWER_INPUT_MICRODOLLARS_PER_MILLION_TOKENS",
+  "OPAS_ANSWER_LEASE_MILLISECONDS",
+  "OPAS_ANSWER_MAXIMUM_CONCURRENCY",
+  "OPAS_ANSWER_MAXIMUM_INPUT_TOKENS",
+  "OPAS_ANSWER_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS",
+  "OPAS_ANSWER_TOPIC_GUARDRAILS",
+  "OPAS_DATABASE_DRIVER",
+  "OPAS_EMBED_PARENT_ORIGINS",
+  "OPAS_GENERATION_FALLBACK_ENABLED",
+  "OPAS_GENERATION_FALLBACK_GATEWAY_ID",
+  "OPAS_GENERATION_FALLBACK_MODEL",
+  "OPAS_GENERATION_FALLBACK_PROVIDER",
+  "OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE",
+  "OPAS_GENERATION_GATEWAY_ID",
+  "OPAS_GENERATION_MODEL",
+  "OPAS_GENERATION_RETENTION_DISCLOSURE",
+  "OPAS_HANDOFF_DAILY_LIMIT",
+  "OPAS_HANDOFF_FROM_EMAIL",
+  "OPAS_HANDOFF_PROVIDER",
+  "OPAS_HANDOFF_RETENTION_DAYS",
+  "OPAS_SITE_URL",
+]);
 
 type JsonObject = Record<string, unknown>;
 
@@ -37,6 +105,7 @@ export type CloudflareTarget = {
   databaseId: string | undefined;
   databaseName: string;
   siteOrigin: string;
+  secretNames: readonly string[];
   sourcePrefix: string;
   workerName: string;
 };
@@ -65,12 +134,57 @@ function requireOpasResource(value: unknown, field: string) {
   return name;
 }
 
+const baseCloudflareSecretNames = [
+  "ADMIN_EMAIL",
+  "ADMIN_PASSWORD",
+  "ADMIN_SESSION_SECRET",
+  "OPAS_HANDOFF_TO_EMAIL",
+] as const;
+
+export function requiredCloudflareSecretNames(
+  vars: Readonly<Record<string, unknown>> = {},
+) {
+  return [
+    ...baseCloudflareSecretNames,
+    ...(vars.OPAS_GENERATION_FALLBACK_ENABLED === "true"
+      ? [
+          "OPAS_GENERATION_FALLBACK_API_KEY",
+          "OPAS_GENERATION_FALLBACK_ENDPOINT",
+        ]
+      : []),
+  ];
+}
+
+function validateRequiredSecrets(config: JsonObject, vars: JsonObject) {
+  const requiredNames = requiredCloudflareSecretNames(vars);
+  const secrets = config.secrets;
+  if (
+    !isObject(secrets) ||
+    Object.keys(secrets).length !== 1 ||
+    !Array.isArray(secrets.required) ||
+    !isDeepStrictEqual(secrets.required, requiredNames)
+  ) {
+    throw new Error(
+      "secrets.required must declare the exact canonical OPAS secret names.",
+    );
+  }
+  return requiredNames;
+}
+
 function validateRouting(config: JsonObject, accountId: string, workerName: string) {
   if ("route" in config) {
     throw new Error("Singular Worker routes are not permitted.");
   }
 
   if (!("routes" in config)) {
+    if (
+      accountId === maintainedAccountId &&
+      workerName === maintainedWorkerName
+    ) {
+      throw new Error(
+        `The maintained ${maintainedWorkerName} Worker must keep ${maintainedCustomDomain}.`,
+      );
+    }
     if (config.workers_dev === false) {
       throw new Error("workers.dev must remain enabled.");
     }
@@ -155,6 +269,87 @@ function validateAnswerConfiguration(vars: JsonObject) {
     );
   }
 
+  createAnswerAdmissionPolicy(
+    {
+      OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS: requireString(
+        vars.OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS,
+        "vars.OPAS_ANSWER_DAILY_BUDGET_MICRODOLLARS",
+      ),
+      OPAS_ANSWER_INPUT_MICRODOLLARS_PER_MILLION_TOKENS: requireString(
+        vars.OPAS_ANSWER_INPUT_MICRODOLLARS_PER_MILLION_TOKENS,
+        "vars.OPAS_ANSWER_INPUT_MICRODOLLARS_PER_MILLION_TOKENS",
+      ),
+      OPAS_ANSWER_LEASE_MILLISECONDS: requireString(
+        vars.OPAS_ANSWER_LEASE_MILLISECONDS,
+        "vars.OPAS_ANSWER_LEASE_MILLISECONDS",
+      ),
+      OPAS_ANSWER_MAXIMUM_CONCURRENCY: requireString(
+        vars.OPAS_ANSWER_MAXIMUM_CONCURRENCY,
+        "vars.OPAS_ANSWER_MAXIMUM_CONCURRENCY",
+      ),
+      OPAS_ANSWER_MAXIMUM_INPUT_TOKENS: requireString(
+        vars.OPAS_ANSWER_MAXIMUM_INPUT_TOKENS,
+        "vars.OPAS_ANSWER_MAXIMUM_INPUT_TOKENS",
+      ),
+      OPAS_ANSWER_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS: requireString(
+        vars.OPAS_ANSWER_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS,
+        "vars.OPAS_ANSWER_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS",
+      ),
+      OPAS_ANSWER_FALLBACK_INPUT_MICRODOLLARS_PER_MILLION_TOKENS:
+        typeof vars.OPAS_ANSWER_FALLBACK_INPUT_MICRODOLLARS_PER_MILLION_TOKENS ===
+        "string"
+          ? vars.OPAS_ANSWER_FALLBACK_INPUT_MICRODOLLARS_PER_MILLION_TOKENS
+          : undefined,
+      OPAS_ANSWER_FALLBACK_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS:
+        typeof vars.OPAS_ANSWER_FALLBACK_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS ===
+        "string"
+          ? vars.OPAS_ANSWER_FALLBACK_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS
+          : undefined,
+      OPAS_GENERATION_FALLBACK_ENABLED:
+        typeof vars.OPAS_GENERATION_FALLBACK_ENABLED === "string"
+          ? vars.OPAS_GENERATION_FALLBACK_ENABLED
+          : undefined,
+    },
+    maximumAnswerOutputTokens,
+  );
+
+  const fallbackEnabled = vars.OPAS_GENERATION_FALLBACK_ENABLED;
+  if (
+    fallbackEnabled !== undefined &&
+    fallbackEnabled !== "false" &&
+    fallbackEnabled !== "true"
+  ) {
+    throw new Error("vars.OPAS_GENERATION_FALLBACK_ENABLED must be true or false.");
+  }
+  const optionalFallbackValue = (name: string) => {
+    const value = vars[name];
+    if (value === undefined) return undefined;
+    return requireString(value, `vars.${name}`);
+  };
+  const fallbackEnvironment = {
+    OPAS_GENERATION_FALLBACK_ENABLED:
+      fallbackEnabled as string | undefined,
+    OPAS_GENERATION_FALLBACK_GATEWAY_ID: optionalFallbackValue(
+      "OPAS_GENERATION_FALLBACK_GATEWAY_ID",
+    ),
+    OPAS_GENERATION_FALLBACK_MODEL: optionalFallbackValue(
+      "OPAS_GENERATION_FALLBACK_MODEL",
+    ),
+    OPAS_GENERATION_FALLBACK_PROVIDER: optionalFallbackValue(
+      "OPAS_GENERATION_FALLBACK_PROVIDER",
+    ),
+    OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE: optionalFallbackValue(
+      "OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE",
+    ),
+    ...(fallbackEnabled === "true"
+      ? {
+          OPAS_GENERATION_FALLBACK_API_KEY: "validated-at-secret-upload",
+          OPAS_GENERATION_FALLBACK_ENDPOINT:
+            "https://fallback.invalid/v1/chat/completions",
+        }
+      : {}),
+  };
+
   createGenerationAdapter({
     environment: {
       OPAS_DATABASE_DRIVER: "d1",
@@ -170,6 +365,7 @@ function validateAnswerConfiguration(vars: JsonObject) {
         vars.OPAS_GENERATION_RETENTION_DISCLOSURE,
         "vars.OPAS_GENERATION_RETENTION_DISCLOSURE",
       ),
+      ...fallbackEnvironment,
     },
     workersAiBinding: {
       async run() {
@@ -179,6 +375,86 @@ function validateAnswerConfiguration(vars: JsonObject) {
   });
 }
 
+function validateHandoffConfiguration(config: JsonObject, vars: JsonObject) {
+  const bindings = config.send_email;
+  const binding = Array.isArray(bindings) && bindings.length === 1
+    ? bindings[0]
+    : undefined;
+  if (
+    !isObject(binding) ||
+    binding.name !== "SUPPORT_EMAIL" ||
+    !Array.isArray(binding.allowed_sender_addresses) ||
+    binding.allowed_sender_addresses.length !== 1 ||
+    binding.allowed_sender_addresses[0] !== "hello@opas.dev" ||
+    Object.keys(binding).sort().join(",") !==
+      "allowed_sender_addresses,name"
+  ) {
+    throw new Error(
+      "send_email must expose one SUPPORT_EMAIL binding limited to hello@opas.dev.",
+    );
+  }
+  if (
+    vars.OPAS_HANDOFF_PROVIDER !== "cloudflare-email" ||
+    vars.OPAS_HANDOFF_FROM_EMAIL !== "hello@opas.dev" ||
+    "OPAS_HANDOFF_TO_EMAIL" in vars
+  ) {
+    throw new Error(
+      "Cloudflare handoff delivery must use the fixed binding and a secret destination.",
+    );
+  }
+  createHandoffWriteAdmission({
+    environment: {
+      OPAS_HANDOFF_DAILY_LIMIT: requireString(
+        vars.OPAS_HANDOFF_DAILY_LIMIT,
+        "vars.OPAS_HANDOFF_DAILY_LIMIT",
+      ),
+    },
+    store: {
+      async cleanup() {
+        return 0;
+      },
+      async reserve() {
+        return { accepted: true as const };
+      },
+    },
+    workspaceId: "workspace_demo",
+  });
+  if (
+    configuredHandoffRetentionDays({
+      OPAS_HANDOFF_RETENTION_DAYS: requireString(
+        vars.OPAS_HANDOFF_RETENTION_DAYS,
+        "vars.OPAS_HANDOFF_RETENTION_DAYS",
+      ),
+    }) === null
+  ) {
+    throw new Error("vars.OPAS_HANDOFF_RETENTION_DAYS must be between 1 and 365.");
+  }
+}
+
+function validateAnalyticsConfiguration(vars: JsonObject) {
+  const policy = createConversationAnalyticsPolicy({
+    OPAS_ANALYTICS_REDACTION_PATTERNS: requireString(
+      vars.OPAS_ANALYTICS_REDACTION_PATTERNS,
+      "vars.OPAS_ANALYTICS_REDACTION_PATTERNS",
+    ),
+    OPAS_ANSWER_ANALYTICS_RETENTION_DAYS: requireString(
+      vars.OPAS_ANSWER_ANALYTICS_RETENTION_DAYS,
+      "vars.OPAS_ANSWER_ANALYTICS_RETENTION_DAYS",
+    ),
+  });
+  if (policy.status === "unavailable") {
+    throw new Error("Cloudflare analytics privacy configuration is invalid.");
+  }
+}
+
+function validateEmbedConfiguration(vars: JsonObject) {
+  const configured = vars.OPAS_EMBED_PARENT_ORIGINS;
+  if (configured !== undefined && typeof configured !== "string") {
+    throw new Error("vars.OPAS_EMBED_PARENT_ORIGINS must be a string.");
+  }
+  embedParentOrigins(configured as string | undefined);
+}
+
 export function validateCloudflareConfig(
   config: unknown,
   configPath = "wrangler.jsonc",
@@ -186,18 +462,43 @@ export function validateCloudflareConfig(
   if (!isObject(config)) {
     throw new Error("Wrangler config must contain a JSON object.");
   }
+  const unsupportedKeys = Object.keys(config).filter(
+    (key) => !allowedCloudflareConfigKeys.has(key),
+  );
+  if (unsupportedKeys.length > 0) {
+    throw new Error(
+      `Wrangler config contains unsupported fields: ${unsupportedKeys.sort().join(", ")}.`,
+    );
+  }
 
   const workerName = requireOpasResource(config.name, "name");
   const accountId = requireString(config.account_id, "account_id");
 
-  if (!cloudflareAccountPattern.test(accountId)) {
-    throw new Error("account_id must be an explicit Cloudflare account ID.");
+  if (
+    !cloudflareAccountPattern.test(accountId) ||
+    accountId !== maintainedAccountId
+  ) {
+    throw new Error("account_id must identify the maintained DevPlant account.");
   }
 
   const customDomain = validateRouting(config, accountId, workerName);
 
   if (config.main !== "custom-worker.ts") {
     throw new Error("main must use the scheduled OPAS custom Worker entry point.");
+  }
+
+  if (
+    !isObject(config.assets) ||
+    config.assets.binding !== "ASSETS" ||
+    config.assets.directory !== ".open-next/assets" ||
+    Object.keys(config.assets).sort().join(",") !== "binding,directory" ||
+    ["site", "wasm_modules", "text_blobs", "data_blobs"].some(
+      (field) => field in config,
+    )
+  ) {
+    throw new Error(
+      "assets must use only the generated .open-next/assets directory and ASSETS binding.",
+    );
   }
 
   if (
@@ -211,18 +512,39 @@ export function validateCloudflareConfig(
   if (
     !isObject(config.triggers) ||
     !Array.isArray(config.triggers.crons) ||
-    config.triggers.crons.length !== 1 ||
+    config.triggers.crons.length !== 2 ||
     config.triggers.crons[0] !== "* * * * *" ||
+    config.triggers.crons[1] !== "15 0 * * *" ||
     Object.keys(config.triggers).length !== 1
   ) {
-    throw new Error("triggers must run bounded embedding recovery every minute.");
+    throw new Error(
+      "triggers must run minute embedding recovery and daily analytics cleanup.",
+    );
   }
 
   if (!isObject(config.vars) || config.vars.OPAS_DATABASE_DRIVER !== "d1") {
     throw new Error("vars.OPAS_DATABASE_DRIVER must be d1.");
   }
+  const unsupportedVariables = Object.keys(config.vars).filter(
+    (name) => !allowedCloudflareVariableNames.has(name),
+  );
+  if (unsupportedVariables.length > 0) {
+    throw new Error(
+      `Cloudflare vars contain secret or unsupported names: ${unsupportedVariables.sort().join(", ")}.`,
+    );
+  }
+  if (
+    config.vars.NEXTJS_ENV !== undefined &&
+    config.vars.NEXTJS_ENV !== "production"
+  ) {
+    throw new Error("vars.NEXTJS_ENV must be production when configured.");
+  }
 
   validateAnswerConfiguration(config.vars);
+  validateAnalyticsConfiguration(config.vars);
+  validateEmbedConfiguration(config.vars);
+  validateHandoffConfiguration(config, config.vars);
+  const secretNames = validateRequiredSecrets(config, config.vars);
 
   const siteOrigin = validateSiteOrigin(
     config.vars.OPAS_SITE_URL,
@@ -237,24 +559,38 @@ export function validateCloudflareConfig(
 
   const database = databases[0];
   const databaseName = requireOpasResource(database.database_name, "database_name");
+  const databaseId = database.database_id;
+  const databaseKeys = Object.keys(database);
+  const allowedDatabaseKeys = new Set([
+    "binding",
+    "database_id",
+    "database_name",
+    "migrations_dir",
+    "preview_database_id",
+  ]);
 
   if (
     database.binding !== "DB" ||
     databaseName !== workerName ||
-    database.migrations_dir !== "drizzle/sqlite"
+    database.migrations_dir !== "drizzle/sqlite" ||
+    database.preview_database_id !== "DB" ||
+    databaseKeys.some((key) => !allowedDatabaseKeys.has(key)) ||
+    (databaseId !== undefined &&
+      (typeof databaseId !== "string" ||
+        !cloudflareDatabaseIdPattern.test(databaseId)))
   ) {
     throw new Error("The DB binding, D1 database, and Worker must form one exact OPAS target.");
   }
 
   const services = config.services;
+  const service = Array.isArray(services) && services.length === 1
+    ? services[0]
+    : undefined;
   const hasSelfReference =
-    Array.isArray(services) &&
-    services.some(
-      (service) =>
-        isObject(service) &&
-        service.binding === "WORKER_SELF_REFERENCE" &&
-        service.service === workerName,
-    );
+    isObject(service) &&
+    service.binding === "WORKER_SELF_REFERENCE" &&
+    service.service === workerName &&
+    Object.keys(service).sort().join(",") === "binding,service";
 
   if (!hasSelfReference) {
     throw new Error("WORKER_SELF_REFERENCE must point to the same OPAS Worker.");
@@ -264,17 +600,19 @@ export function validateCloudflareConfig(
     accountId,
     config,
     configPath,
-    databaseId:
-      typeof database.database_id === "string" ? database.database_id : undefined,
+    databaseId: typeof databaseId === "string" ? databaseId : undefined,
     databaseName,
     siteOrigin,
+    secretNames,
     sourcePrefix: "",
     workerName,
   };
 }
 
-export function readCloudflareTarget(configPath: string): CloudflareTarget {
-  const workspaceRoot = process.cwd();
+export function readCloudflareTarget(
+  configPath: string,
+  workspaceRoot = process.cwd(),
+): CloudflareTarget {
   const absoluteConfigPath = resolve(workspaceRoot, configPath);
   const workspaceRelativePath = relative(workspaceRoot, absoluteConfigPath);
 
@@ -284,6 +622,17 @@ export function readCloudflareTarget(configPath: string): CloudflareTarget {
     isAbsolute(workspaceRelativePath)
   ) {
     throw new Error("Cloudflare config must be a file inside the current workspace.");
+  }
+  if (
+    !existsSync(absoluteConfigPath) ||
+    lstatSync(absoluteConfigPath).isSymbolicLink() ||
+    !lstatSync(absoluteConfigPath).isFile() ||
+    realpathSync(absoluteConfigPath) !==
+      resolve(realpathSync(workspaceRoot), workspaceRelativePath)
+  ) {
+    throw new Error(
+      "Cloudflare config must be a regular file without symbolic-link traversal.",
+    );
   }
 
   const source = readFileSync(absoluteConfigPath, "utf8");
@@ -307,10 +656,37 @@ export function readCloudflareTarget(configPath: string): CloudflareTarget {
   };
 }
 
-function validateAdminSecrets() {
-  const email = (process.env.ADMIN_EMAIL ?? "").trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD ?? "";
-  const sessionSecret = process.env.ADMIN_SESSION_SECRET ?? "";
+export function prepareCloudflareTargetSnapshot(
+  target: CloudflareTarget,
+  workspaceRoot = process.cwd(),
+) {
+  const snapshot = prepareCloudflareProject(workspaceRoot);
+
+  try {
+    const configPath = relative(workspaceRoot, target.configPath);
+    const snapshotTarget = readCloudflareTarget(configPath, snapshot.directory);
+    if (!isDeepStrictEqual(snapshotTarget.config, target.config)) {
+      throw new Error(
+        "The isolated Cloudflare config no longer matches the validated source.",
+      );
+    }
+    return { ...snapshot, target: snapshotTarget };
+  } catch (error) {
+    snapshot.dispose();
+    throw error;
+  }
+}
+
+export function validateCloudflareSecrets(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  vars: JsonObject = {},
+) {
+  const email = (environment.ADMIN_EMAIL ?? "").trim().toLowerCase();
+  const password = environment.ADMIN_PASSWORD ?? "";
+  const sessionSecret = environment.ADMIN_SESSION_SECRET ?? "";
+  const handoffDestination = normalizeHandoffEmailAddress(
+    environment.OPAS_HANDOFF_TO_EMAIL,
+  );
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error("ADMIN_EMAIL must contain a valid email address.");
@@ -324,48 +700,104 @@ function validateAdminSecrets() {
     throw new Error("ADMIN_SESSION_SECRET must contain at least 32 bytes.");
   }
 
-  return { ADMIN_EMAIL: email, ADMIN_PASSWORD: password, ADMIN_SESSION_SECRET: sessionSecret };
+  if (!handoffDestination) {
+    throw new Error(
+      "OPAS_HANDOFF_TO_EMAIL must contain a verified destination email address.",
+    );
+  }
+
+  const fallbackEnabled = vars.OPAS_GENERATION_FALLBACK_ENABLED === "true";
+  const fallbackApiKey = environment.OPAS_GENERATION_FALLBACK_API_KEY ?? "";
+  const fallbackEndpoint = environment.OPAS_GENERATION_FALLBACK_ENDPOINT ?? "";
+  if (!fallbackEnabled && (fallbackApiKey || fallbackEndpoint)) {
+    throw new Error(
+      "Cloudflare fallback secrets require explicit fallback configuration.",
+    );
+  }
+  if (fallbackEnabled) {
+    let endpoint: URL;
+    try {
+      endpoint = new URL(fallbackEndpoint);
+    } catch {
+      throw new Error(
+        "OPAS_GENERATION_FALLBACK_ENDPOINT must contain a valid HTTPS URL.",
+      );
+    }
+    if (
+      endpoint.protocol !== "https:" ||
+      endpoint.username !== "" ||
+      endpoint.password !== "" ||
+      endpoint.toString() !== fallbackEndpoint ||
+      fallbackApiKey.trim() !== fallbackApiKey ||
+      fallbackApiKey.length < 8 ||
+      fallbackApiKey.length > 4_096 ||
+      /[\u0000-\u001f\u007f]/u.test(fallbackApiKey)
+    ) {
+      throw new Error("Cloudflare fallback secrets are invalid.");
+    }
+  }
+
+  return {
+    ADMIN_EMAIL: email,
+    ADMIN_PASSWORD: password,
+    ADMIN_SESSION_SECRET: sessionSecret,
+    OPAS_HANDOFF_TO_EMAIL: handoffDestination,
+    ...(fallbackEnabled
+      ? {
+          OPAS_GENERATION_FALLBACK_API_KEY: fallbackApiKey,
+          OPAS_GENERATION_FALLBACK_ENDPOINT: fallbackEndpoint,
+        }
+      : {}),
+  };
 }
 
-function run(command: string, args: string[]) {
+export function cloudflareCommandEnvironment(
+  accountId: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+) {
+  if (accountId !== maintainedAccountId) {
+    throw new Error("Cloudflare commands are pinned to the maintained DevPlant account.");
+  }
+  const configured = environment.CLOUDFLARE_ACCOUNT_ID;
+  const configuredAlias = environment.CF_ACCOUNT_ID;
+  if (
+    (configured && configured !== accountId) ||
+    (configuredAlias && configuredAlias !== accountId)
+  ) {
+    throw new Error("CLOUDFLARE_ACCOUNT_ID conflicts with the validated Wrangler account.");
+  }
+  return sanitizedCloudflareEnvironment(process.cwd(), {
+    ...environment,
+    CLOUDFLARE_ACCOUNT_ID: accountId,
+  });
+}
+
+async function run(
+  command: string,
+  args: string[],
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+) {
   console.info(`\n$ ${command} ${args.join(" ")}`);
-  const result = spawnSync(command, args, {
+  await runCloudflareProcess(command, args, {
     cwd: process.cwd(),
-    env: { ...process.env, CI: "1" },
-    stdio: ["ignore", "inherit", "inherit"],
+    environment: { ...environment, CI: "1" },
   });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (result.status !== 0) {
-    throw new Error(`${command} exited with status ${result.status ?? "unknown"}.`);
-  }
 }
 
-function capture(command: string, args: string[]) {
-  const result = spawnSync(command, args, {
+async function capture(
+  command: string,
+  args: string[],
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+) {
+  return runCloudflareProcess(command, args, {
+    captureOutput: true,
     cwd: process.cwd(),
-    encoding: "utf8",
-    env: { ...process.env, CI: "1" },
-    maxBuffer: 10 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
+    environment: { ...environment, CI: "1" },
   });
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (result.status !== 0) {
-    throw new Error(`${command} exited with status ${result.status ?? "unknown"}.`);
-  }
-
-  return result.stdout;
 }
 
-function listD1Databases(configPath: string) {
-  const output = capture("pnpm", [
+async function listD1Databases(configPath: string, accountId: string) {
+  const output = await capture("pnpm", [
     "exec",
     "wrangler",
     "d1",
@@ -373,7 +805,7 @@ function listD1Databases(configPath: string) {
     "--json",
     "--config",
     configPath,
-  ]);
+  ], cloudflareCommandEnvironment(accountId));
   let result: unknown;
 
   try {
@@ -399,6 +831,18 @@ function listD1Databases(configPath: string) {
   });
 }
 
+async function listD1DatabasesForTarget(target: CloudflareTarget) {
+  const snapshot = prepareCloudflareTargetSnapshot(target);
+  try {
+    return await listD1Databases(
+      snapshot.target.configPath,
+      snapshot.target.accountId,
+    );
+  } finally {
+    snapshot.dispose();
+  }
+}
+
 function saveDatabaseId(target: CloudflareTarget, databaseId: string) {
   const databases = target.config.d1_databases;
 
@@ -416,24 +860,30 @@ function saveDatabaseId(target: CloudflareTarget, databaseId: string) {
   writeFileSync(target.configPath, contents, "utf8");
 }
 
-function resolveD1Database(target: CloudflareTarget) {
-  let exactMatches = listD1Databases(target.configPath).filter(
+async function resolveD1Database(target: CloudflareTarget) {
+  const environment = cloudflareCommandEnvironment(target.accountId);
+  let exactMatches = (await listD1DatabasesForTarget(target)).filter(
     (database) => database.name === target.databaseName,
   );
 
   if (exactMatches.length === 0) {
-    run("pnpm", [
-      "exec",
-      "wrangler",
-      "d1",
-      "create",
-      target.databaseName,
-      "--location",
-      "eeur",
-      "--config",
-      target.configPath,
-    ]);
-    exactMatches = listD1Databases(target.configPath).filter(
+    const snapshot = prepareCloudflareTargetSnapshot(target);
+    try {
+      await run("pnpm", [
+        "exec",
+        "wrangler",
+        "d1",
+        "create",
+        target.databaseName,
+        "--location",
+        "eeur",
+        "--config",
+        snapshot.target.configPath,
+      ], environment);
+    } finally {
+      snapshot.dispose();
+    }
+    exactMatches = (await listD1DatabasesForTarget(target)).filter(
       (database) => database.name === target.databaseName,
     );
   }
@@ -446,7 +896,23 @@ function resolveD1Database(target: CloudflareTarget) {
 
   if (target.databaseId !== database.uuid) {
     saveDatabaseId(target, database.uuid);
+    target.databaseId = database.uuid;
     console.info(`Pinned ${target.databaseName} to its exact D1 database ID.`);
+  }
+}
+
+export async function verifyCloudflareDatabaseTarget(target: CloudflareTarget) {
+  const exactMatches = (await listD1DatabasesForTarget(target)).filter(
+    (database) => database.name === target.databaseName,
+  );
+  if (
+    exactMatches.length !== 1 ||
+    target.databaseId === undefined ||
+    exactMatches[0].uuid !== target.databaseId
+  ) {
+    throw new Error(
+      "The validated Worker config must pin the exact remote OPAS D1 database ID.",
+    );
   }
 }
 
@@ -462,9 +928,13 @@ function parseConfigPath(args: string[]) {
   throw new Error("Usage: bootstrap-cloudflare.ts [--config <wrangler.jsonc>]");
 }
 
-function main() {
+async function main() {
   const target = readCloudflareTarget(parseConfigPath(process.argv.slice(2)));
-  const adminSecrets = validateAdminSecrets();
+  const environment = cloudflareCommandEnvironment(target.accountId);
+  const deploymentSecrets = validateCloudflareSecrets(
+    process.env,
+    target.config.vars as JsonObject,
+  );
   const seedPath = resolve(process.cwd(), "scripts/seed-d1.sql");
   const migrationsPath = resolve(dirname(target.configPath), "drizzle/sqlite");
 
@@ -472,73 +942,99 @@ function main() {
     throw new Error("Cloudflare migrations and seed SQL must exist before bootstrap.");
   }
 
-  capture("pnpm", ["exec", "wrangler", "whoami", "--config", target.configPath]);
+  await capture(
+    "pnpm",
+    ["exec", "wrangler", "whoami", "--config", target.configPath],
+    environment,
+  );
   console.info(`Authenticated for guarded target ${target.workerName}.`);
 
-  run("pnpm", [
-    "exec",
-    "opennextjs-cloudflare",
-    "build",
-    "--config",
-    target.configPath,
-  ]);
-  resolveD1Database(target);
-  run("pnpm", [
-    "exec",
-    "opennextjs-cloudflare",
-    "deploy",
-    "--config",
-    target.configPath,
-    "--dry-run",
-  ]);
-
-  run("pnpm", [
-    "exec",
-    "wrangler",
-    "d1",
-    "migrations",
-    "apply",
-    target.databaseName,
-    "--remote",
-    "--config",
-    target.configPath,
-  ]);
-  run("pnpm", [
-    "exec",
-    "wrangler",
-    "d1",
-    "execute",
-    target.databaseName,
-    "--remote",
-    "--file",
-    seedPath,
-    "--yes",
-    "--config",
-    target.configPath,
-  ]);
-
-  const secretDirectory = mkdtempSync(join(tmpdir(), "opas-cloudflare-"));
-  const secretPath = join(secretDirectory, "secrets.json");
+  const build = await prepareCloudflareBuild(["--config", target.configPath], {
+    environment,
+    expectedTarget: target,
+  });
 
   try {
-    writeFileSync(secretPath, JSON.stringify(adminSecrets), { mode: 0o600 });
-    run("pnpm", [
-      "exec",
-      "opennextjs-cloudflare",
-      "deploy",
-      "--config",
-      target.configPath,
-      "--secrets-file",
-      secretPath,
-    ]);
-  } finally {
-    if (existsSync(secretPath)) {
-      unlinkSync(secretPath);
+    await resolveD1Database(target);
+    const secretDirectory = mkdtempSync(join(tmpdir(), "opas-cloudflare-"));
+    const secretPath = join(secretDirectory, "secrets.json");
+    chmodSync(secretDirectory, 0o700);
+    const cleanupSecrets = () =>
+      rmSync(secretDirectory, { force: true, recursive: true });
+    const unregisterSecretCleanup = registerCloudflareCleanup(cleanupSecrets);
+
+    try {
+      writeFileSync(secretPath, JSON.stringify(deploymentSecrets), { mode: 0o600 });
+      await runBuiltCloudflareCommand(
+        "deploy",
+        [
+          "--config",
+          target.configPath,
+          "--dry-run",
+          "--secrets-file",
+          secretPath,
+        ],
+        build,
+        {
+          environment,
+          expectedSecrets: deploymentSecrets,
+          expectedTarget: target,
+        },
+      );
+
+      const dataSnapshot = prepareCloudflareTargetSnapshot(target);
+      try {
+        await run("pnpm", [
+          "exec",
+          "wrangler",
+          "d1",
+          "migrations",
+          "apply",
+          target.databaseName,
+          "--remote",
+          "--config",
+          dataSnapshot.target.configPath,
+        ], environment);
+        await run("pnpm", [
+          "exec",
+          "wrangler",
+          "d1",
+          "execute",
+          target.databaseName,
+          "--remote",
+          "--file",
+          resolve(dataSnapshot.directory, "scripts/seed-d1.sql"),
+          "--yes",
+          "--config",
+          dataSnapshot.target.configPath,
+        ], environment);
+      } finally {
+        dataSnapshot.dispose();
+      }
+
+      await runBuiltCloudflareCommand(
+        "deploy",
+        ["--config", target.configPath, "--secrets-file", secretPath],
+        build,
+        {
+          environment,
+          expectedSecrets: deploymentSecrets,
+          expectedTarget: target,
+        },
+      );
+    } finally {
+      unregisterSecretCleanup();
+      cleanupSecrets();
     }
-    rmdirSync(secretDirectory);
+  } finally {
+    build.dispose();
   }
 
-  run("bash", [resolve(process.cwd(), "scripts/smoke.sh"), target.siteOrigin]);
+  await run(
+    "bash",
+    [resolve(process.cwd(), "scripts/smoke.sh"), target.siteOrigin],
+    cloudflareBuildEnvironment(process.cwd(), environment),
+  );
   console.info(`\nCloudflare bootstrap complete: ${target.siteOrigin}`);
 }
 
@@ -547,10 +1043,8 @@ const invokedModule = process.argv[1]
   : undefined;
 
 if (import.meta.url === invokedModule) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-  }
+    if (!process.exitCode) process.exitCode = 1;
+  });
 }

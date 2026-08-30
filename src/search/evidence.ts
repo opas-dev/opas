@@ -130,10 +130,72 @@ type CacheEntry = {
 export const maximumEvidenceQueryLength = maximumSearchQueryLength;
 export const defaultEvidenceTopK = 5;
 export const maximumEvidenceTopK = 20;
+export const minimumLexicalEvidenceTermCoverage = 0.5;
 
 const identifierMaximumLength = 200;
 const activeCacheEntriesPerWorkspace = 1;
 const minimumVectorSimilarity = Number.EPSILON;
+const evidenceFunctionWords = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "been",
+  "but",
+  "by",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "how",
+  "i",
+  "if",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "may",
+  "might",
+  "of",
+  "on",
+  "or",
+  "our",
+  "should",
+  "that",
+  "the",
+  "their",
+  "then",
+  "there",
+  "these",
+  "they",
+  "this",
+  "those",
+  "to",
+  "was",
+  "we",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "will",
+  "with",
+  "would",
+  "you",
+  "your",
+]);
 
 export class EvidenceRetrievalError extends Error {
   constructor(message: string) {
@@ -373,6 +435,57 @@ export function normalizeEvidenceQuery(query: string) {
     .join("");
 }
 
+function evidenceTerms(value: string) {
+  const words =
+    value.normalize("NFKC").toLocaleLowerCase("en-US").match(/[\p{L}\p{N}]+/gu) ??
+    [];
+  return [...new Set(words.filter((word) => !evidenceFunctionWords.has(word)))];
+}
+
+function lexicalEvidenceCoverage(
+  queryTerms: readonly string[],
+  chunk: EvidenceChunkRecord,
+) {
+  const documentTerms = new Set(
+    evidenceTerms(
+      `${chunk.title} ${chunk.headingPath.join(" ")} ${chunk.evidenceText}`,
+    ),
+  );
+  const matched = queryTerms.filter((term) => documentTerms.has(term)).length;
+  return matched / queryTerms.length;
+}
+
+function vectorEvidenceSimilarity(
+  queryVector: readonly number[],
+  storedVector: unknown,
+) {
+  if (
+    !Array.isArray(storedVector) ||
+    storedVector.length !== queryVector.length ||
+    storedVector.some(
+      (value) => typeof value !== "number" || !Number.isFinite(value),
+    )
+  ) {
+    return 0;
+  }
+  const query = Float32Array.from(queryVector);
+  const stored = Float32Array.from(storedVector);
+  let dotProduct = 0;
+  let queryMagnitude = 0;
+  let storedMagnitude = 0;
+  for (let index = 0; index < query.length; index += 1) {
+    dotProduct += query[index]! * stored[index]!;
+    queryMagnitude += query[index]! * query[index]!;
+    storedMagnitude += stored[index]! * stored[index]!;
+  }
+  const denominator = Math.sqrt(queryMagnitude) * Math.sqrt(storedMagnitude);
+  if (!Number.isFinite(denominator) || denominator <= 0) return 0;
+  const similarity = dotProduct / denominator;
+  return Number.isFinite(similarity)
+    ? Math.min(1, Math.max(0, similarity))
+    : 0;
+}
+
 export function createRepositoryEvidenceSource(
   repository: RepositoryEvidenceOperations,
 ): EvidenceRetrievalSource {
@@ -462,6 +575,13 @@ export function createEvidenceRetriever(source: EvidenceRetrievalSource) {
     if (mode === "vector" && snapshot.dimension === null) {
       return [];
     }
+    const lexicalQueryTerms =
+      effectiveMode === "vector" ? [] : evidenceTerms(term);
+    if (effectiveMode !== "vector" && lexicalQueryTerms.length === 0) {
+      return [];
+    }
+    const searchTerm =
+      effectiveMode === "lexical" ? lexicalQueryTerms.join(" ") : term;
     const vector =
       effectiveMode === "lexical" ? undefined : boundedVector(queryVector);
     if (
@@ -481,7 +601,7 @@ export function createEvidenceRetriever(source: EvidenceRetrievalSource) {
     const searchResults =
       effectiveMode === "lexical"
         ? await search(snapshot.index, {
-            term,
+            term: searchTerm,
             properties: [...properties],
             tolerance: 1,
             limit: candidateLimit,
@@ -506,12 +626,25 @@ export function createEvidenceRetriever(source: EvidenceRetrievalSource) {
     const candidates = searchResults.hits
       .map((hit) => {
         const currentChunk = snapshot.chunksById.get(hit.document.id);
-        return currentChunk
+        const lexicalCoverage = currentChunk
+          ? lexicalEvidenceCoverage(lexicalQueryTerms, currentChunk)
+          : 0;
+        const score =
+          currentChunk && effectiveMode === "hybrid"
+            ? Math.max(
+                lexicalCoverage,
+                vectorEvidenceSimilarity(vector!, hit.document.embedding),
+              )
+            : hit.score;
+        return currentChunk &&
+          (effectiveMode !== "lexical" ||
+            lexicalCoverage >=
+              minimumLexicalEvidenceTermCoverage)
           ? resultFromChunk(
               currentChunk,
               snapshot.generation,
               effectiveMode,
-              hit.score,
+              score,
             )
           : null;
       })

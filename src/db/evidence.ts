@@ -18,6 +18,7 @@ import type {
   EmbeddingJobWorkRequest,
   EvidenceCandidateRevalidation,
   EvaluationRunCompletion,
+  EvaluationRunResultsUpdate,
   EvaluationRunStart,
   SavedQuestionSet,
 } from "@/db/repository";
@@ -31,6 +32,7 @@ export const articleEvidenceInitializationMaximumCount = 20;
 const questionSetMaximumQuestions = 1_000;
 const questionMaximumSources = 100;
 const evaluationResultsMaximumCharacters = 750_000;
+export const evidenceReviewMaximumRecords = 100;
 const savedQuestionClassifications = new Set([
   "answerable",
   "ambiguous",
@@ -382,6 +384,7 @@ export function validateQuestionSet(questionSet: SavedQuestionSet) {
       !savedQuestionOutcomes.has(question.expectedOutcome) ||
       !Array.isArray(question.acceptedSourceIds) ||
       !Array.isArray(question.sourceContentHashes) ||
+      question.acceptedSourceIds.length !== question.sourceContentHashes.length ||
       question.acceptedSourceIds.length > questionMaximumSources ||
       question.sourceContentHashes.length > questionMaximumSources
     ) {
@@ -429,9 +432,13 @@ export function validateEvaluationRunCompletion(completion: EvaluationRunComplet
   if (completion.status !== "completed" && completion.status !== "failed") {
     throw new EvidenceStorageError("Evaluation completion status is invalid");
   }
+  validateEvaluationRunResults(completion.results);
+}
+
+function validateEvaluationRunResults(results: unknown) {
   let serializedResults: string | undefined;
   try {
-    serializedResults = JSON.stringify(completion.results);
+    serializedResults = JSON.stringify(results);
   } catch {
     throw new EvidenceStorageError("Evaluation results must be JSON serializable");
   }
@@ -440,5 +447,24 @@ export function validateEvaluationRunCompletion(completion: EvaluationRunComplet
     serializedResults.length > evaluationResultsMaximumCharacters
   ) {
     throw new EvidenceStorageError("Evaluation results are required");
+  }
+}
+
+export function validateEvaluationRunResultsUpdate(
+  update: EvaluationRunResultsUpdate,
+) {
+  identifier(update.id, "Evaluation run ID");
+  identifier(update.workspaceId, "Workspace ID");
+  validateEvaluationRunResults(update.results);
+}
+
+export function validateEvidenceReviewRequest(workspaceId: string, limit: number) {
+  identifier(workspaceId, "Workspace ID");
+  if (
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > evidenceReviewMaximumRecords
+  ) {
+    throw new EvidenceStorageError("Evidence review limit is invalid");
   }
 }

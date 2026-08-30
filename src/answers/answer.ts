@@ -4,13 +4,19 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 
-import type {
-  GenerationAdapter,
-  GenerationEvent,
-  GenerationFinishReason,
-  GenerationMessage,
-  GenerationUsage,
+import {
+  GenerationError,
+  type GenerationAdapter,
+  type GenerationEvent,
+  type GenerationFinishReason,
+  type GenerationMessage,
+  type GenerationMetadata,
+  type GenerationUsage,
 } from "@/ai/generation";
+import type {
+  AnswerInferenceAdmission,
+  AnswerInferenceOutcome,
+} from "@/answers/admission";
 import {
   createAnswerGuardrails,
   type AnswerGuardrailReason,
@@ -86,6 +92,10 @@ export type AnswerRequest = Readonly<{
   currentPage?: PublishedPageIdentity;
   history?: readonly AnswerHistoryMessage[];
   maximumOutputTokens?: number;
+  observeProvider?: (
+    metadata: Readonly<Pick<GenerationMetadata, "model" | "provider">>,
+  ) => void;
+  observeRetrieval?: (results: readonly EvidenceRetrievalResult[]) => void;
   question: string;
   signal?: AbortSignal;
   workspaceId: string;
@@ -139,6 +149,7 @@ export type AnswerEvent =
     }>;
 
 export type AnswerServiceOptions = Readonly<{
+  admission?: AnswerInferenceAdmission;
   evidencePolicy: AnswerEvidencePolicy;
   generation: GenerationAdapter;
   guardrails?: AnswerGuardrails;
@@ -153,6 +164,8 @@ type PreparedAnswerRequest = {
   currentPage?: PublishedPageIdentity;
   history: readonly AnswerHistoryMessage[];
   maximumOutputTokens: number;
+  observeProvider?: AnswerRequest["observeProvider"];
+  observeRetrieval?: (results: readonly EvidenceRetrievalResult[]) => void;
   question: string;
   signal?: AbortSignal;
   workspaceId: string;
@@ -297,6 +310,18 @@ function prepareAnswerRequest(
     throw new AnswerError("invalid-input", "Answer cancellation signal is invalid");
   }
   if (
+    value.observeProvider !== undefined &&
+    typeof value.observeProvider !== "function"
+  ) {
+    throw new AnswerError("invalid-input", "Answer provider observer is invalid");
+  }
+  if (
+    value.observeRetrieval !== undefined &&
+    typeof value.observeRetrieval !== "function"
+  ) {
+    throw new AnswerError("invalid-input", "Answer retrieval observer is invalid");
+  }
+  if (
     value.currentPage !== undefined &&
     !isPublishedPageIdentity(value.currentPage)
   ) {
@@ -311,6 +336,8 @@ function prepareAnswerRequest(
       value.maximumOutputTokens,
       generation,
     ),
+    observeProvider: value.observeProvider,
+    observeRetrieval: value.observeRetrieval,
     question: normalizedQuestion(value.question),
     signal: value.signal,
     workspaceId: value.workspaceId,
@@ -810,6 +837,11 @@ async function* answerStream(
     throw new AnswerError("cancelled", "Answer request was cancelled");
   }
   const evidence = prepareEvidence(retrieved, request.workspaceId);
+  try {
+    request.observeRetrieval?.(evidence);
+  } catch {
+    // Answer analytics observers cannot affect retrieval or generation.
+  }
   const guardrailDecision = options.guardrails?.evaluateEvidence(evidence);
   if (guardrailDecision) {
     yield abstention(guardrailDecision);
@@ -826,13 +858,119 @@ async function* answerStream(
     entries,
     options.generation,
   );
-  const providerEvents = options.generation.stream({
-    maximumOutputTokens: request.maximumOutputTokens,
-    messages,
-    signal: request.signal,
-    temperature: 0,
+  const reservation = options.admission
+    ? await options.admission.reserve({
+        maximumOutputTokens: request.maximumOutputTokens,
+        model: options.generation.metadata.model,
+        provider: options.generation.metadata.provider,
+        workspaceId: request.workspaceId,
+      })
+    : undefined;
+  let usage: GenerationUsage | undefined;
+  let fallbackGeneration: GenerationMetadata | undefined;
+  let observedProvider = "";
+  let outcome: AnswerInferenceOutcome = "cancelled";
+  let reconciled = false;
+  let finishEvent: AnswerEvent | undefined;
+  const settlement = () => ({
+    ...(fallbackGeneration
+      ? {
+          generation: {
+            model: fallbackGeneration.model,
+            provider: fallbackGeneration.provider,
+          },
+        }
+      : {}),
+    outcome,
+    usage,
   });
-  yield* normalizedAnswerEvents(providerEvents, entries);
+  const observeProvider = (metadata: GenerationMetadata) => {
+    const identity = `${metadata.provider}\u0000${metadata.model}`;
+    if (identity === observedProvider) return;
+    observedProvider = identity;
+    if (
+      metadata.provider !== options.generation.metadata.provider ||
+      metadata.model !== options.generation.metadata.model
+    ) {
+      fallbackGeneration = metadata;
+    }
+    try {
+      request.observeProvider?.(
+        Object.freeze({ model: metadata.model, provider: metadata.provider }),
+      );
+    } catch {
+      // Answer analytics observers cannot affect provider selection or generation.
+    }
+  };
+
+  try {
+    observeProvider(options.generation.metadata);
+    const providerEvents = options.generation.stream({
+      maximumOutputTokens: request.maximumOutputTokens,
+      messages,
+      observeProvider,
+      signal: request.signal,
+      temperature: 0,
+    });
+    const observedProviderEvents = (async function* () {
+      for await (const event of providerEvents) {
+        if (event.type === "finish") usage = event.usage;
+        yield event;
+      }
+    })();
+    for await (const event of normalizedAnswerEvents(
+      observedProviderEvents,
+      entries,
+    )) {
+      if (event.type === "finish") {
+        finishEvent = event;
+        continue;
+      }
+      yield event;
+    }
+    if (!finishEvent) {
+      throw new AnswerError(
+        "invalid-output",
+        "Generated answer ended before completion",
+      );
+    }
+    outcome = "completed";
+    if (reservation) {
+      await reservation.reconcile(settlement());
+      reconciled = true;
+    }
+    yield finishEvent;
+  } catch (error) {
+    outcome = answerInferenceOutcome(error);
+    throw error;
+  } finally {
+    if (reservation && !reconciled) {
+      try {
+        await reservation.reconcile(settlement());
+      } catch {
+        // An unreconciled lease remains fully reserved and expires conservatively.
+      }
+    }
+  }
+}
+
+function answerInferenceOutcome(error: unknown): AnswerInferenceOutcome {
+  if (
+    (error instanceof AnswerError && error.category === "cancelled") ||
+    (error instanceof GenerationError && error.category === "cancelled")
+  ) {
+    return "cancelled";
+  }
+  if (error instanceof GenerationError && error.category === "timeout") {
+    return "timeout";
+  }
+  if (
+    error instanceof AnswerError &&
+    ["invalid-output", "output-limit", "unsafe-output"].includes(error.category)
+  ) {
+    return "invalid-output";
+  }
+  return "failed";
 }
 
 export function createAnswerService(
@@ -859,6 +997,7 @@ export function createAnswerService(
   }
   const policy = validateEvidencePolicy(options.evidencePolicy);
   const configuredOptions = Object.freeze({
+    admission: options.admission,
     evidencePolicy: policy,
     generation: options.generation,
     guardrails,

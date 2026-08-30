@@ -102,6 +102,84 @@
   border-radius: var(--opas-radius-md);
 }
 
+.editor button,
+.editor :global(.mdxeditor-toolbar button),
+.editor :global(.mdxeditor-toolbar [role="button"]),
+.editor :global(.mdxeditor-toolbar [role="combobox"]) {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.dialogLayer {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  overflow-y: auto;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in oklch, black 52%, transparent);
+}
+
+.dialogCard {
+  width: min(32rem, 100%);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  border: 1px solid var(--opas-border);
+  border-radius: var(--opas-radius-lg);
+  background: var(--opas-surface-elevated);
+  color: var(--opas-foreground);
+  padding: 1.25rem;
+  box-shadow: 0 1.5rem 4rem color-mix(in oklch, black 30%, transparent);
+}
+
+.dialogTitle {
+  margin: 0 0 1.25rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.linkOptions {
+  position: fixed;
+  z-index: 70;
+  right: 1rem;
+  bottom: 1rem;
+  display: flex;
+  max-width: calc(100vw - 2rem);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--opas-border);
+  border-radius: var(--opas-radius-md);
+  background: var(--opas-surface-elevated);
+  padding: 0.5rem;
+  box-shadow: 0 0.75rem 2rem color-mix(in oklch, black 22%, transparent);
+}
+
+.linkOptions button {
+  min-height: 2.75rem;
+  border: 1px solid var(--opas-border);
+  border-radius: var(--opas-radius-sm);
+  background: var(--opas-background);
+  color: var(--opas-foreground);
+  padding-inline: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.linkDestination {
+  min-height: 2.75rem;
+  max-width: 22rem;
+  overflow: hidden;
+  align-content: center;
+  padding-inline: 0.75rem;
+  color: var(--opas-primary);
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .plainCodeBlock {
   display: grid;
   gap: 0.5rem;
@@ -119,7 +197,7 @@
 }
 
 .plainCodeMeta input {
-  min-height: 2.25rem;
+  min-height: 2.75rem;
   min-width: 8rem;
   flex: 1 1 8rem;
   border: 1px solid color-mix(in oklch, var(--opas-code-foreground) 30%, transparent);

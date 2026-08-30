@@ -15,6 +15,7 @@ import { Pool } from "pg";
 import { demoIds } from "@/db/demo";
 import {
   EvidenceStorageError,
+  validateEvidenceReviewRequest,
   validateEvaluationRunCompletion,
   validateQuestionSet,
 } from "@/db/evidence";
@@ -76,6 +77,25 @@ test("evidence validation rejects invalid fixture and evaluation records", () =>
   } as unknown as SavedQuestionSet;
   assert.throws(
     () => validateQuestionSet(invalidQuestionSet),
+    EvidenceStorageError,
+  );
+  assert.throws(
+    () =>
+      validateQuestionSet({
+        ...invalidQuestionSet,
+        id: "mismatched_question_sources",
+        questions: [
+          {
+            ...invalidQuestionSet.questions[0]!,
+            classification: "answerable",
+            sourceContentHashes: [],
+          },
+        ],
+      }),
+    EvidenceStorageError,
+  );
+  assert.throws(
+    () => validateEvidenceReviewRequest(demoIds.workspace, 0),
     EvidenceStorageError,
   );
 
@@ -1138,7 +1158,7 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
         question: "Does OPAS ship a ticket inbox?",
         expectedOutcome: "abstain",
         acceptedSourceIds: [],
-        sourceContentHashes: [questionSourceHash],
+        sourceContentHashes: [],
       },
     ],
     createdAt: startedAt,
@@ -1148,6 +1168,11 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
       ?.questions.length,
     2,
   );
+  assert.deepEqual(
+    (await repository.listQuestionSets(demoIds.workspace, 10)).map(({ id }) => id),
+    ["question_set_pilot_v1"],
+  );
+  assert.deepEqual(await repository.listQuestionSets("workspace_other", 10), []);
 
   await repository.startEvaluationRun({
     id: "evaluation_run_pilot",
@@ -1177,12 +1202,52 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
     "evaluation_run_pilot",
   );
   assert.equal(run?.status, "completed");
+  assert.equal(run?.provider, "test-provider");
+  assert.equal(run?.model, "test-answer-v1");
+  assert.equal(run?.retrievalMode, "orama-hybrid");
   assert.deepEqual(run?.results, {
     classes: {
       answerable: { passed: 1, total: 1 },
       unsupported: { passed: 1, total: 1 },
     },
   });
+  await repository.updateEvaluationRunResults({
+    id: "evaluation_run_pilot",
+    results: {
+      classes: {
+        answerable: { passed: 1, reviewed: 1, total: 1 },
+        unsupported: { passed: 1, reviewed: 0, total: 1 },
+      },
+    },
+    workspaceId: demoIds.workspace,
+  });
+  assert.deepEqual(
+    (
+      await repository.getEvaluationRun(
+        demoIds.workspace,
+        "evaluation_run_pilot",
+      )
+    )?.results,
+    {
+      classes: {
+        answerable: { passed: 1, reviewed: 1, total: 1 },
+        unsupported: { passed: 1, reviewed: 0, total: 1 },
+      },
+    },
+  );
+  await assert.rejects(
+    repository.updateEvaluationRunResults({
+      id: "evaluation_run_pilot",
+      results: { exposed: true },
+      workspaceId: "workspace_other",
+    }),
+    /Completed evaluation record was not found/u,
+  );
+  assert.deepEqual(
+    (await repository.listEvaluationRuns(demoIds.workspace, 10)).map(({ id }) => id),
+    ["evaluation_run_pilot"],
+  );
+  assert.deepEqual(await repository.listEvaluationRuns("workspace_other", 10), []);
 }
 
 test("evidence repository contract passes on Postgres", { timeout: 120_000 }, async () => {

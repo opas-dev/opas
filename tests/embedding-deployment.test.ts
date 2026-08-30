@@ -11,12 +11,14 @@ function jsonFile(path: string) {
   return JSON.parse(source.slice(start)) as Record<string, unknown>;
 }
 
-test("Cloudflare uses configured Workers AI answers and minute embedding recovery", () => {
+test("Cloudflare uses configured Workers AI answers and independent recovery schedules", () => {
   const config = jsonFile("wrangler.jsonc");
 
   assert.equal(config.main, "custom-worker.ts");
   assert.deepEqual(config.ai, { binding: "AI" });
-  assert.deepEqual(config.triggers, { crons: ["* * * * *"] });
+  assert.deepEqual(config.triggers, {
+    crons: ["* * * * *", "15 0 * * *"],
+  });
   const vars = config.vars as Record<string, unknown>;
   assert.equal(vars.OPAS_GENERATION_GATEWAY_ID, "opas-answers");
   assert.equal(
@@ -25,9 +27,13 @@ test("Cloudflare uses configured Workers AI answers and minute embedding recover
   );
   assert.match(
     String(vars.OPAS_GENERATION_RETENTION_DISCLOSURE),
-    /retains only configured redacted conversation records/iu,
+    /retain configured redacted conversation records.*30 days.*support handoffs.*logging is disabled.*caching is bypassed/iu,
   );
   assert.equal("OPAS_ANSWER_TOPIC_GUARDRAILS" in vars, false);
+  assert.equal(
+    vars.OPAS_EMBED_PARENT_ORIGINS,
+    "https://opas.dev,https://www.opas.dev",
+  );
 
   const worker = readFileSync("custom-worker.ts", "utf8");
   assert.match(worker, /fetch:\s*handler\.fetch/u);
@@ -44,6 +50,10 @@ test("Vercel uses the authenticated route on its Hobby-compatible recovery sched
       path: "/api/internal/embeddings",
       schedule: "0 0 * * *",
     },
+    {
+      path: "/api/internal/analytics",
+      schedule: "15 0 * * *",
+    },
   ]);
   assert.equal("env" in config, false);
 });
@@ -59,16 +69,35 @@ test("Docker runs the authenticated recovery client independently from the app",
     compose,
     /OPAS_EMBEDDING_RECOVERY_URL:\s*http:\/\/app:3000\/api\/internal\/embeddings/u,
   );
-  assert.match(compose, /CRON_SECRET:\s*\$\{CRON_SECRET:-\}/u);
+  assert.match(compose, /CRON_SECRET:\s*\$\{CRON_SECRET:\?Set CRON_SECRET in \.env\}/u);
+  assert.match(compose, /analytics-cleanup:/u);
+  assert.match(compose, /"node", "scripts\/run-analytics-cleanup\.mjs"/u);
+  assert.match(
+    compose,
+    /OPAS_ANALYTICS_CLEANUP_URL:\s*http:\/\/app:3000\/api\/internal\/analytics/u,
+  );
   for (const name of [
     "OPAS_ANSWER_TOPIC_GUARDRAILS",
+    "OPAS_ANSWER_FALLBACK_INPUT_MICRODOLLARS_PER_MILLION_TOKENS",
+    "OPAS_ANSWER_FALLBACK_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS",
     "OPAS_GENERATION_API_KEY",
     "OPAS_GENERATION_ENDPOINT",
+    "OPAS_GENERATION_FALLBACK_API_KEY",
+    "OPAS_GENERATION_FALLBACK_ENDPOINT",
+    "OPAS_GENERATION_FALLBACK_GATEWAY_ID",
+    "OPAS_GENERATION_FALLBACK_MODEL",
+    "OPAS_GENERATION_FALLBACK_PROVIDER",
+    "OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE",
     "OPAS_GENERATION_MODEL",
     "OPAS_GENERATION_RETENTION_DISCLOSURE",
+    "OPAS_EMBED_PARENT_ORIGINS",
   ]) {
     assert.match(compose, new RegExp(`${name}:\\s*\\$\\{${name}:-\\}`, "u"));
   }
+  assert.match(
+    compose,
+    /OPAS_GENERATION_FALLBACK_ENABLED:\s*\$\{OPAS_GENERATION_FALLBACK_ENABLED:-false\}/u,
+  );
   assert.match(dockerfile, /scripts\/run-embedding-recovery\.mjs/u);
   assert.match(dockerfile, /node prepare-postgres\.cjs && node server\.js/u);
   assert.match(preparation, /initializeAllMissingArticleEvidence/u);
@@ -99,8 +128,16 @@ test("the environment template documents secret and provider settings without va
     "OPAS_EMBEDDING_MODEL",
     "OPAS_GENERATION_API_KEY",
     "OPAS_GENERATION_ENDPOINT",
+    "OPAS_GENERATION_FALLBACK_API_KEY",
+    "OPAS_GENERATION_FALLBACK_ENABLED",
+    "OPAS_GENERATION_FALLBACK_ENDPOINT",
+    "OPAS_GENERATION_FALLBACK_GATEWAY_ID",
+    "OPAS_GENERATION_FALLBACK_MODEL",
+    "OPAS_GENERATION_FALLBACK_PROVIDER",
+    "OPAS_GENERATION_FALLBACK_RETENTION_DISCLOSURE",
     "OPAS_GENERATION_MODEL",
     "OPAS_GENERATION_RETENTION_DISCLOSURE",
+    "OPAS_EMBED_PARENT_ORIGINS",
   ]) {
     assert.match(template, new RegExp(`^${name}=`, "mu"));
   }

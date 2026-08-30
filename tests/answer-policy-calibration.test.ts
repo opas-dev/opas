@@ -195,17 +195,61 @@ test("derives provisional answer boundaries from the hash-bound 50-question fixt
     ),
   );
   assert.equal(
-    Math.floor(minimumScoreMidpoint * 10) / 10,
+    answerEvidencePolicyCalibration.minimumScoreGuard,
     answerEvidencePolicy.minimumScore,
   );
+  assert.ok(
+    answerEvidencePolicyCalibration.minimumScoreGuard > minimumScoreMidpoint,
+  );
   assert.equal(
-    Math.ceil(conflictingArticleGapCeiling * 100) / 100,
+    answerEvidencePolicyCalibration.conflictingArticleGapGuard,
     answerEvidencePolicy.minimumScoreGapAcrossArticles,
   );
-  assert.equal(answerEvidencePolicyCalibration.minimumScoreRounding, "down-to-one-decimal");
-  assert.equal(
-    answerEvidencePolicyCalibration.conflictingArticleGapRounding,
-    "up-to-two-decimals",
+  assert.ok(
+    answerEvidencePolicyCalibration.conflictingArticleGapGuard >
+      conflictingArticleGapCeiling,
   );
   assert.equal(answerEvidencePolicyCalibration.designPartnerCalibration, "pending");
+});
+
+test("lexical fallback admits the fixed answerable class and rejects unsupported questions", async () => {
+  const fixture = syntheticRetrievalFixtureV1;
+  const retrieve = createEvidenceRetriever(calibrationSource());
+  const answerable = fixture.questions.filter(
+    ({ classification }) => classification === "answerable",
+  );
+  const unsupported = fixture.questions.filter(
+    ({ classification }) => classification === "unsupported",
+  );
+
+  for (const question of answerable) {
+    const results = await retrieve({
+      workspaceId: fixture.workspaceId,
+      query: question.question,
+      mode: "lexical",
+      topK: 5,
+    });
+    assert.ok(results.length > 0, question.id);
+    assert.ok(
+      results.some(({ sourceId }) =>
+        question.acceptedSourceIds.includes(sourceId),
+      ),
+      question.id,
+    );
+  }
+  for (const question of unsupported) {
+    assert.deepEqual(
+      await retrieve({
+        workspaceId: fixture.workspaceId,
+        query: question.question,
+        mode: "lexical",
+        topK: 5,
+      }),
+      [],
+      question.id,
+    );
+  }
+
+  assert.equal(answerable.length, 20);
+  assert.equal(unsupported.length, 10);
 });

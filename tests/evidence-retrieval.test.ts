@@ -192,6 +192,40 @@ test("lexical retrieval is workspace scoped, top-k bounded, and deterministic", 
   assert.ok(results.every((result) => result.workspaceId === "workspace_alpha"));
 });
 
+test("lexical retrieval rejects unrelated questions that share only function words", async () => {
+  const source = new MutableEvidenceSource();
+  source.state = {
+    ...source.state!,
+    activeEmbeddingGenerationId: null,
+  };
+  source.chunks = [
+    chunk(
+      "chunk_runtime",
+      "article_runtime",
+      "Runtime MDX in OPAS",
+      "This article is loaded from the deployment database through Drizzle ORM and compiled when the request arrives.",
+    ),
+  ];
+  const retrieve = createEvidenceRetriever(source);
+
+  assert.deepEqual(
+    await retrieve({
+      workspaceId: "workspace_alpha",
+      query: "What is the current weather in Tokyo?",
+      mode: "lexical",
+    }),
+    [],
+  );
+  assert.equal(
+    (await retrieve({
+      workspaceId: "workspace_alpha",
+      query: "How is the Runtime MDX article loaded?",
+      mode: "lexical",
+    }))[0]?.sourceId,
+    "chunk_runtime",
+  );
+});
+
 test("vector and hybrid modes rank provider-independent vectors consistently", async () => {
   const password = chunk(
     "chunk_password",
@@ -238,6 +272,88 @@ test("vector and hybrid modes rank provider-independent vectors consistently", a
       `${mode} results were not deterministically ordered`,
     );
   }
+});
+
+test("hybrid confidence keeps absolute semantic and lexical evidence instead of normalized rank", async () => {
+  const runtime = chunk(
+    "chunk_runtime",
+    "article_runtime",
+    "Runtime MDX in OPAS",
+    "Database content is compiled when the request arrives.",
+  );
+  const deployment = chunk(
+    "chunk_deployment",
+    "article_deployment",
+    "Deployment targets",
+    "The content model runs on Docker, Vercel, and Cloudflare Workers.",
+    {
+      articleContentHash: articleHashB,
+      contentHash: contentHashB,
+      embeddingInputHash: contentHashB,
+    },
+  );
+  const offline = chunk(
+    "chunk_offline",
+    "article_offline",
+    "Offline export",
+    "Download a portable archive without an active network connection.",
+    {
+      articleContentHash: articleHashC,
+      contentHash: contentHashC,
+      embeddingInputHash: contentHashC,
+    },
+  );
+  const source = new MutableEvidenceSource();
+  source.chunks = [runtime, deployment, offline];
+  source.embeddings = [
+    embedding(runtime, [1, 0, 0]),
+    embedding(deployment, [0.9, 0.1, 0]),
+  ];
+  const retrieve = createEvidenceRetriever(source);
+
+  const unsupported = await retrieve({
+    workspaceId: "workspace_alpha",
+    query: "What is the current weather in Tokyo?",
+    mode: "hybrid",
+    queryVector: [0.4, 0.916515, 0],
+  });
+  assert.ok(unsupported.length > 0);
+  assert.equal(unsupported[0]?.sourceId, deployment.id);
+  assert.ok(unsupported.every(({ score }) => score < 0.7));
+
+  const semantic = await retrieve({
+    workspaceId: "workspace_alpha",
+    query: "Where is documentation executed?",
+    mode: "hybrid",
+    queryVector: [0.98, 0.2, 0],
+  });
+  assert.ok((semantic[0]?.score ?? 0) > 0.95);
+
+  const lexical = await retrieve({
+    workspaceId: "workspace_alpha",
+    query: "Runtime MDX",
+    mode: "hybrid",
+    queryVector: [0.4, 0.916515, 0],
+  });
+  assert.equal(lexical[0]?.sourceId, runtime.id);
+  assert.equal(lexical[0]?.score, 1);
+
+  const partial = await retrieve({
+    workspaceId: "workspace_alpha",
+    query: "Runtime weather Tokyo",
+    mode: "hybrid",
+    queryVector: [0.4, 0.916515, 0],
+  });
+  assert.ok(partial.every(({ score }) => score < 0.7));
+
+  const missingVector = await retrieve({
+    workspaceId: "workspace_alpha",
+    query: "Offline export",
+    mode: "hybrid",
+    queryVector: [0.4, 0.916515, 0],
+  });
+  assert.equal(missingVector[0]?.sourceId, offline.id);
+  assert.equal(missingVector[0]?.score, 1);
 });
 
 test("hybrid retrieval stays lexical while active embeddings are pending", async () => {

@@ -1,6 +1,6 @@
 // ABOUTME: Stores versioned evidence, embeddings, jobs, and evaluations in SQLite and D1.
 // ABOUTME: Keeps publication invalidation and retry checkpoints atomic within each deployment driver.
-import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { AnyD1Database, DrizzleD1Database } from "drizzle-orm/d1";
@@ -20,9 +20,11 @@ import {
   validateEmbeddingJobRetry,
   validateEmbeddingJobWorkRequest,
   validateEvaluationRunCompletion,
+  validateEvaluationRunResultsUpdate,
   validateEvaluationRunStart,
   validateEvidenceCandidateRevalidation,
   validateEvidenceCommit,
+  validateEvidenceReviewRequest,
   validateQuestionSet,
 } from "@/db/evidence";
 import type {
@@ -1904,6 +1906,20 @@ export function createSqliteEvidenceRepository(
         : null;
     },
 
+    async listQuestionSets(workspaceId, limit) {
+      validateEvidenceReviewRequest(workspaceId, limit);
+      const rows = await executableDatabase
+        .select()
+        .from(savedQuestionSets)
+        .where(eq(savedQuestionSets.workspaceId, workspaceId))
+        .orderBy(desc(savedQuestionSets.createdAt), asc(savedQuestionSets.id))
+        .limit(limit);
+      return rows.map((questionSet) => ({
+        ...questionSet,
+        questions: questionSet.questions as readonly SavedQuestion[],
+      }));
+    },
+
     async startEvaluationRun(run) {
       validateEvaluationRunStart(run);
       await executableDatabase.insert(evaluationRuns).values({
@@ -1936,6 +1952,24 @@ export function createSqliteEvidenceRepository(
       }
     },
 
+    async updateEvaluationRunResults(update) {
+      validateEvaluationRunResultsUpdate(update);
+      const updated = await executableDatabase
+        .update(evaluationRuns)
+        .set({ results: update.results })
+        .where(
+          and(
+            eq(evaluationRuns.workspaceId, update.workspaceId),
+            eq(evaluationRuns.id, update.id),
+            eq(evaluationRuns.status, "completed"),
+          ),
+        )
+        .returning({ id: evaluationRuns.id });
+      if (updated.length !== 1) {
+        throw new Error("Completed evaluation record was not found");
+      }
+    },
+
     async getEvaluationRun(workspaceId, id) {
       const [run] = await executableDatabase
         .select()
@@ -1943,6 +1977,16 @@ export function createSqliteEvidenceRepository(
         .where(and(eq(evaluationRuns.workspaceId, workspaceId), eq(evaluationRuns.id, id)))
         .limit(1);
       return run ?? null;
+    },
+
+    async listEvaluationRuns(workspaceId, limit) {
+      validateEvidenceReviewRequest(workspaceId, limit);
+      return executableDatabase
+        .select()
+        .from(evaluationRuns)
+        .where(eq(evaluationRuns.workspaceId, workspaceId))
+        .orderBy(desc(evaluationRuns.startedAt), asc(evaluationRuns.id))
+        .limit(limit);
     },
   };
 }

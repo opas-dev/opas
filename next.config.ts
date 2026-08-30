@@ -3,11 +3,15 @@
 import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
-import { embedParentOrigins } from "./src/embed/config";
 import {
-  createEmbedContentSecurityPolicy,
+  contentSecurityPolicy,
   securityHeaders,
 } from "./src/security/headers";
+import { mcpResponseHeaders } from "./src/mcp/headers";
+
+const sharedSecurityHeaders = securityHeaders.filter(
+  ({ key }) => key !== "Content-Security-Policy",
+);
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -17,7 +21,7 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: [
-          ...securityHeaders,
+          ...sharedSecurityHeaders,
           {
             key: "Link",
             value:
@@ -30,13 +34,17 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/embed",
+        source: "/:path((?!embed$).*)",
         headers: [
           {
             key: "Content-Security-Policy",
-            value: createEmbedContentSecurityPolicy(embedParentOrigins()),
+            value: contentSecurityPolicy,
           },
         ],
+      },
+      {
+        source: "/mcp",
+        headers: [...mcpResponseHeaders],
       },
     ];
   },

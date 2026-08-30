@@ -84,6 +84,15 @@ export type AnswerGuardrails = Readonly<{
   status: "ready" | "unavailable";
 }>;
 
+export type AnswerTopicGuardrailReport =
+  | Readonly<{ status: "invalid" }>
+  | Readonly<{ status: "unconfigured" }>
+  | Readonly<{
+      allow: readonly string[];
+      deny: readonly string[];
+      status: "configured";
+    }>;
+
 type TopicPolicy = Readonly<{
   allow: readonly (readonly string[])[];
   deny: readonly (readonly string[])[];
@@ -180,6 +189,23 @@ function parsedTopicPolicy(configuration: string | undefined): ParsedTopicPolicy
   return Object.freeze({
     policy: Object.freeze({ allow: allow.topics, deny: deny.topics }),
     status: "ready",
+  });
+}
+
+export function describeAnswerTopicGuardrails(
+  configuration: string | undefined,
+): AnswerTopicGuardrailReport {
+  const parsed = parsedTopicPolicy(configuration);
+  if (parsed.status === "invalid") {
+    return Object.freeze({ status: "invalid" });
+  }
+  if (!parsed.policy) {
+    return Object.freeze({ status: "unconfigured" });
+  }
+  return Object.freeze({
+    allow: Object.freeze(parsed.policy.allow.map((topic) => topic.join(" "))),
+    deny: Object.freeze(parsed.policy.deny.map((topic) => topic.join(" "))),
+    status: "configured",
   });
 }
 

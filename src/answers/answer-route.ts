@@ -11,16 +11,26 @@ import {
   type AnswerRuntime,
 } from "@/answers/answer-runtime";
 import {
+  consumeAnswerRequestAllowance,
+  type AnswerRequestAllowance,
+} from "@/answers/gate";
+import {
   resolvePublishedArticlePath,
   type PublishedPageCandidate,
 } from "@/content/page-context";
 import { demoIds } from "@/db/demo";
+import {
+  createAnswerOutcomeRecorder,
+  type AnswerOutcomeRecorder,
+} from "@/outcomes/answer-recorder";
+import { normalizeConversationAnalyticsId } from "@/outcomes/records";
 
 export const maximumAnswerRequestUtf8Bytes = 16_384;
 
 export type AnswerStreamRecord =
   | AnswerEvent
   | Readonly<{
+      conversationId: string;
       generation: AnswerRuntime["metadata"];
       type: "metadata";
     }>
@@ -30,8 +40,12 @@ export type AnswerStreamRecord =
     }>;
 
 export type AnswerRouteDependencies = {
+  consumeAllowance?: (request: Request) => Promise<AnswerRequestAllowance>;
+  createConversationId?: () => string;
+  createRecorder?: typeof createAnswerOutcomeRecorder;
   createRuntime?: () => Promise<AnswerRuntime>;
   loadPublications?: () => Promise<readonly PublishedPageCandidate[]>;
+  now?: () => Date;
 };
 
 type ParsedAnswerRequest = {
@@ -236,11 +250,16 @@ function preStreamFailure(error: unknown) {
   return jsonResponse("unavailable", 503);
 }
 
-function streamFailureCode(error: unknown): AnswerStreamRecord & { type: "error" } {
-  if (
+function failureWasCancelled(error: unknown) {
+  return (
+    (error instanceof RequestFailure && error.code === "cancelled") ||
     (error instanceof AnswerError && error.category === "cancelled") ||
     (error instanceof GenerationError && error.category === "cancelled")
-  ) {
+  );
+}
+
+function streamFailureCode(error: unknown): AnswerStreamRecord & { type: "error" } {
+  if (failureWasCancelled(error)) {
     return Object.freeze({ code: "cancelled", type: "error" });
   }
   if (
@@ -266,13 +285,15 @@ async function closeIterator(iterator: AsyncIterator<AnswerEvent>) {
 }
 
 function streamingResponse(
+  conversationId: string,
   runtime: AnswerRuntime,
   iterator: AsyncIterator<AnswerEvent>,
   firstEvent: AnswerEvent,
+  recorder: AnswerOutcomeRecorder,
   signal: ReturnType<typeof linkedSignal>,
 ) {
   const pending: AnswerStreamRecord[] = [
-    Object.freeze({ generation: runtime.metadata, type: "metadata" }),
+    Object.freeze({ conversationId, generation: runtime.metadata, type: "metadata" }),
     firstEvent,
   ];
   let closed = false;
@@ -295,9 +316,16 @@ function streamingResponse(
           controller.close();
           return;
         }
+        await recorder.observeEvent(result.value);
         controller.enqueue(encodedRecord(result.value));
       } catch (error) {
-        controller.enqueue(encodedRecord(streamFailureCode(error)));
+        const failure = signal.signal.aborted
+          ? Object.freeze({ code: "cancelled" as const, type: "error" as const })
+          : streamFailureCode(error);
+        await recorder.abandon(
+          failure.code === "cancelled" ? "cancelled" : "stream-failed",
+        );
+        controller.enqueue(encodedRecord(failure));
         close();
         controller.close();
         await closeIterator(iterator);
@@ -305,6 +333,7 @@ function streamingResponse(
     },
     async cancel() {
       signal.abort();
+      await recorder.abandon("cancelled");
       close();
       await closeIterator(iterator);
     },
@@ -325,6 +354,8 @@ export async function handleAnswerRequest(
   request: Request,
   dependencies: AnswerRouteDependencies = {},
 ) {
+  const now = dependencies.now ?? (() => new Date());
+  const requestStartedAt = now();
   if (request.method !== "POST") {
     return jsonResponse("method-not-allowed", 405, { Allow: "POST" });
   }
@@ -336,8 +367,23 @@ export async function handleAnswerRequest(
     return preStreamFailure(error);
   }
 
+  let allowance: AnswerRequestAllowance;
+  try {
+    allowance = await (
+      dependencies.consumeAllowance ?? consumeAnswerRequestAllowance
+    )(request);
+  } catch {
+    return jsonResponse("unavailable", 503);
+  }
+  if (!allowance.accepted) {
+    return jsonResponse("unavailable", 429, {
+      "Retry-After": String(allowance.retryAfterSeconds),
+    });
+  }
+
   const answerSignal = linkedSignal(request.signal);
   let iterator: AsyncIterator<AnswerEvent> | undefined;
+  let recorder: AnswerOutcomeRecorder | undefined;
   try {
     cancelledRequest(answerSignal.signal);
     const { currentPagePath, ...answerInput } = input;
@@ -358,10 +404,28 @@ export async function handleAnswerRequest(
     const runtime = await (
       dependencies.createRuntime ?? createConfiguredAnswerRuntime
     )();
+    const conversationId = (
+      dependencies.createConversationId ?? (() => crypto.randomUUID())
+    )();
+    if (!normalizeConversationAnalyticsId(conversationId)) {
+      throw new Error("Conversation analytics identifier generation failed");
+    }
+    recorder = (dependencies.createRecorder ?? createAnswerOutcomeRecorder)({
+      history: answerInput.history,
+      id: conversationId,
+      model: runtime.metadata.model,
+      now,
+      provider: runtime.metadata.provider,
+      question: answerInput.question,
+      startedAt: requestStartedAt,
+      workspaceId: demoIds.workspace,
+    });
     iterator = runtime.service
       .stream({
         ...answerInput,
         ...(currentPage ? { currentPage } : {}),
+        observeProvider: recorder.observeProvider,
+        observeRetrieval: recorder.observeRetrieval,
         signal: answerSignal.signal,
         workspaceId: demoIds.workspace,
       })
@@ -373,10 +437,23 @@ export async function handleAnswerRequest(
         "Answer stream ended without a public result",
       );
     }
-    return streamingResponse(runtime, iterator, first.value, answerSignal);
+    await recorder.observeEvent(first.value);
+    return streamingResponse(
+      conversationId,
+      runtime,
+      iterator,
+      first.value,
+      recorder,
+      answerSignal,
+    );
   } catch (error) {
     answerSignal.close();
     if (iterator) await closeIterator(iterator);
+    await recorder?.abandon(
+      answerSignal.signal.aborted || failureWasCancelled(error)
+        ? "cancelled"
+        : "request-failed",
+    );
     return preStreamFailure(error);
   }
 }

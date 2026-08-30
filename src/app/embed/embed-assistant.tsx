@@ -22,6 +22,7 @@ type EmbedAssistantProps = Readonly<{
 
 type ContextState = Readonly<{
   context: PublishedPageIdentity | null;
+  handoffPageUrl: string | null;
   phase: "error" | "ready" | "resolving" | "waiting";
 }>;
 
@@ -41,6 +42,7 @@ function parsedContextResponse(value: unknown): PublishedPageIdentity | null | u
 export function EmbedAssistant({ parentOrigin }: EmbedAssistantProps) {
   const [state, setState] = useState<ContextState>({
     context: null,
+    handoffPageUrl: null,
     phase: "waiting",
   });
   const activeRequest = useRef<AbortController | null>(null);
@@ -68,7 +70,11 @@ export function EmbedAssistant({ parentOrigin }: EmbedAssistantProps) {
       activeRequest.current?.abort();
       const controller = new AbortController();
       activeRequest.current = controller;
-      setState({ context: null, phase: "resolving" });
+      const pageUrl = new URL(event.data.pageUrl);
+      pageUrl.search = "";
+      pageUrl.hash = "";
+      const handoffPageUrl = pageUrl.toString();
+      setState({ context: null, handoffPageUrl, phase: "resolving" });
       void fetch("/api/embed/context", {
         body: JSON.stringify({
           pageUrl: event.data.pageUrl,
@@ -90,7 +96,7 @@ export function EmbedAssistant({ parentOrigin }: EmbedAssistantProps) {
             throw new Error("Embed page context response was invalid");
           }
           if (!disposed && activeRequest.current === controller) {
-            setState({ context, phase: "ready" });
+            setState({ context, handoffPageUrl, phase: "ready" });
           }
         })
         .catch((error: unknown) => {
@@ -99,7 +105,7 @@ export function EmbedAssistant({ parentOrigin }: EmbedAssistantProps) {
             activeRequest.current === controller &&
             !(error instanceof Error && error.name === "AbortError")
           ) {
-            setState({ context: null, phase: "error" });
+            setState({ context: null, handoffPageUrl, phase: "error" });
           }
         })
         .finally(() => {
@@ -151,6 +157,7 @@ export function EmbedAssistant({ parentOrigin }: EmbedAssistantProps) {
         <Search
           key={state.context?.articleId ?? "all-published-content"}
           currentPage={state.context ?? undefined}
+          handoffPageUrl={state.handoffPageUrl ?? undefined}
         />
       ) : null}
     </main>

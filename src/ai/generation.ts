@@ -54,6 +54,7 @@ export type GenerationMessage = Readonly<{
 export type GenerationRequest = Readonly<{
   maximumOutputTokens?: number;
   messages: readonly GenerationMessage[];
+  observeProvider?: (metadata: GenerationMetadata) => void;
   signal?: AbortSignal;
   temperature?: number;
 }>;
@@ -90,10 +91,16 @@ export type GenerationMetadata = Readonly<{
 }>;
 
 export interface GenerationAdapter {
+  readonly fallbackMetadata?: GenerationMetadata;
   readonly limits: GenerationLimits;
   readonly metadata: GenerationMetadata;
   stream(request: GenerationRequest): AsyncIterable<GenerationEvent>;
 }
+
+export type GenerationFallbackAdapterOptions = Readonly<{
+  fallback: GenerationAdapter;
+  primary: GenerationAdapter;
+}>;
 
 export type WorkersAiGenerationBinding = Pick<Ai, "run">;
 
@@ -742,6 +749,120 @@ function metadata(
   retentionDisclosure: string,
 ) {
   return Object.freeze({ provider, model, retentionDisclosure });
+}
+
+function sharedGenerationLimits(
+  primary: GenerationLimits,
+  fallback: GenerationLimits,
+) {
+  return Object.freeze({
+    maximumInputUtf8Bytes: Math.min(
+      primary.maximumInputUtf8Bytes,
+      fallback.maximumInputUtf8Bytes,
+    ),
+    maximumMessages: Math.min(
+      primary.maximumMessages,
+      fallback.maximumMessages,
+    ),
+    maximumOutputTokens: Math.min(
+      primary.maximumOutputTokens,
+      fallback.maximumOutputTokens,
+    ),
+    maximumOutputUtf8Bytes: Math.min(
+      primary.maximumOutputUtf8Bytes,
+      fallback.maximumOutputUtf8Bytes,
+    ),
+    timeoutMilliseconds:
+      primary.timeoutMilliseconds + fallback.timeoutMilliseconds,
+  });
+}
+
+function fallbackDisclosure(
+  primary: GenerationMetadata,
+  fallback: GenerationMetadata,
+) {
+  return configuredText(
+    `${primary.retentionDisclosure} If that provider fails before answer output, OPAS may use ${fallback.provider} model ${fallback.model}. ${fallback.retentionDisclosure}`,
+    "fallback retention disclosure",
+    1_024,
+  );
+}
+
+function eligibleFallbackFailure(error: unknown) {
+  return error instanceof GenerationError && error.retryable;
+}
+
+async function* fallbackStream(
+  options: GenerationFallbackAdapterOptions,
+  request: GenerationRequest,
+) {
+  let primaryProducedEvent = false;
+  try {
+    request.observeProvider?.(options.primary.metadata);
+    for await (const event of options.primary.stream(request)) {
+      primaryProducedEvent = true;
+      yield event;
+    }
+  } catch (error) {
+    if (
+      primaryProducedEvent ||
+      request.signal?.aborted ||
+      !eligibleFallbackFailure(error)
+    ) {
+      throw error;
+    }
+    request.observeProvider?.(options.fallback.metadata);
+    yield* options.fallback.stream(request);
+  }
+}
+
+export function createGenerationFallbackAdapter(
+  options: GenerationFallbackAdapterOptions,
+): GenerationAdapter {
+  if (
+    !options?.primary ||
+    !options?.fallback ||
+    options.primary.metadata.provider === options.fallback.metadata.provider ||
+    options.primary.fallbackMetadata ||
+    options.fallback.fallbackMetadata
+  ) {
+    throw new GenerationError(
+      "configuration",
+      "Generation fallback configuration is invalid",
+    );
+  }
+  const limits = sharedGenerationLimits(
+    options.primary.limits,
+    options.fallback.limits,
+  );
+  if (limits.timeoutMilliseconds > hardMaximums.timeoutMilliseconds) {
+    throw new GenerationError(
+      "configuration",
+      "Generation fallback timeout is outside the supported range",
+    );
+  }
+  const primaryMetadata = metadata(
+    options.primary.metadata.provider,
+    options.primary.metadata.model,
+    fallbackDisclosure(options.primary.metadata, options.fallback.metadata),
+  );
+  const fallbackMetadata = metadata(
+    options.fallback.metadata.provider,
+    options.fallback.metadata.model,
+    options.fallback.metadata.retentionDisclosure,
+  );
+  const providers = Object.freeze({
+    fallback: options.fallback,
+    primary: options.primary,
+  });
+  return Object.freeze({
+    fallbackMetadata,
+    limits,
+    metadata: primaryMetadata,
+    stream(request: GenerationRequest) {
+      return fallbackStream(providers, request);
+    },
+  });
 }
 
 export function createWorkersAiGenerationAdapter(

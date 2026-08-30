@@ -573,6 +573,201 @@ a {
   line-height: 1.5;
 }
 
+.answer-feedback {
+  margin: 1.25rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.answer-feedback legend {
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 680;
+}
+
+.answer-feedback > div {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.625rem;
+}
+
+.answer-feedback button,
+.support-handoff-open,
+.support-handoff-close {
+  min-height: 2.75rem;
+  padding-inline: 0.875rem;
+  border: 1px solid var(--opas-border-strong);
+  border-radius: var(--opas-radius-sm);
+  background: transparent;
+  color: var(--opas-foreground);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 680;
+  transition:
+    border-color 150ms cubic-bezier(0.25, 1, 0.5, 1),
+    color 150ms cubic-bezier(0.25, 1, 0.5, 1),
+    background-color 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.answer-feedback button:hover,
+.support-handoff-open:hover,
+.support-handoff-close:hover {
+  border-color: var(--opas-primary);
+  color: var(--opas-primary);
+}
+
+.answer-feedback button[aria-pressed="true"] {
+  border-color: var(--opas-primary);
+  background: var(--opas-primary);
+  color: var(--opas-primary-foreground);
+}
+
+.answer-feedback p {
+  margin: 0 0 0 0.25rem;
+  color: var(--opas-muted);
+  font-size: 0.8125rem;
+}
+
+.support-handoff {
+  margin-top: 1.25rem;
+}
+
+.support-handoff[data-open="true"] {
+  padding: 1rem;
+  border: 1px solid var(--opas-border-strong);
+  border-radius: var(--opas-radius-sm);
+  background: var(--opas-surface);
+}
+
+.support-handoff[data-emphasized="true"] {
+  border-color: var(--opas-primary);
+}
+
+.support-handoff-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.support-handoff-heading h4 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.support-handoff-heading p {
+  max-width: 65ch;
+  margin: 0.375rem 0 0;
+  color: var(--opas-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.support-handoff-close {
+  min-height: 2.25rem;
+  flex: 0 0 auto;
+}
+
+.support-handoff-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.support-handoff-fields label {
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 680;
+}
+
+.support-handoff-fields label span {
+  color: var(--opas-muted);
+  font-weight: 500;
+}
+
+.support-handoff-fields input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  margin-top: 0.5rem;
+  padding-inline: 0.75rem;
+  border: 1px solid var(--opas-border-strong);
+  border-radius: var(--opas-radius-sm);
+  background: var(--opas-background);
+  color: var(--opas-foreground);
+}
+
+.support-handoff-fields input:hover:not(:disabled) {
+  border-color: var(--opas-foreground);
+}
+
+.support-handoff-fields input:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.support-handoff-privacy {
+  margin: 0.625rem 0 0;
+  color: var(--opas-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.support-handoff-submit {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin-top: 1rem;
+}
+
+.support-handoff-submit button {
+  min-height: 2.75rem;
+  padding-inline: 1rem;
+  border: 1px solid var(--opas-primary);
+  border-radius: var(--opas-radius-sm);
+  background: var(--opas-primary);
+  color: var(--opas-primary-foreground);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.support-handoff-submit button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.support-handoff-submit button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.support-handoff-submit p,
+.support-handoff-success {
+  margin: 0;
+  color: var(--opas-muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.support-handoff-submit p[data-error] {
+  color: var(--opas-danger);
+}
+
+.support-handoff-success {
+  margin-top: 1rem;
+  color: var(--opas-foreground);
+  font-weight: 650;
+}
+
 .answer-skeleton {
   display: grid;
   gap: 0.5rem;
@@ -981,12 +1176,64 @@ a {
   margin-top: 0;
 }
 
+.article-actions {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  margin-top: 3rem;
+}
+
+.article-actions a,
+.article-actions button {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0.875rem;
+  border: 1px solid var(--opas-border-strong);
+  border-radius: var(--opas-radius-sm);
+  background: transparent;
+  color: var(--opas-foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 680;
+  text-decoration: none;
+  transition: border-color 180ms ease, color 180ms ease;
+}
+
+.article-actions a:hover,
+.article-actions button:hover:not(:disabled) {
+  border-color: var(--opas-primary);
+  color: var(--opas-primary);
+}
+
+.article-actions a:active,
+.article-actions button:active:not(:disabled) {
+  border-color: var(--opas-primary);
+  background: var(--opas-surface);
+}
+
+.article-actions button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.article-actions-status {
+  min-height: 1.25rem;
+  color: var(--opas-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
 .article-meta {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.75rem 2rem;
-  margin-top: 4rem;
+  margin-top: 1.5rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--opas-border);
   color: var(--opas-muted);
@@ -1265,8 +1512,24 @@ body:has(.embed-shell) {
   .suggested-questions button,
   .answer-heading button,
   .answer-follow-up button,
-  .answer-actions > button {
+  .answer-actions > button,
+  .support-handoff-open,
+  .support-handoff-submit button {
     width: 100%;
+  }
+
+  .support-handoff-heading,
+  .support-handoff-submit {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .support-handoff-close {
+    width: 100%;
+  }
+
+  .support-handoff-fields {
+    grid-template-columns: 1fr;
   }
 
   .suggested-questions button {

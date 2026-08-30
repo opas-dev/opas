@@ -36,6 +36,34 @@
       "when": 1788079257642,
       "tag": "0004_lumpy_boomerang",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788099627315,
+      "tag": "0005_medical_sleepwalker",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788100892717,
+      "tag": "0006_large_bloodscream",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788101954775,
+      "tag": "0007_nostalgic_hulk",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788108735957,
+      "tag": "0008_lush_kid_colt",
+      "breakpoints": true
     }
   ]
 }

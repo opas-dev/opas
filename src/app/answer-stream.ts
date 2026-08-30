@@ -16,6 +16,8 @@ const directionalControls = /[\u202a-\u202e\u2066-\u2069]/u;
 const articlePathPattern =
   /^\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const hashPattern = /^[a-f\d]{64}$/u;
+const conversationIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export type AnswerFailureCode =
   | "cancelled"
@@ -94,6 +96,7 @@ type AnswerAbstention = Readonly<{
 export type AnswerStreamSnapshot = Readonly<{
   abstention: AnswerAbstention | null;
   blocks: readonly CitedAnswerBlock[];
+  conversationId: string | null;
   failure: AnswerFailureCode | null;
   finish: AnswerFinish | null;
   metadata: PublicGenerationMetadata | null;
@@ -101,7 +104,11 @@ export type AnswerStreamSnapshot = Readonly<{
 }>;
 
 type AnswerStreamRecord =
-  | Readonly<{ generation: PublicGenerationMetadata; type: "metadata" }>
+  | Readonly<{
+      conversationId: string;
+      generation: PublicGenerationMetadata;
+      type: "metadata";
+    }>
   | Readonly<{ markdown: string; type: "content" }>
   | Readonly<{ citation: AnswerCitation; type: "citation" }>
   | Readonly<{
@@ -301,8 +308,14 @@ function parseRecord(line: string): AnswerStreamRecord {
     throw new AnswerStreamError("invalid-response");
   }
   const record = objectRecord(value);
-  if (record.type === "metadata" && exactKeys(record, ["generation", "type"])) {
+  if (
+    record.type === "metadata" &&
+    exactKeys(record, ["conversationId", "generation", "type"]) &&
+    typeof record.conversationId === "string" &&
+    conversationIdPattern.test(record.conversationId)
+  ) {
     return Object.freeze({
+      conversationId: record.conversationId,
       generation: generationMetadata(record.generation),
       type: "metadata" as const,
     });
@@ -379,6 +392,7 @@ function frozenSnapshot(snapshot: AnswerStreamSnapshot): AnswerStreamSnapshot {
 }
 
 function answerAccumulator(onSnapshot?: (snapshot: AnswerStreamSnapshot) => void) {
+  let conversationId: string | null = null;
   let metadata: PublicGenerationMetadata | null = null;
   let blocks: CitedAnswerBlock[] = [];
   let pendingMarkdown: string[] = [];
@@ -386,6 +400,7 @@ function answerAccumulator(onSnapshot?: (snapshot: AnswerStreamSnapshot) => void
   let latest = frozenSnapshot({
     abstention: null,
     blocks: [],
+    conversationId: null,
     failure: null,
     finish: null,
     metadata: null,
@@ -393,7 +408,13 @@ function answerAccumulator(onSnapshot?: (snapshot: AnswerStreamSnapshot) => void
   });
 
   function publish(update: Partial<AnswerStreamSnapshot>) {
-    latest = frozenSnapshot({ ...latest, ...update, blocks, metadata });
+    latest = frozenSnapshot({
+      ...latest,
+      ...update,
+      blocks,
+      conversationId,
+      metadata,
+    });
     onSnapshot?.(latest);
   }
 
@@ -408,8 +429,9 @@ function answerAccumulator(onSnapshot?: (snapshot: AnswerStreamSnapshot) => void
       if (terminal) throw new AnswerStreamError("invalid-response");
       if (record.type === "metadata") {
         if (metadata) throw new AnswerStreamError("invalid-response");
+        conversationId = record.conversationId;
         metadata = record.generation;
-        publish({ metadata });
+        publish({ conversationId, metadata });
         return;
       }
       if (!metadata) throw new AnswerStreamError("invalid-response");

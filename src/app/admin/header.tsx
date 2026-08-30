@@ -6,12 +6,13 @@ import { logoutAdmin } from "@/app/admin/actions";
 
 type AdminHeaderProps = {
   email: string;
-  active: "content" | "analytics" | "theme";
+  active: "content" | "analytics" | "quality" | "theme";
 };
 
 const navigation = [
   { id: "content", href: "/admin/content", label: "Content" },
   { id: "analytics", href: "/admin/analytics", label: "Analytics" },
+  { id: "quality", href: "/admin/quality", label: "Quality" },
   { id: "theme", href: "/admin/theme", label: "Theme" },
 ] as const;
 

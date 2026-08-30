@@ -6,6 +6,10 @@
     {
       "path": "/api/internal/embeddings",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/internal/analytics",
+      "schedule": "15 0 * * *"
     }
   ]
 }
