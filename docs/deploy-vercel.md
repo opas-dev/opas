@@ -15,11 +15,32 @@ OPAS_SITE_URL=https://opas-mvp-timo-bejans-projects.vercel.app
 ADMIN_EMAIL=<admin email>
 ADMIN_PASSWORD=<at least 8 characters>
 ADMIN_SESSION_SECRET=<at least 32 random bytes>
+CRON_SECRET=<separate random value of at least 32 bytes>
+OPAS_GENERATION_ENDPOINT=<absolute OpenAI-compatible /chat/completions endpoint>
+OPAS_GENERATION_MODEL=<provider model name>
+OPAS_GENERATION_RETENTION_DISCLOSURE=<browser-visible provider and product retention statement>
+OPAS_GENERATION_API_KEY=<optional provider credential>
+OPAS_EMBEDDING_ENDPOINT=<absolute OpenAI-compatible /embeddings endpoint>
+OPAS_EMBEDDING_MODEL=<provider model name>
+OPAS_EMBEDDING_DIMENSION=<positive output dimension, at most 4096>
+OPAS_EMBEDDING_DIMENSIONS_PARAMETER=false
+OPAS_EMBEDDING_API_KEY=<optional provider credential>
+OPAS_ANSWER_TOPIC_GUARDRAILS=<optional compact JSON; omit until a policy is approved>
 ```
 
 `OPAS_SITE_URL` must be the stable Vercel compatibility origin above, with no path, query, or fragment. Set it before the build. Do not use a generated deployment URL or the Cloudflare production URL: OPAS uses this value for canonical metadata, sitemap entries, JSON-LD, Markdown links, and llms documents.
 
 Use a direct Neon connection string while running migrations. The Vercel runtime may use the pooled serverless connection string for the same branch.
+
+Answer generation requires the endpoint, model, and retention disclosure. The endpoint must be an absolute HTTP or HTTPS URL without embedded credentials, query, or fragment, and it must stream OpenAI-compatible server-sent events. Model and disclosure values must be non-empty and control-free, with respective UTF-8 limits of 256 and 1,024 bytes. The API key is optional for a trusted credential-free endpoint; a non-empty value may contain at most 16,384 UTF-8 bytes and no line break, and is sent only as a bearer credential. The retention disclosure is returned to and rendered by the browser, so it must be an accurate operator-authored statement rather than a secret or placeholder. OPAS sends provider requests with `cache: no-store`, discards non-success response bodies unread, and does not place prompts, evidence, credentials, responses, or provider messages in application logs. Provider-side storage and training remain governed by the selected provider and must agree with the disclosure. OPAS persistence is limited to configured redacted conversation records; the v0.2 target is a 30-day default once that record path ships.
+
+Missing or malformed generation settings make `/api/answers` return a safe unavailable response; article rendering and ordinary search remain available. `vercel.json` deliberately contains no environment values because Vercel project settings own this deployment-specific provider contract.
+
+`OPAS_ANSWER_TOPIC_GUARDRAILS` is optional. Leave it absent until the deployment has an approved scope. When used, it must be one compact JSON object with only `allow` and/or `deny` string arrays, at least one phrase, no overlap or duplicates, at most 4,096 UTF-8 bytes and 32 phrases combined, and at most 80 Unicode code points or eight words per phrase. Malformed non-empty configuration fails before provider or repository creation. An exact empty value in `.env` and Docker Compose is treated as absent; other blank or malformed values fail closed. Direct unsafe or denied requests abstain before retrieval, retrieved prompt injection abstains before generation, and denied history is not forwarded into a later clean turn. No model classifier is required for these controls.
+
+The embedding endpoint, model, and dimension must all be present before recovery runs. The endpoint follows the same absolute-URL restrictions as generation; the trimmed model is limited to 200 characters, dimension is a base-10 integer from 1 through 4,096, and `OPAS_EMBEDDING_DIMENSIONS_PARAMETER` accepts only `true` or `false`. The API key is optional for a trusted credential-free endpoint; a non-empty value is limited to 4,096 characters with no line break, is sent as a bearer credential, and is never persisted. Missing provider settings leave publishing, keyword search, and the rest of the application available while semantic indexing remains disabled; malformed non-empty settings fail before the repository is opened.
+
+Vercel sends `CRON_SECRET` to the private recovery route as a bearer credential. The route accepts 32 through 4,096 UTF-8 bytes with no line break, compares fixed-size SHA-256 digests, disables caching, and returns only status and counts. The maintained Vercel account is on the Hobby cron tier, so `vercel.json` uses its allowed daily recovery schedule; immediate post-commit recovery is the primary path. Pro and Enterprise forks may change the schedule to `* * * * *` for minute recovery. Vercel documents both [automatic bearer authentication](https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs) and [the plan-specific minimum intervals](https://vercel.com/docs/cron-jobs/usage-and-pricing).
 
 ## Setup
 
@@ -35,8 +56,18 @@ vercel env add OPAS_SITE_URL production
 vercel env add ADMIN_EMAIL production
 vercel env add ADMIN_PASSWORD production
 vercel env add ADMIN_SESSION_SECRET production
+vercel env add CRON_SECRET production
+vercel env add OPAS_GENERATION_ENDPOINT production
+vercel env add OPAS_GENERATION_MODEL production
+vercel env add OPAS_GENERATION_RETENTION_DISCLOSURE production
+vercel env add OPAS_EMBEDDING_ENDPOINT production
+vercel env add OPAS_EMBEDDING_MODEL production
+vercel env add OPAS_EMBEDDING_DIMENSION production
+vercel env add OPAS_EMBEDDING_DIMENSIONS_PARAMETER production
 vercel pull --environment=production --yes
 ```
+
+Add `OPAS_GENERATION_API_KEY` and `OPAS_EMBEDDING_API_KEY` only when their providers require bearer authentication. Add `OPAS_ANSWER_TOPIC_GUARDRAILS` only after selecting an explicit deployment policy; do not create a blank Vercel value for an omitted optional setting.
 
 Vercel prompts for each value without placing it in shell history. Pull again after changing a Production variable so the local build cannot reuse stale project settings. Vercel Secret values are intentionally written as `[SENSITIVE]` when pulled; `.vercel/.env.production.local` is therefore not a source of real local build secrets.
 
@@ -87,6 +118,19 @@ For a published FAQ article, require the complete Article and FAQPage structured
 ```sh
 OPAS_SMOKE_FAQ_PATH=/getting-started/your-faq-slug pnpm smoke "$DEPLOYMENT_URL"
 ```
+
+Exercise the answer stream with a question backed by a current published article:
+
+```sh
+curl --fail-with-body --no-buffer --silent --show-error \
+  --dump-header /tmp/opas-vercel-answer.headers \
+  --header 'content-type: application/json' \
+  --data '{"question":"How is the Runtime MDX article loaded?"}' \
+  "$DEPLOYMENT_URL/api/answers" | tee /tmp/opas-vercel-answer.ndjson
+rg -i '^cache-control: no-store' /tmp/opas-vercel-answer.headers
+```
+
+The first NDJSON record must expose the configured provider, model, and exact retention disclosure. A supported answer then needs at least one validated content record followed by a server-owned citation and one finish record. Confirm the citation resolves to the current published revision. Send a direct prompt-injection attempt and verify it yields one `unsafe-request` abstention without a corresponding provider request. Provider dashboards or audit records must match the configured retention disclosure; OPAS cannot enforce an upstream provider's storage policy. In a disposable deployment with generation settings absent, the answer endpoint must be unavailable while `pnpm smoke "$DEPLOYMENT_URL"` still passes.
 
 Before promotion, verify the browser-only paths that curl cannot cover:
 

@@ -1,0 +1,248 @@
+// ABOUTME: Wires generation and current-evidence retrieval into the deployment answer service.
+// ABOUTME: Uses hybrid search only when query and persisted embedding metadata match exactly.
+import {
+  createEmbeddingAdapter,
+  type EmbeddingAdapterConfiguration,
+  type EmbeddingEnvironment,
+} from "@/ai/embedding-config";
+import type {
+  EmbeddingAdapter,
+  EmbeddingMetadata,
+  WorkersAiEmbeddingBinding,
+} from "@/ai/embeddings";
+import {
+  createGenerationAdapter,
+  generationPublicMetadata,
+  type GenerationAdapterConfiguration,
+  type GenerationEnvironment,
+  type PublicGenerationMetadata,
+} from "@/ai/generation-config";
+import type { WorkersAiGenerationBinding } from "@/ai/generation";
+import {
+  AnswerError,
+  createAnswerService,
+  type AnswerEvidencePolicy,
+  type AnswerService,
+} from "@/answers/answer";
+import {
+  createAnswerGuardrails,
+  type AnswerGuardrailEnvironment,
+} from "@/answers/guardrails";
+import type { EmbeddingGeneration, Repository } from "@/db/repository";
+import {
+  createEvidenceRetriever,
+  createRepositoryEvidenceSource,
+} from "@/search/evidence";
+
+export const answerEvidencePolicy: Readonly<AnswerEvidencePolicy> =
+  Object.freeze({
+    minimumScore: 0.7,
+    minimumScoreGapAcrossArticles: 0.07,
+  });
+
+export const answerEvidencePolicyCalibration = Object.freeze({
+  fixtureId: "synthetic_retrieval_v1",
+  sourceContentHash:
+    "4297d85a9c014d8f8a2f2fc275091bdc31af84ef6220c5d01e5b67ac3c5eb712",
+  provenance: "synthetic" as const,
+  requiredAnswerScoreFloor: 1,
+  unsupportedScoreCeiling: 0.5,
+  minimumScoreMidpoint: 0.75,
+  minimumScoreRounding: "down-to-one-decimal" as const,
+  conflictingArticleGapCeiling: 0.064479,
+  conflictingArticleGapRounding: "up-to-two-decimals" as const,
+  designPartnerCalibration: "pending" as const,
+});
+
+export type AnswerRuntimeEnvironment = GenerationEnvironment &
+  EmbeddingEnvironment &
+  AnswerGuardrailEnvironment;
+
+export type AnswerRuntime = Readonly<{
+  metadata: PublicGenerationMetadata;
+  service: AnswerService;
+}>;
+
+type WorkersAiBinding = WorkersAiEmbeddingBinding &
+  WorkersAiGenerationBinding;
+
+export type AnswerRuntimeDependencies = {
+  environment?: AnswerRuntimeEnvironment;
+  fetch?: typeof fetch;
+  workersAiBinding?: WorkersAiBinding;
+  createEmbeddingAdapter?: (
+    configuration: EmbeddingAdapterConfiguration,
+  ) => Promise<EmbeddingAdapter>;
+  createGenerationAdapter?: (
+    configuration: GenerationAdapterConfiguration,
+  ) => ReturnType<typeof createGenerationAdapter>;
+  getRepository?: () => Promise<Repository>;
+  getWorkersAiBinding?: () => Promise<WorkersAiBinding | undefined>;
+};
+
+function exactEmbeddingMetadata(
+  generation: EmbeddingGeneration | null,
+  metadata: EmbeddingMetadata,
+) {
+  return (
+    generation?.status === "active" &&
+    generation.provider === metadata.provider &&
+    generation.model === metadata.model &&
+    generation.dimension === metadata.dimension &&
+    generation.configurationHash === metadata.configurationHash
+  );
+}
+
+function usableQueryVector(value: unknown, dimension: number) {
+  if (
+    !Array.isArray(value) ||
+    value.length !== dimension ||
+    value.some((entry) => typeof entry !== "number" || !Number.isFinite(entry))
+  ) {
+    return null;
+  }
+  let squaredMagnitude = 0;
+  for (const entry of value) squaredMagnitude += entry * entry;
+  return Number.isFinite(squaredMagnitude) && squaredMagnitude > 0
+    ? (value as readonly number[])
+    : null;
+}
+
+async function cloudflareWorkersAiBinding() {
+  const { getCloudflareContext } = await import("@opennextjs/cloudflare");
+  const { env } = getCloudflareContext();
+  return (env as { AI?: WorkersAiBinding }).AI;
+}
+
+async function selectedRepository() {
+  const { getRepository } = await import("@/db");
+  return getRepository();
+}
+
+async function optionalEmbeddingAdapter(
+  configuration: EmbeddingAdapterConfiguration,
+  factory: AnswerRuntimeDependencies["createEmbeddingAdapter"],
+) {
+  try {
+    return await (factory ?? createEmbeddingAdapter)(configuration);
+  } catch {
+    return null;
+  }
+}
+
+function cancelled(signal: AbortSignal | undefined) {
+  if (signal?.aborted) {
+    throw new AnswerError("cancelled", "Answer request was cancelled");
+  }
+}
+
+async function interruptible<T>(operation: Promise<T>, signal?: AbortSignal) {
+  if (!signal) return operation;
+  cancelled(signal);
+  let abort: () => void = () => {};
+  const interruption = new Promise<never>((_resolve, reject) => {
+    abort = () =>
+      reject(new AnswerError("cancelled", "Answer request was cancelled"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([operation, interruption]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
+export async function createConfiguredAnswerRuntime(
+  dependencies: AnswerRuntimeDependencies = {},
+): Promise<AnswerRuntime> {
+  const environment = dependencies.environment ?? process.env;
+  const guardrails = createAnswerGuardrails(
+    environment.OPAS_ANSWER_TOPIC_GUARDRAILS === ""
+      ? undefined
+      : environment.OPAS_ANSWER_TOPIC_GUARDRAILS,
+  );
+  if (guardrails.status === "unavailable") {
+    throw new AnswerError("configuration", "Answer guardrails are unavailable");
+  }
+  const databaseDriver = environment.OPAS_DATABASE_DRIVER ?? "postgres";
+  const workersAiBinding =
+    databaseDriver === "d1"
+      ? dependencies.workersAiBinding ??
+        (await (dependencies.getWorkersAiBinding ??
+          cloudflareWorkersAiBinding)())
+      : undefined;
+  const generation = (
+    dependencies.createGenerationAdapter ?? createGenerationAdapter
+  )({
+    environment,
+    fetch: dependencies.fetch,
+    workersAiBinding,
+  });
+  const [repository, queryEmbedding] = await Promise.all([
+    (dependencies.getRepository ?? selectedRepository)(),
+    optionalEmbeddingAdapter(
+      {
+        environment,
+        fetch: dependencies.fetch,
+        workersAiBinding,
+      },
+      dependencies.createEmbeddingAdapter,
+    ),
+  ]);
+  const retrieveEvidence = createEvidenceRetriever(
+    createRepositoryEvidenceSource(repository),
+  );
+
+  const service = createAnswerService({
+    evidencePolicy: answerEvidencePolicy,
+    generation,
+    guardrails,
+    async retriever(request) {
+      cancelled(request.signal);
+      let queryVector: readonly number[] | null = null;
+
+      if (queryEmbedding) {
+        try {
+          const activeGeneration =
+            await interruptible(
+              repository.getActiveEmbeddingGeneration(request.workspaceId),
+              request.signal,
+            );
+          cancelled(request.signal);
+          if (exactEmbeddingMetadata(activeGeneration, queryEmbedding.metadata)) {
+            const batch = await interruptible(
+              queryEmbedding.embed([request.query]),
+              request.signal,
+            );
+            cancelled(request.signal);
+            if (exactEmbeddingMetadata(activeGeneration, batch.metadata)) {
+              queryVector = usableQueryVector(
+                batch.vectors[0],
+                activeGeneration!.dimension,
+              );
+            }
+          }
+        } catch {
+          cancelled(request.signal);
+          queryVector = null;
+        }
+      }
+
+      return interruptible(
+        retrieveEvidence({
+          workspaceId: request.workspaceId,
+          query: request.query,
+          mode: queryVector ? "hybrid" : "lexical",
+          ...(queryVector ? { queryVector } : {}),
+          topK: request.topK,
+        }),
+        request.signal,
+      );
+    },
+  });
+
+  return Object.freeze({
+    metadata: generationPublicMetadata(generation),
+    service,
+  });
+}

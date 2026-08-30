@@ -5,6 +5,7 @@ OPAS is an open-source help center for the AI era: theme it at runtime, deploy i
 - Runtime theming stores brand colors, fonts, radii, and the logo in the database and applies them without a rebuild.
 - Database-backed MDX gives administrators one authoring and publishing workflow across every deployment target.
 - Search, sitemap, Article and FAQ structured data, `/llms.txt`, `/llms-full.txt`, and per-article Markdown are built in.
+- Grounded answers stream from current published evidence with server-owned citations and deterministic abstention.
 - Anonymous helpfulness feedback and 30-day aggregate analytics avoid cookies and persisted requester metadata.
 - The same application supports Docker with Postgres, Vercel with Neon, and Cloudflare Workers with D1.
 
@@ -35,7 +36,7 @@ pnpm install --frozen-lockfile
 
 ## Docker quickstart
 
-Copy the single environment template and set `ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET`. Keep `OPAS_SITE_URL` aligned with the public port; the template already uses `http://localhost:3000`.
+Copy the single environment template and set `ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET`. Keep `OPAS_SITE_URL` aligned with the public port; the template already uses `http://localhost:3000`. The assistant needs the three non-secret generation endpoint, model, and retention-disclosure fields and, when required, `OPAS_GENERATION_API_KEY`. Without them, `/api/answers` returns unavailable while articles and search keep working. Embedding settings and a separate 32-byte `CRON_SECRET` are optional: answers use lexical published-evidence retrieval until a matching embedding generation becomes active, and the recovery sidecar stays idle while embedding recovery is unconfigured.
 
 ```sh
 cp .env.example .env
@@ -61,7 +62,7 @@ pnpm exec wrangler login
 pnpm cf:bootstrap
 ```
 
-The bootstrap validates the scoped names and account, creates or finds the exact D1 database, applies migrations, inserts missing demo records, deploys with encrypted Worker secrets, and runs the HTTP smoke suite. Use `pnpm cf:deploy` for subsequent application-only releases.
+Before activating answers, create the checked-in `opas-answers` AI Gateway in the same Cloudflare account. The bootstrap validates the scoped names, account, answer variables, and optional topic-policy syntax; it creates or finds the exact D1 database, applies migrations, inserts missing demo records, deploys with encrypted Worker secrets, and runs the HTTP smoke suite. Use `pnpm cf:deploy` for subsequent application-only releases.
 
 See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for configuration, migration, verification, and rollback details.
 
@@ -69,7 +70,7 @@ See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for configuration, mi
 
 Vercel and Neon are a live portability target, not OPAS production. “Production” in the commands below is only Vercel's environment name; promotion changes the Vercel project alias and does not move Cloudflare traffic or attach an OPAS domain.
 
-Create one Neon branch, copy `.env.example` to `.env`, and put its direct connection string and real administrator values there. Link the checkout to Vercel and configure the six Vercel Production-environment variables listed in [docs/deploy-vercel.md](docs/deploy-vercel.md). Then pin the project to Node 22, build before migrating, prepare Neon transactionally, and upload the staged artifact:
+Create one Neon branch, copy `.env.example` to `.env`, and put its direct connection string and real administrator values there. Link the checkout to Vercel and configure the Vercel Production-environment variables listed in [docs/deploy-vercel.md](docs/deploy-vercel.md). Then pin the project to Node 22, build before migrating, prepare Neon transactionally, and upload the staged artifact:
 
 ```sh
 vercel link

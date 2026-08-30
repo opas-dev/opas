@@ -69,6 +69,7 @@ export const articles = pgTable(
     slug: text("slug").notNull(),
     title: text("title").notNull(),
     mdx: text("mdx").notNull(),
+    contentHash: text("content_hash"),
     status: text("status", { enum: ["draft", "published"] }).notNull().default("draft"),
     isFaq: boolean("is_faq").notNull().default(false),
     authorName: text("author_name").notNull().default("OPAS"),
@@ -80,6 +81,15 @@ export const articles = pgTable(
     uniqueIndex("articles_workspace_slug_unique").on(table.workspaceId, table.slug),
     uniqueIndex("articles_id_workspace_unique").on(table.id, table.workspaceId),
     index("articles_category_status_index").on(table.categoryId, table.status),
+    index("articles_workspace_status_content_hash_index").on(
+      table.workspaceId,
+      table.status,
+      table.contentHash,
+    ),
+    check(
+      "articles_content_hash_check",
+      sql`${table.contentHash} is null or length(${table.contentHash}) = 64`,
+    ),
     check("articles_status_check", sql`${table.status} in ('draft', 'published')`),
   ],
 );
@@ -209,6 +219,14 @@ export const embeddingGenerations = pgTable(
     index("embedding_generations_workspace_status_index").on(
       table.workspaceId,
       table.status,
+    ),
+    index("embedding_generations_reconciliation_index").on(
+      table.workspaceId,
+      table.status,
+      table.provider,
+      table.model,
+      table.dimension,
+      table.configurationHash,
     ),
     check(
       "embedding_generations_dimension_check",
@@ -393,8 +411,21 @@ export const embeddingJobs = pgTable(
       table.workspaceId,
       table.leaseToken,
     ),
+    uniqueIndex("embedding_jobs_generation_article_hash_unique").on(
+      table.workspaceId,
+      table.articleId,
+      table.articleContentHash,
+      table.embeddingGenerationId,
+    ),
     index("embedding_jobs_claim_index").on(
       table.workspaceId,
+      table.status,
+      table.availableAt,
+      table.leaseExpiresAt,
+    ),
+    index("embedding_jobs_generation_claim_index").on(
+      table.workspaceId,
+      table.embeddingGenerationId,
       table.status,
       table.availableAt,
       table.leaseExpiresAt,

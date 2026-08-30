@@ -5,6 +5,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { scheduleEmbeddingRecovery } from "@/ai/embedding-scheduling";
 import {
   parseArticleRequest,
   parseCategoryRequest,
@@ -17,6 +18,7 @@ import {
 } from "@/app/admin/content/article-asset-state";
 import { requireAdmin } from "@/auth/admin";
 import { referencedArticleAssetHashes } from "@/content/article-assets";
+import { prepareArticleEvidence } from "@/content/article-evidence";
 import {
   ArticleMdxValidationError,
   validateArticleMdx,
@@ -109,7 +111,13 @@ export async function saveCategoryAction(
     if (request.data.mode === "create") {
       await repository.createCategory(category);
     } else {
-      await repository.updateCategory(category);
+      const updated = await repository.updateCategory(category);
+      if (!updated) {
+        return errorState(
+          previousState,
+          "Unpublish the category's indexed articles before changing its URL slug.",
+        );
+      }
     }
   } catch (error) {
     console.error("Category persistence failed.", databaseErrorDetails(error));
@@ -200,7 +208,10 @@ export async function saveArticleAction(
 
   const repository = await getRepository();
   const categories = await repository.listCategories(demoIds.workspace);
-  if (!categories.some((category) => category.id === request.data.categoryId)) {
+  const category = categories.find(
+    (candidate) => candidate.id === request.data.categoryId,
+  );
+  if (!category) {
     return errorState(previousState, "Choose a category from this workspace.", {
       categoryId: "That category is unavailable",
     });
@@ -235,11 +246,12 @@ export async function saveArticleAction(
       authorName: request.data.authorName,
       publishedAt,
     };
+    const evidence = await prepareArticleEvidence(article, category.slug);
 
     if (request.data.mode === "create") {
-      await repository.createArticle(article, assetSelection);
+      await repository.createArticle(article, assetSelection, evidence);
     } else {
-      await repository.updateArticle(article, assetSelection);
+      await repository.updateArticle(article, assetSelection, evidence);
     }
   } catch (error) {
     console.error("Article persistence failed.", databaseErrorDetails(error));
@@ -270,6 +282,7 @@ export async function saveArticleAction(
     );
   }
 
+  scheduleEmbeddingRecovery();
   revalidateContent();
 
   if (request.data.mode === "create") {
@@ -303,6 +316,7 @@ export async function deleteArticleAction(
     return errorState(previousState, "The article could not be deleted. Try again.");
   }
 
+  scheduleEmbeddingRecovery();
   revalidateContent();
   redirect("/admin/content");
 }

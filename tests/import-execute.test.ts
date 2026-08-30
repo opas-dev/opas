@@ -132,6 +132,17 @@ test("maps one approved plan into a single staged atomic activation", async () =
   assert.equal(target.state.activated?.articles[0].categoryId, target.state.activated?.categories[0].id);
   assert.deepEqual(target.state.activated?.articles[0].assetHashes, [hash]);
   assert.equal(target.state.activated?.articles[0].publishedAt?.toISOString(), now.toISOString());
+  assert.equal(target.state.activated?.articles[0].evidence?.categorySlug, "guides");
+  assert.equal(
+    target.state.activated?.articles[0].evidence?.job.availableAt.toISOString(),
+    now.toISOString(),
+  );
+  assert.deepEqual(
+    target.state.activated?.articles[0].evidence?.chunks.map(
+      (chunk) => chunk.canonicalUrl,
+    ),
+    ["http://localhost:3000/guides/guide"],
+  );
 });
 
 test("discards the manifest after either staging or atomic activation fails", async () => {

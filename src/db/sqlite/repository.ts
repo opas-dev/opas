@@ -1,6 +1,6 @@
 // ABOUTME: Implements the OPAS repository for injected SQLite-compatible D1 databases.
 // ABOUTME: Normalizes D1 records to the same domain contract used by Postgres deployments.
-import { and, asc, count, eq, gte, lt, notExists, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, isNotNull, lt, notExists, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { AnyD1Database, DrizzleD1Database } from "drizzle-orm/d1";
@@ -11,6 +11,7 @@ import {
   prepareAsset,
   prepareAssetSelection,
 } from "@/db/assets";
+import { validateArticleEvidence } from "@/db/evidence";
 import type {
   ArticleAssetSelection,
   ArticleSubmission,
@@ -19,7 +20,11 @@ import type {
   Repository,
 } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
-import { createSqliteEvidenceRepository } from "@/db/sqlite/evidence-repository";
+import {
+  articleEvidenceCommitStatements,
+  articleEvidenceInvalidationStatements,
+  createSqliteEvidenceRepository,
+} from "@/db/sqlite/evidence-repository";
 import {
   articleFeedback,
   articleAssets,
@@ -48,6 +53,7 @@ const articleFields = {
   slug: articles.slug,
   title: articles.title,
   mdx: articles.mdx,
+  contentHash: articles.contentHash,
   status: articles.status,
   isFaq: articles.isFaq,
   authorName: articles.authorName,
@@ -327,6 +333,22 @@ function knowledgeImportStatements(
   }
 
   for (const article of knowledgeImport.articles) {
+    validateArticleEvidence(
+      {
+        id: article.id,
+        workspaceId,
+        categoryId: article.categoryId,
+        slug: article.slug,
+        title: article.title,
+        mdx: article.mdx,
+        status: article.status,
+        isFaq: article.isFaq,
+        authorName: article.authorName,
+        position: article.position,
+        publishedAt: article.publishedAt,
+      },
+      article.evidence,
+    );
     statements.push(
       validImportCategoryStatement(workspaceId, article.categoryId),
       executableDatabase
@@ -338,6 +360,7 @@ function knowledgeImportStatements(
           slug: article.slug,
           title: article.title,
           mdx: article.mdx,
+          contentHash: article.evidence?.articleContentHash ?? null,
           status: article.status,
           isFaq: article.isFaq,
           authorName: article.authorName,
@@ -353,6 +376,16 @@ function knowledgeImportStatements(
       ),
     );
   }
+
+  statements.push(
+    ...articleEvidenceCommitStatements(
+      database,
+      knowledgeImport.articles.flatMap((article) =>
+        article.evidence ? [article.evidence] : [],
+      ),
+      checkedAt,
+    ),
+  );
 
   statements.push(
     sql`delete from asset_manifests where id = ${manifestId} and workspace_id = ${workspaceId}`,
@@ -424,7 +457,7 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
     },
 
     async updateCategory(category) {
-      await executableDatabase
+      const updated = await executableDatabase
         .update(categories)
         .set({
           slug: category.slug,
@@ -437,9 +470,27 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
           and(
             eq(categories.workspaceId, category.workspaceId),
             eq(categories.id, category.id),
+            or(
+              eq(categories.slug, category.slug),
+              notExists(
+                executableDatabase
+                  .select({ id: articles.id })
+                  .from(articles)
+                  .where(
+                    and(
+                      eq(articles.workspaceId, category.workspaceId),
+                      eq(articles.categoryId, category.id),
+                      eq(articles.status, "published"),
+                      isNotNull(articles.contentHash),
+                    ),
+                  ),
+              ),
+            ),
           ),
         )
+        .returning({ id: categories.id })
         .execute();
+      return updated.length === 1;
     },
 
     async deleteCategory(workspaceId, id) {
@@ -488,27 +539,34 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
       return article ?? null;
     },
 
-    async createArticle(article, assetSelection) {
+    async createArticle(article, assetSelection, evidence) {
+      const changedAt = new Date();
+      const manifestId = assetSelection?.manifestId;
       const insert = executableDatabase
         .insert(articles)
-        .values({ ...article, position: article.position ?? 0 });
-
-      if (!assetSelection) {
-        await insert.execute();
-        return;
-      }
+        .values({
+          ...article,
+          contentHash: evidence?.articleContentHash ?? null,
+          position: article.position ?? 0,
+        });
 
       try {
+        validateArticleEvidence(article, evidence);
         await executeAtomically(database, [
           insert.getSQL(),
-          ...articleAttachmentStatements(article, assetSelection, new Date()),
+          ...(assetSelection
+            ? articleAttachmentStatements(article, assetSelection, changedAt)
+            : []),
+          ...(evidence
+            ? articleEvidenceCommitStatements(database, [evidence], changedAt)
+            : []),
         ]);
       } catch (error) {
-        if (assetSelection.manifestId) {
+        if (manifestId) {
           try {
             await executeAtomically(
               database,
-              discardManifestStatements(article.workspaceId, assetSelection.manifestId),
+              discardManifestStatements(article.workspaceId, manifestId),
             );
           } catch (cleanupError) {
             throw new AggregateError(
@@ -521,7 +579,9 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
       }
     },
 
-    async updateArticle(article, assetSelection) {
+    async updateArticle(article, assetSelection, evidence) {
+      const changedAt = new Date();
+      const manifestId = assetSelection?.manifestId;
       const update = executableDatabase
         .update(articles)
         .set({
@@ -529,33 +589,43 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
           slug: article.slug,
           title: article.title,
           mdx: article.mdx,
+          contentHash: evidence?.articleContentHash ?? null,
           status: article.status,
           isFaq: article.isFaq,
           authorName: article.authorName,
           position: article.position,
           publishedAt: article.publishedAt,
-          updatedAt: new Date(),
+          updatedAt: changedAt,
         })
         .where(
           and(eq(articles.workspaceId, article.workspaceId), eq(articles.id, article.id)),
         );
 
-      if (!assetSelection) {
-        await update.execute();
-        return;
-      }
-
       try {
+        validateArticleEvidence(article, evidence);
         await executeAtomically(database, [
+          ...(!evidence
+            ? articleEvidenceInvalidationStatements(
+                database,
+                article.workspaceId,
+                [article.id],
+                changedAt,
+              )
+            : []),
           update.getSQL(),
-          ...articleAttachmentStatements(article, assetSelection, new Date()),
+          ...(assetSelection
+            ? articleAttachmentStatements(article, assetSelection, changedAt)
+            : []),
+          ...(evidence
+            ? articleEvidenceCommitStatements(database, [evidence], changedAt)
+            : []),
         ]);
       } catch (error) {
-        if (assetSelection.manifestId) {
+        if (manifestId) {
           try {
             await executeAtomically(
               database,
-              discardManifestStatements(article.workspaceId, assetSelection.manifestId),
+              discardManifestStatements(article.workspaceId, manifestId),
             );
           } catch (cleanupError) {
             throw new AggregateError(
@@ -569,7 +639,14 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
     },
 
     async deleteArticle(workspaceId, id) {
+      const deletedAt = new Date();
       await executeAtomically(database, [
+        ...articleEvidenceInvalidationStatements(
+          database,
+          workspaceId,
+          [id],
+          deletedAt,
+        ),
         sql`delete from articles where workspace_id = ${workspaceId} and id = ${id}`,
         orphanAssetCleanup(workspaceId),
       ]);

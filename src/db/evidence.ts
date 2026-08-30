@@ -1,13 +1,22 @@
 // ABOUTME: Validates portable evidence records before either database dialect stores them.
 // ABOUTME: Keeps hash, generation, lease, vector, fixture, and evaluation bounds consistent.
+import { embeddingPersistenceMaximumUtf8Bytes } from "@/ai/embedding-worker";
 import type {
   ArticleEvidenceCommit,
+  ArticleEvidenceInitialization,
+  ArticleSubmission,
   ChunkEmbeddingBatch,
+  EmbeddingGenerationActivation,
+  EmbeddingGenerationReconciliation,
   EmbeddingGeneration,
+  EmbeddingJobBatch,
   EmbeddingJobClaim,
   EmbeddingJobCheckpoint,
   EmbeddingJobCompletion,
+  EmbeddingJobFailure,
   EmbeddingJobRetry,
+  EmbeddingJobWorkRequest,
+  EvidenceCandidateRevalidation,
   EvaluationRunCompletion,
   EvaluationRunStart,
   SavedQuestionSet,
@@ -17,6 +26,8 @@ const hashPattern = /^[a-f0-9]{64}$/u;
 const identifierMaximumLength = 200;
 const textMaximumLength = 500;
 const evidenceChunkMaximumOrdinal = 999_999;
+const evidenceCandidateMaximumCount = 20;
+export const articleEvidenceInitializationMaximumCount = 20;
 const questionSetMaximumQuestions = 1_000;
 const questionMaximumSources = 100;
 const evaluationResultsMaximumCharacters = 750_000;
@@ -28,6 +39,7 @@ const savedQuestionClassifications = new Set([
   "adversarial",
 ]);
 const savedQuestionOutcomes = new Set(["answer", "abstain", "either"]);
+const utf8Encoder = new TextEncoder();
 
 export class EvidenceStorageError extends Error {
   constructor(message: string) {
@@ -79,9 +91,36 @@ export function validateEmbeddingGeneration(generation: EmbeddingGeneration) {
   timestamp(generation.createdAt, "Embedding generation creation time");
 }
 
+function validateEmbeddingMetadata(metadata: {
+  provider: string;
+  model: string;
+  dimension: number;
+  configurationHash: string;
+}) {
+  boundedText(metadata.provider, "Embedding provider");
+  boundedText(metadata.model, "Embedding model");
+  hash(metadata.configurationHash, "Embedding configuration hash");
+  if (
+    !Number.isInteger(metadata.dimension) ||
+    metadata.dimension < 1 ||
+    metadata.dimension > 4_096
+  ) {
+    throw new EvidenceStorageError("Embedding dimension is invalid");
+  }
+}
+
+export function validateEmbeddingGenerationReconciliation(
+  reconciliation: EmbeddingGenerationReconciliation,
+) {
+  identifier(reconciliation.workspaceId, "Workspace ID");
+  validateEmbeddingMetadata(reconciliation.metadata);
+  timestamp(reconciliation.reconciledAt, "Embedding reconciliation time");
+}
+
 export function validateEvidenceCommit(commit: ArticleEvidenceCommit) {
   identifier(commit.workspaceId, "Workspace ID");
   identifier(commit.articleId, "Article ID");
+  identifier(commit.categorySlug, "Evidence category slug");
   hash(commit.articleContentHash, "Article content hash");
   identifier(commit.job.id, "Embedding job ID");
   if (commit.job.embeddingGenerationId) {
@@ -143,8 +182,83 @@ export function validateEvidenceCommit(commit: ArticleEvidenceCommit) {
   }
 }
 
+export function validateArticleEvidenceInitialization(
+  initialization: ArticleEvidenceInitialization,
+) {
+  const { article, evidence, initializedAt } = initialization;
+  validateArticleEvidence(article, evidence);
+  if (
+    article.status !== "published" ||
+    evidence.categorySlug !== article.categorySlug
+  ) {
+    throw new EvidenceStorageError(
+      "Evidence initialization requires the matching published category",
+    );
+  }
+  timestamp(initializedAt, "Evidence initialization time");
+}
+
+export function validateArticleEvidenceInitializationQuery(
+  workspaceId: string,
+  limit: number,
+) {
+  identifier(workspaceId, "Workspace ID");
+  if (
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > articleEvidenceInitializationMaximumCount
+  ) {
+    throw new EvidenceStorageError("Evidence initialization limit is invalid");
+  }
+}
+
+export function validateArticleEvidence(
+  article: ArticleSubmission,
+  evidence: ArticleEvidenceCommit | null,
+) {
+  if (article.status === "published" && evidence === null) {
+    throw new EvidenceStorageError("Published articles require prepared evidence");
+  }
+  if (article.status === "draft" && evidence !== null) {
+    throw new EvidenceStorageError("Draft articles cannot contain published evidence");
+  }
+  if (!evidence) {
+    return;
+  }
+  if (
+    evidence.workspaceId !== article.workspaceId ||
+    evidence.articleId !== article.id
+  ) {
+    throw new EvidenceStorageError(
+      "Prepared evidence must belong to the saved article and workspace",
+    );
+  }
+  validateEvidenceCommit(evidence);
+}
+
+export function validateEvidenceCandidateRevalidation(
+  request: EvidenceCandidateRevalidation,
+) {
+  identifier(request.workspaceId, "Workspace ID");
+  if (
+    !Number.isSafeInteger(request.generation) ||
+    request.generation < 0 ||
+    !Array.isArray(request.candidates) ||
+    request.candidates.length > evidenceCandidateMaximumCount
+  ) {
+    throw new EvidenceStorageError("Evidence candidate revalidation is invalid");
+  }
+  for (const candidate of request.candidates) {
+    identifier(candidate.chunkId, "Evidence chunk ID");
+    identifier(candidate.articleId, "Article ID");
+    hash(candidate.articleContentHash, "Article content hash");
+    hash(candidate.contentHash, "Evidence content hash");
+  }
+}
+
 export function validateEmbeddingJobClaim(claim: EmbeddingJobClaim) {
   identifier(claim.workspaceId, "Workspace ID");
+  identifier(claim.embeddingGenerationId, "Embedding generation ID");
   identifier(claim.leaseToken, "Embedding job lease token");
   timestamp(claim.claimedAt, "Embedding job claim time");
   timestamp(claim.leaseExpiresAt, "Embedding job lease expiry");
@@ -158,16 +272,17 @@ export function validateEmbeddingJobCheckpoint(checkpoint: EmbeddingJobCheckpoin
   identifier(checkpoint.id, "Embedding job ID");
   identifier(checkpoint.leaseToken, "Embedding job lease token");
   timestamp(checkpoint.checkedAt, "Embedding job checkpoint time");
+  timestamp(checkpoint.leaseExpiresAt, "Embedding job lease expiry");
+  if (checkpoint.leaseExpiresAt <= checkpoint.checkedAt) {
+    throw new EvidenceStorageError("Embedding job lease must expire after its checkpoint");
+  }
   if (!Number.isInteger(checkpoint.completedChunkCount) || checkpoint.completedChunkCount < 0) {
     throw new EvidenceStorageError("Embedding job checkpoint is invalid");
   }
 }
 
 export function validateEmbeddingJobRetry(retry: EmbeddingJobRetry) {
-  validateEmbeddingJobCheckpoint({
-    ...retry,
-    completedChunkCount: 0,
-  });
+  validateEmbeddingJobCompletion(retry);
   boundedText(retry.errorCode, "Embedding error code", 100);
   timestamp(retry.availableAt, "Embedding retry time");
   if (retry.availableAt <= retry.checkedAt) {
@@ -176,10 +291,48 @@ export function validateEmbeddingJobRetry(retry: EmbeddingJobRetry) {
 }
 
 export function validateEmbeddingJobCompletion(completion: EmbeddingJobCompletion) {
-  validateEmbeddingJobCheckpoint({
-    ...completion,
-    completedChunkCount: 0,
-  });
+  identifier(completion.workspaceId, "Workspace ID");
+  identifier(completion.id, "Embedding job ID");
+  identifier(completion.leaseToken, "Embedding job lease token");
+  timestamp(completion.checkedAt, "Embedding job completion time");
+}
+
+export function validateEmbeddingJobFailure(failure: EmbeddingJobFailure) {
+  validateEmbeddingJobCompletion(failure);
+  boundedText(failure.errorCode, "Embedding error code", 100);
+}
+
+export function validateEmbeddingJobWorkRequest(request: EmbeddingJobWorkRequest) {
+  validateEmbeddingJobCompletion(request);
+}
+
+export function validateEmbeddingJobBatch(batch: EmbeddingJobBatch, dimension: number) {
+  validateEmbeddingJobCompletion(batch);
+  identifier(batch.embeddingGenerationId, "Embedding generation ID");
+  validateChunkEmbeddingBatch(
+    {
+      workspaceId: batch.workspaceId,
+      embeddingGenerationId: batch.embeddingGenerationId,
+      embeddings: batch.embeddings,
+      createdAt: batch.checkedAt,
+    },
+    dimension,
+  );
+  if (
+    utf8Encoder.encode(JSON.stringify(batch.embeddings)).byteLength >
+    embeddingPersistenceMaximumUtf8Bytes
+  ) {
+    throw new EvidenceStorageError("Embedding batch exceeds the portable byte limit");
+  }
+}
+
+export function validateEmbeddingGenerationActivation(
+  activation: EmbeddingGenerationActivation,
+) {
+  identifier(activation.workspaceId, "Workspace ID");
+  identifier(activation.embeddingGenerationId, "Embedding generation ID");
+  validateEmbeddingMetadata(activation.metadata);
+  timestamp(activation.activatedAt, "Embedding activation time");
 }
 
 export function validateChunkEmbeddingBatch(batch: ChunkEmbeddingBatch, dimension: number) {

@@ -2,6 +2,7 @@
 // ABOUTME: Replans every activation against current workspace slugs before any database write.
 import { revalidatePath } from "next/cache";
 
+import { scheduleEmbeddingRecovery } from "@/ai/embedding-scheduling";
 import { requireAdmin } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
@@ -105,6 +106,7 @@ export async function POST(request: Request) {
     );
   }
 
+  scheduleEmbeddingRecovery();
   revalidatePath("/", "layout");
   return Response.json(
     {

@@ -27,7 +27,11 @@ export default async function HomePage() {
         <p className="hero-copy">
           Search every published answer, or browse the help center by category.
         </p>
-        <Search />
+        <Search
+          suggestedQuestions={publications.slice(0, 3).map(
+            ({ article }) => `What should I know about “${article.title}”?`,
+          )}
+        />
       </section>
 
       <section className="launch-points" aria-labelledby="categories-heading">

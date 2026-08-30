@@ -44,6 +44,7 @@ const article: Article = {
   slug: "runtime-mdx",
   title: "Runtime MDX in OPAS",
   mdx: "# Runtime MDX in OPAS",
+  contentHash: "a".repeat(64),
   status: "published",
   isFaq: false,
   authorName: "OPAS",

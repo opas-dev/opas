@@ -1,0 +1,382 @@
+// ABOUTME: Implements the bounded POST and streaming response boundary for native answers.
+// ABOUTME: Emits complete validated NDJSON records and reduces failures to safe public codes.
+import { GenerationError } from "@/ai/generation";
+import {
+  AnswerError,
+  type AnswerEvent,
+  type AnswerHistoryMessage,
+} from "@/answers/answer";
+import {
+  createConfiguredAnswerRuntime,
+  type AnswerRuntime,
+} from "@/answers/answer-runtime";
+import {
+  resolvePublishedArticlePath,
+  type PublishedPageCandidate,
+} from "@/content/page-context";
+import { demoIds } from "@/db/demo";
+
+export const maximumAnswerRequestUtf8Bytes = 16_384;
+
+export type AnswerStreamRecord =
+  | AnswerEvent
+  | Readonly<{
+      generation: AnswerRuntime["metadata"];
+      type: "metadata";
+    }>
+  | Readonly<{
+      code: "cancelled" | "invalid-answer" | "unavailable";
+      type: "error";
+    }>;
+
+export type AnswerRouteDependencies = {
+  createRuntime?: () => Promise<AnswerRuntime>;
+  loadPublications?: () => Promise<readonly PublishedPageCandidate[]>;
+};
+
+type ParsedAnswerRequest = {
+  currentPagePath?: string;
+  history?: readonly AnswerHistoryMessage[];
+  maximumOutputTokens?: number;
+  question: string;
+};
+
+type RequestFailureCode =
+  | "cancelled"
+  | "invalid-request"
+  | "payload-too-large"
+  | "unsupported-media-type";
+
+class RequestFailure extends Error {
+  readonly code: RequestFailureCode;
+  readonly status: number;
+
+  constructor(code: RequestFailureCode, status: number) {
+    super(code);
+    this.name = "RequestFailure";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+const encoder = new TextEncoder();
+const responseSecurityHeaders = Object.freeze({
+  "Cache-Control": "no-store",
+  "Content-Security-Policy":
+    "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "Cross-Origin-Resource-Policy": "same-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Referrer-Policy": "no-referrer",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+});
+
+async function loadCurrentPublications() {
+  const { loadPublicationContent } = await import("@/content/publication-data");
+  return (await loadPublicationContent()).publications;
+}
+
+function jsonResponse(
+  error: string,
+  status: number,
+  headers?: Record<string, string>,
+) {
+  return Response.json(
+    { error },
+    {
+      status,
+      headers: { ...responseSecurityHeaders, ...headers },
+    },
+  );
+}
+
+function strictJsonContentType(value: string | null) {
+  return (
+    value !== null &&
+    /^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?$/iu.test(value)
+  );
+}
+
+function declaredBodySize(value: string | null) {
+  if (value === null) return null;
+  if (!/^\d+$/u.test(value)) {
+    throw new RequestFailure("invalid-request", 400);
+  }
+  const size = Number(value);
+  if (!Number.isSafeInteger(size)) {
+    throw new RequestFailure("payload-too-large", 413);
+  }
+  return size;
+}
+
+function cancelledRequest(signal: AbortSignal) {
+  if (signal.aborted) throw new RequestFailure("cancelled", 499);
+}
+
+async function boundedRequestText(request: Request) {
+  const declaredSize = declaredBodySize(request.headers.get("content-length"));
+  if (declaredSize !== null && declaredSize > maximumAnswerRequestUtf8Bytes) {
+    throw new RequestFailure("payload-too-large", 413);
+  }
+  if (!request.body) throw new RequestFailure("invalid-request", 400);
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      cancelledRequest(request.signal);
+      const result = await reader.read();
+      if (result.done) break;
+      if (!(result.value instanceof Uint8Array)) {
+        throw new RequestFailure("invalid-request", 400);
+      }
+      totalBytes += result.value.byteLength;
+      if (totalBytes > maximumAnswerRequestUtf8Bytes) {
+        throw new RequestFailure("payload-too-large", 413);
+      }
+      chunks.push(result.value);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Releasing a consumed or disconnected request body is best effort.
+    }
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(body);
+  } catch {
+    throw new RequestFailure("invalid-request", 400);
+  }
+}
+
+function parsedAnswerRequest(text: string): ParsedAnswerRequest {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new RequestFailure("invalid-request", 400);
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new RequestFailure("invalid-request", 400);
+  }
+  const record = value as Record<string, unknown>;
+  const allowedKeys = new Set([
+    "currentPagePath",
+    "history",
+    "maximumOutputTokens",
+    "question",
+  ]);
+  if (
+    !("question" in record) ||
+    Object.keys(record).some((key) => !allowedKeys.has(key))
+  ) {
+    throw new RequestFailure("invalid-request", 400);
+  }
+  return record as ParsedAnswerRequest;
+}
+
+async function requestInput(request: Request) {
+  if (!strictJsonContentType(request.headers.get("content-type"))) {
+    throw new RequestFailure("unsupported-media-type", 415);
+  }
+  return parsedAnswerRequest(await boundedRequestText(request));
+}
+
+function linkedSignal(source: AbortSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (source.aborted) abort();
+  else source.addEventListener("abort", abort, { once: true });
+  return {
+    abort,
+    close() {
+      source.removeEventListener("abort", abort);
+    },
+    signal: controller.signal,
+  };
+}
+
+function preStreamFailure(error: unknown) {
+  if (error instanceof RequestFailure) {
+    return jsonResponse(error.code, error.status);
+  }
+  if (error instanceof AnswerError) {
+    if (error.category === "invalid-input") {
+      return jsonResponse("invalid-request", 400);
+    }
+    if (error.category === "cancelled") {
+      return jsonResponse("cancelled", 499);
+    }
+    if (error.category === "configuration") {
+      return jsonResponse("unavailable", 503);
+    }
+    return jsonResponse("invalid-answer", 502);
+  }
+  if (error instanceof GenerationError) {
+    if (error.category === "cancelled") {
+      return jsonResponse("cancelled", 499);
+    }
+    if (error.category === "invalid-response" || error.category === "output-limit") {
+      return jsonResponse("invalid-answer", 502);
+    }
+    if (error.category === "timeout") {
+      return jsonResponse("unavailable", 504);
+    }
+  }
+  return jsonResponse("unavailable", 503);
+}
+
+function streamFailureCode(error: unknown): AnswerStreamRecord & { type: "error" } {
+  if (
+    (error instanceof AnswerError && error.category === "cancelled") ||
+    (error instanceof GenerationError && error.category === "cancelled")
+  ) {
+    return Object.freeze({ code: "cancelled", type: "error" });
+  }
+  if (
+    (error instanceof AnswerError && error.category !== "configuration") ||
+    (error instanceof GenerationError &&
+      (error.category === "invalid-response" || error.category === "output-limit"))
+  ) {
+    return Object.freeze({ code: "invalid-answer", type: "error" });
+  }
+  return Object.freeze({ code: "unavailable", type: "error" });
+}
+
+function encodedRecord(record: AnswerStreamRecord) {
+  return encoder.encode(`${JSON.stringify(record)}\n`);
+}
+
+async function closeIterator(iterator: AsyncIterator<AnswerEvent>) {
+  try {
+    await iterator.return?.();
+  } catch {
+    // The response boundary has already reduced the failure to a public code.
+  }
+}
+
+function streamingResponse(
+  runtime: AnswerRuntime,
+  iterator: AsyncIterator<AnswerEvent>,
+  firstEvent: AnswerEvent,
+  signal: ReturnType<typeof linkedSignal>,
+) {
+  const pending: AnswerStreamRecord[] = [
+    Object.freeze({ generation: runtime.metadata, type: "metadata" }),
+    firstEvent,
+  ];
+  let closed = false;
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    signal.close();
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (pending.length > 0) {
+        controller.enqueue(encodedRecord(pending.shift()!));
+        return;
+      }
+      try {
+        const result = await iterator.next();
+        if (result.done) {
+          close();
+          controller.close();
+          return;
+        }
+        controller.enqueue(encodedRecord(result.value));
+      } catch (error) {
+        controller.enqueue(encodedRecord(streamFailureCode(error)));
+        close();
+        controller.close();
+        await closeIterator(iterator);
+      }
+    },
+    async cancel() {
+      signal.abort();
+      close();
+      await closeIterator(iterator);
+    },
+  });
+
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...responseSecurityHeaders,
+      "Content-Encoding": "identity",
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+export async function handleAnswerRequest(
+  request: Request,
+  dependencies: AnswerRouteDependencies = {},
+) {
+  if (request.method !== "POST") {
+    return jsonResponse("method-not-allowed", 405, { Allow: "POST" });
+  }
+
+  let input: ParsedAnswerRequest;
+  try {
+    input = await requestInput(request);
+  } catch (error) {
+    return preStreamFailure(error);
+  }
+
+  const answerSignal = linkedSignal(request.signal);
+  let iterator: AsyncIterator<AnswerEvent> | undefined;
+  try {
+    cancelledRequest(answerSignal.signal);
+    const { currentPagePath, ...answerInput } = input;
+    const currentPage =
+      currentPagePath === undefined
+        ? undefined
+        : resolvePublishedArticlePath(
+            currentPagePath,
+            await (
+              dependencies.loadPublications ??
+              loadCurrentPublications
+            )(),
+          );
+    if (currentPagePath !== undefined && currentPage === null) {
+      throw new RequestFailure("invalid-request", 400);
+    }
+    cancelledRequest(answerSignal.signal);
+    const runtime = await (
+      dependencies.createRuntime ?? createConfiguredAnswerRuntime
+    )();
+    iterator = runtime.service
+      .stream({
+        ...answerInput,
+        ...(currentPage ? { currentPage } : {}),
+        signal: answerSignal.signal,
+        workspaceId: demoIds.workspace,
+      })
+      [Symbol.asyncIterator]();
+    const first = await iterator.next();
+    if (first.done) {
+      throw new AnswerError(
+        "invalid-output",
+        "Answer stream ended without a public result",
+      );
+    }
+    return streamingResponse(runtime, iterator, first.value, answerSignal);
+  } catch (error) {
+    answerSignal.close();
+    if (iterator) await closeIterator(iterator);
+    return preStreamFailure(error);
+  }
+}

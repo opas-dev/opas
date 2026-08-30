@@ -8,6 +8,7 @@ import { ArticleFeedback } from "@/app/[categorySlug]/[articleSlug]/feedback";
 import { ArticleViewBeacon } from "@/app/[categorySlug]/[articleSlug]/view-beacon";
 import { PublicHeader } from "@/app/public-header";
 import { loadPublicPageContent } from "@/app/publication-data";
+import { Search } from "@/app/search";
 import {
   articleJsonLd,
   articleMetadata,
@@ -95,6 +96,21 @@ export default async function ArticlePage({
             </time>
           </footer>
         </article>
+        <section className="article-assistant" aria-labelledby="article-assistant-heading">
+          <h2 id="article-assistant-heading">Need another answer?</h2>
+          <p>Search the full help center or ask a cited follow-up from this page.</p>
+          <Search
+            currentPage={{
+              articleId: article.id,
+              path: publication.path,
+              title: article.title,
+            }}
+            suggestedQuestions={[
+              `Summarize “${article.title}”.`,
+              `What are the next steps in “${article.title}”?`,
+            ]}
+          />
+        </section>
         <ArticleFeedback key={article.id} articleId={article.id} />
       </div>
     </main>

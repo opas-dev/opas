@@ -1,11 +1,14 @@
 // ABOUTME: Prepares a Neon deployment by applying Postgres migrations and missing demo records.
-// ABOUTME: Uses a direct transactional connection without printing the database connection string.
+// ABOUTME: Initializes missing evidence through a direct connection without printing its string.
 import { resolve } from "node:path";
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 
+import { initializeAllMissingArticleEvidence } from "../src/content/article-evidence-initialization";
+import { demoIds } from "../src/db/demo";
+import { createPostgresRepository } from "../src/db/postgres/repository";
 import { seedPostgres } from "../src/db/postgres/seed";
 import * as schema from "../src/db/schema/postgres";
 
@@ -62,10 +65,17 @@ async function main() {
         migrationsFolder: resolve(process.cwd(), "drizzle/postgres"),
       });
       await seedPostgres(database);
+      const evidence = await initializeAllMissingArticleEvidence({
+        ...(process.env.OPAS_SITE_URL === undefined
+          ? {}
+          : { configuredSiteUrl: process.env.OPAS_SITE_URL }),
+        repository: createPostgresRepository(database),
+        workspaceId: demoIds.workspace,
+      });
+      console.info("Prepared the OPAS Neon database.", { evidence });
     } finally {
       await pool.end();
     }
-    console.info("Prepared the OPAS Neon database.");
   } catch (error: unknown) {
     console.error(`Neon preparation failed: ${safeErrorMessage(error, connectionString)}`);
     process.exitCode = 1;

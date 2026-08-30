@@ -9,6 +9,10 @@ import {
   EvidenceChunkingError,
   type PublishedEvidenceArticle,
 } from "@/content/evidence-chunks";
+import {
+  prepareArticleEvidence,
+  publishedArticleContentHash,
+} from "@/content/article-evidence";
 import { ArticleMdxValidationError } from "@/content/mdx-safety";
 import { parseArticleMarkdown } from "@/content/runtime-mdx-plugins";
 
@@ -62,6 +66,72 @@ Use the recovery flow.
     ...overrides,
   };
 }
+
+test("prepares one deterministic published revision and provider-free pending job", async () => {
+  const availableAt = new Date("2026-08-30T12:00:00.000Z");
+  const savedArticle = {
+    id: "article_reset",
+    workspaceId: "workspace_test",
+    categoryId: "category_account",
+    slug: "reset-your-password",
+    title: "Reset your password",
+    mdx: "# Reset your password\n\nUse the recovery flow.\n",
+    status: "published" as const,
+    isFaq: false,
+    authorName: "OPAS",
+    publishedAt: availableAt,
+  };
+  const prepared = await prepareArticleEvidence(savedArticle, "account", {
+    availableAt,
+    configuredSiteUrl: "https://opas.dev",
+    createId: () => "00000000-0000-4000-8000-000000000001",
+  });
+
+  assert.ok(prepared);
+  assert.equal(prepared.categorySlug, "account");
+  assert.equal(prepared.job.embeddingGenerationId, null);
+  assert.equal(prepared.job.availableAt, availableAt);
+  assert.equal(
+    prepared.articleContentHash,
+    await publishedArticleContentHash(savedArticle, "/account/reset-your-password"),
+  );
+  assert.deepEqual(
+    prepared.chunks.map((chunk) => chunk.canonicalUrl),
+    ["https://opas.dev/account/reset-your-password"],
+  );
+  assert.ok(
+    prepared.chunks.every((chunk) =>
+      /^[a-f0-9]{64}$/u.test(chunk.embeddingInputHash),
+    ),
+  );
+
+  const moved = await prepareArticleEvidence(savedArticle, "security", {
+    availableAt,
+    configuredSiteUrl: "https://opas.dev",
+  });
+  assert.ok(moved);
+  assert.notEqual(moved.articleContentHash, prepared.articleContentHash);
+});
+
+test("drafts prepare no evidence or embedding job", async () => {
+  const prepared = await prepareArticleEvidence(
+    {
+      id: "article_draft",
+      workspaceId: "workspace_test",
+      categoryId: "category_account",
+      slug: "draft",
+      title: "Draft",
+      mdx: "# Draft",
+      status: "draft",
+      isFaq: false,
+      authorName: "OPAS",
+      publishedAt: null,
+    },
+    "account",
+  );
+
+  assert.equal(prepared, null);
+});
 
 test("tracks heading paths, canonical metadata, Markdown, and source lines", async () => {
   const chunks = await chunkPublishedArticle(

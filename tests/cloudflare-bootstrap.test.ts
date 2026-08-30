@@ -9,6 +9,7 @@ function validConfig() {
   return {
     name: "opas-mvp",
     account_id: "f8801c7e8853a113a25f8b52fd9ceec1",
+    main: "custom-worker.ts",
     workers_dev: true,
     routes: [
       {
@@ -22,8 +23,18 @@ function validConfig() {
         service: "opas-mvp",
       },
     ],
+    ai: {
+      binding: "AI",
+    },
+    triggers: {
+      crons: ["* * * * *"],
+    },
     vars: {
       OPAS_DATABASE_DRIVER: "d1",
+      OPAS_GENERATION_GATEWAY_ID: "opas-answers",
+      OPAS_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fp8",
+      OPAS_GENERATION_RETENTION_DISCLOSURE:
+        "OPAS retains only configured redacted conversation records; AI Gateway logging is disabled and response caching is bypassed.",
       OPAS_SITE_URL: "https://demo.opas.dev",
     },
     d1_databases: [
@@ -43,7 +54,10 @@ function workersDevConfig() {
   return {
     name: config.name,
     account_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    main: config.main,
     services: config.services,
+    ai: config.ai,
+    triggers: config.triggers,
     vars: {
       ...config.vars,
       OPAS_SITE_URL: "https://opas-mvp.example.workers.dev",
@@ -97,6 +111,68 @@ test("rejects protected, unrelated, and cross-wired resources", () => {
           migrations_dir: "drizzle/another-directory",
         },
       ],
+    }),
+  ];
+
+  for (const config of cases) {
+    assert.throws(() => validateCloudflareConfig(config));
+  }
+});
+
+test("requires the scheduled custom Worker and fixed Workers AI binding", () => {
+  const cases = [
+    Object.assign(validConfig(), { main: ".open-next/worker.js" }),
+    Object.assign(validConfig(), { ai: undefined }),
+    Object.assign(validConfig(), { ai: { binding: "ANOTHER_AI" } }),
+    Object.assign(validConfig(), { triggers: undefined }),
+    Object.assign(validConfig(), { triggers: { crons: [] } }),
+    Object.assign(validConfig(), { triggers: { crons: ["*/5 * * * *"] } }),
+  ];
+
+  for (const config of cases) {
+    assert.throws(() => validateCloudflareConfig(config));
+  }
+});
+
+test("requires valid Cloudflare answer variables and validates optional topic rules", () => {
+  const validTopicRules = validConfig();
+  (validTopicRules.vars as Record<string, string>).OPAS_ANSWER_TOPIC_GUARDRAILS = JSON.stringify({
+    allow: ["account help"],
+    deny: ["internal operations"],
+  });
+  assert.doesNotThrow(() => validateCloudflareConfig(validTopicRules));
+
+  const missingGateway = validConfig();
+  delete (missingGateway.vars as Record<string, unknown>)
+    .OPAS_GENERATION_GATEWAY_ID;
+  const missingModel = validConfig();
+  delete (missingModel.vars as Record<string, unknown>).OPAS_GENERATION_MODEL;
+  const cases = [
+    missingGateway,
+    missingModel,
+    Object.assign(validConfig(), {
+      vars: {
+        ...validConfig().vars,
+        OPAS_GENERATION_GATEWAY_ID: "Default Gateway",
+      },
+    }),
+    Object.assign(validConfig(), {
+      vars: {
+        ...validConfig().vars,
+        OPAS_GENERATION_RETENTION_DISCLOSURE: "",
+      },
+    }),
+    Object.assign(validConfig(), {
+      vars: {
+        ...validConfig().vars,
+        OPAS_ANSWER_TOPIC_GUARDRAILS: "not-json",
+      },
+    }),
+    Object.assign(validConfig(), {
+      vars: {
+        ...validConfig().vars,
+        OPAS_ANSWER_TOPIC_GUARDRAILS: "",
+      },
     }),
   ];
 

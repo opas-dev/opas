@@ -1,6 +1,7 @@
 // ABOUTME: Stages one approved knowledge plan and activates all of its records atomically.
 // ABOUTME: Maps planner output to repository records while cleaning every failed manifest.
-import type { Repository } from "@/db/repository";
+import { prepareArticleEvidence } from "@/content/article-evidence";
+import type { KnowledgeImportArticle, Repository } from "@/db/repository";
 import type { KnowledgeImportPlan } from "@/import/planner";
 
 type ImportRepository = Pick<
@@ -69,7 +70,8 @@ export async function executeKnowledgeImport({
     const categoryIds = new Map(
       plan.categories.map((category, index) => [category.slug, categories[index].id]),
     );
-    const articles = plan.articles.map((article) => {
+    const articles: KnowledgeImportArticle[] = [];
+    for (const article of plan.articles) {
       const categoryId = categoryIds.get(article.categorySlug);
       if (!categoryId) {
         throw new ImportExecutionError(
@@ -77,7 +79,7 @@ export async function executeKnowledgeImport({
         );
       }
 
-      return {
+      const savedArticle = {
         id: `article_${createId()}`,
         categoryId,
         slug: article.slug,
@@ -90,7 +92,15 @@ export async function executeKnowledgeImport({
         publishedAt: article.status === "published" ? now : null,
         assetHashes: article.assetHashes,
       };
-    });
+      articles.push({
+        ...savedArticle,
+        evidence: await prepareArticleEvidence(
+          { ...savedArticle, workspaceId },
+          article.categorySlug,
+          { availableAt: now, createId },
+        ),
+      });
+    }
 
     await repository.activateKnowledgeImport({
       workspaceId,

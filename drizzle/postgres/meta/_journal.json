@@ -29,6 +29,13 @@
       "when": 1788075971962,
       "tag": "0003_harsh_goliath",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788079257645,
+      "tag": "0004_reflective_paladin",
+      "breakpoints": true
     }
   ]
 }

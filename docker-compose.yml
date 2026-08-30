@@ -24,8 +24,19 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:?Set ADMIN_SESSION_SECRET in .env}
+      CRON_SECRET: ${CRON_SECRET:-}
       DATABASE_URL: postgres://${POSTGRES_USER:-opas}:${POSTGRES_PASSWORD:-opas}@db:5432/${POSTGRES_DB:-opas}
       OPAS_DATABASE_DRIVER: postgres
+      OPAS_ANSWER_TOPIC_GUARDRAILS: ${OPAS_ANSWER_TOPIC_GUARDRAILS:-}
+      OPAS_EMBEDDING_API_KEY: ${OPAS_EMBEDDING_API_KEY:-}
+      OPAS_EMBEDDING_DIMENSION: ${OPAS_EMBEDDING_DIMENSION:-}
+      OPAS_EMBEDDING_DIMENSIONS_PARAMETER: ${OPAS_EMBEDDING_DIMENSIONS_PARAMETER:-false}
+      OPAS_EMBEDDING_ENDPOINT: ${OPAS_EMBEDDING_ENDPOINT:-}
+      OPAS_EMBEDDING_MODEL: ${OPAS_EMBEDDING_MODEL:-}
+      OPAS_GENERATION_API_KEY: ${OPAS_GENERATION_API_KEY:-}
+      OPAS_GENERATION_ENDPOINT: ${OPAS_GENERATION_ENDPOINT:-}
+      OPAS_GENERATION_MODEL: ${OPAS_GENERATION_MODEL:-}
+      OPAS_GENERATION_RETENTION_DISCLOSURE: ${OPAS_GENERATION_RETENTION_DISCLOSURE:-}
       OPAS_SITE_URL: ${OPAS_SITE_URL:?Set OPAS_SITE_URL in .env}
     ports:
       - "${APP_PORT:-3000}:3000"
@@ -43,6 +54,19 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  embedding-recovery:
+    build:
+      context: .
+    command: ["node", "scripts/run-embedding-recovery.mjs"]
+    environment:
+      CRON_SECRET: ${CRON_SECRET:-}
+      OPAS_EMBEDDING_RECOVERY_INTERVAL_MS: ${OPAS_EMBEDDING_RECOVERY_INTERVAL_MS:-30000}
+      OPAS_EMBEDDING_RECOVERY_URL: http://app:3000/api/internal/embeddings
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   opas-postgres:

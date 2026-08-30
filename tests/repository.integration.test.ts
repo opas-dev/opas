@@ -1,6 +1,7 @@
 // ABOUTME: Runs one repository contract against migrated Postgres and local SQLite databases.
 // ABOUTME: Verifies schema parity, preservation-safe seeds, constraints, reads, writes, and cascades.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -18,9 +19,18 @@ import { Pool } from "pg";
 import { demoContent, demoIds, demoSeededAt } from "@/db/demo";
 import { createPostgresRepository } from "@/db/postgres/repository";
 import { seedPostgres } from "@/db/postgres/seed";
-import type { KnowledgeImportArticle, Repository } from "@/db/repository";
+import type {
+  ArticleEvidenceCommit,
+  ArticleSubmission,
+  KnowledgeImportArticle,
+  Repository,
+} from "@/db/repository";
 import * as postgresSchema from "@/db/schema/postgres";
 import * as sqliteSchema from "@/db/schema/sqlite";
+import {
+  articleEvidenceCommitStatements as sqliteArticleEvidenceCommitStatements,
+  articleEvidenceInitializationStatements as sqliteArticleEvidenceInitializationStatements,
+} from "@/db/sqlite/evidence-repository";
 import { createSqliteRepository } from "@/db/sqlite/repository";
 import { seedD1 } from "@/db/sqlite/seed";
 import { executeKnowledgeImport } from "@/import/execute";
@@ -44,6 +54,7 @@ const expectedColumns = {
     "created_at",
     "updated_at",
     "position",
+    "content_hash",
   ],
   asset_manifest_items: ["manifest_id", "asset_id", "workspace_id", "created_at"],
   asset_manifests: ["id", "workspace_id", "expires_at", "created_at"],
@@ -194,6 +205,62 @@ type Harness = {
 
 const tableNames = Object.keys(expectedColumns) as TableName[];
 const dayInMilliseconds = 86_400_000;
+let evidenceJobSequence = 0;
+
+function hashText(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function categorySlug(categoryId: string) {
+  if (categoryId === demoIds.gettingStartedCategory) {
+    return "getting-started";
+  }
+  return categoryId.replace(/^category_/u, "").replaceAll("_", "-");
+}
+
+function articleEvidence(
+  article: ArticleSubmission,
+  selectedCategorySlug = categorySlug(article.categoryId),
+): ArticleEvidenceCommit | null {
+  if (article.status === "draft") {
+    return null;
+  }
+
+  const contentHash = hashText(
+    JSON.stringify([article.title, article.mdx, selectedCategorySlug, article.slug]),
+  );
+  const sourceHash = hashText(article.mdx);
+  return {
+    workspaceId: article.workspaceId,
+    articleId: article.id,
+    categorySlug: selectedCategorySlug,
+    articleContentHash: contentHash,
+    chunks: [
+      {
+        id: `chunk_${hashText(article.id).slice(0, 32)}`,
+        contentHash: sourceHash,
+        embeddingInputHash: hashText(`${article.title}\n\n${article.mdx}`),
+        ordinal: 0,
+        title: article.title,
+        headingPath: [],
+        canonicalUrl: `https://docs.example.test/${selectedCategorySlug}/${article.slug}`,
+        markdown: article.mdx,
+        evidenceText: article.mdx,
+        embeddingText: `${article.title}\n\n${article.mdx}`,
+        sourceLineRange: {
+          start: 1,
+          end: Math.max(1, article.mdx.split("\n").length),
+        },
+      },
+    ],
+    job: {
+      id: `embedding_job_repository_${evidenceJobSequence++}`,
+      embeddingGenerationId: null,
+      maximumAttempts: 3,
+      availableAt: new Date(),
+    },
+  };
+}
 
 async function applyPostgresMigration(pool: Pool, filename: string) {
   const migration = readFileSync(
@@ -247,8 +314,9 @@ function importArticle(
   status: "draft" | "published" = "published",
 ): KnowledgeImportArticle {
   const title = `Import ${id}`;
-  return {
+  const article = {
     id,
+    workspaceId: demoIds.workspace,
     categoryId,
     slug,
     title,
@@ -260,11 +328,15 @@ function importArticle(
     publishedAt: status === "published" ? new Date() : null,
     assetHashes,
   };
+  return {
+    ...article,
+    evidence: articleEvidence(article),
+  };
 }
 
 async function exerciseKnowledgeImport(harness: Harness) {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-  const baseline = await harness.counts();
+  let baseline = await harness.counts();
   const successManifest = await harness.repository.createAssetManifest(
     demoIds.workspace,
     expiresAt,
@@ -357,6 +429,27 @@ async function exerciseKnowledgeImport(harness: Harness) {
     `${harness.name} retained an unreferenced staged import asset`,
   );
   assert.equal((await harness.counts()).asset_manifests, baseline.asset_manifests);
+  assert.equal(
+    (await harness.repository.getIndexingState(demoIds.workspace))?.generation,
+    1,
+    `${harness.name} did not commit one generation for the whole import`,
+  );
+  assert.deepEqual(
+    (await harness.repository.listEvidenceChunks(demoIds.workspace)).map(
+      (chunk) => chunk.articleId,
+    ),
+    [successArticleIds[1], successArticleIds[0]],
+    `${harness.name} did not publish imported evidence in article order`,
+  );
+  assert.ok(
+    (await harness.repository.getArticle(demoIds.workspace, successArticleIds[0]))
+      ?.contentHash,
+  );
+  assert.equal(
+    (await harness.repository.getArticle(demoIds.workspace, successArticleIds[2]))
+      ?.contentHash,
+    null,
+  );
 
   for (const articleId of successArticleIds) {
     await harness.repository.deleteArticle(demoIds.workspace, articleId);
@@ -371,7 +464,16 @@ async function exerciseKnowledgeImport(harness: Harness) {
     await harness.repository.getAsset(demoIds.workspace, referencedAsset.hash),
     null,
   );
-  assert.deepEqual(await harness.counts(), baseline);
+  const countsAfterImportCleanup = await harness.counts();
+  assert.deepEqual(
+    { ...countsAfterImportCleanup, workspace_index_states: baseline.workspace_index_states },
+    baseline,
+  );
+  assert.equal(
+    countsAfterImportCleanup.workspace_index_states,
+    baseline.workspace_index_states + 1,
+  );
+  baseline = countsAfterImportCleanup;
 
   const plannedPng = importPng(3);
   const plannedImport = await planKnowledgeImport(
@@ -645,19 +747,23 @@ async function exerciseSeedRerun(
     demoIds.draftArticle,
   );
   assert.ok(draft);
-  await harness.repository.updateArticle({
-    id: draft.id,
-    workspaceId: draft.workspaceId,
-    categoryId: draft.categoryId,
-    slug: draft.slug,
-    title: `${label} article edit`,
-    mdx: draft.mdx,
-    status: draft.status,
-    isFaq: draft.isFaq,
-    authorName: draft.authorName,
-    position: 9,
-    publishedAt: draft.publishedAt,
-  });
+  await harness.repository.updateArticle(
+    {
+      id: draft.id,
+      workspaceId: draft.workspaceId,
+      categoryId: draft.categoryId,
+      slug: draft.slug,
+      title: `${label} article edit`,
+      mdx: draft.mdx,
+      status: draft.status,
+      isFaq: draft.isFaq,
+      authorName: draft.authorName,
+      position: 9,
+      publishedAt: draft.publishedAt,
+    },
+    undefined,
+    null,
+  );
 
   const theme = await harness.repository.getTheme(demoIds.workspace);
   assert.ok(theme);
@@ -750,13 +856,18 @@ async function exerciseSeedSlugConflicts(
     `${harness.name} ${label} seeded an article without its fixed category parent`,
   );
 
-  await harness.repository.createArticle({
+  const replacementArticle = {
     ...demoContent.articles[0],
     id: replacementArticleId,
     categoryId: replacementCategoryId,
     title: `${label} replacement article`,
     publishedAt: new Date(demoContent.articles[0].publishedAt!),
-  });
+  };
+  await harness.repository.createArticle(
+    replacementArticle,
+    undefined,
+    articleEvidence(replacementArticle, "getting-started"),
+  );
 
   await seed();
 
@@ -985,7 +1096,7 @@ async function exerciseRepository(harness: Harness) {
     position: 7,
     publishedAt: null,
   };
-  await harness.repository.createArticle(contractArticle);
+  await harness.repository.createArticle(contractArticle, undefined, null);
 
   const createdArticle = await harness.repository.getArticle(
     demoIds.workspace,
@@ -993,11 +1104,13 @@ async function exerciseRepository(harness: Harness) {
   );
   assert.ok(createdArticle);
   const {
+    contentHash: contractContentHash,
     createdAt: contractCreatedAt,
     updatedAt: contractUpdatedAt,
     ...createdArticleSubmission
   } = createdArticle;
   assert.deepEqual(createdArticleSubmission, contractArticle);
+  assert.equal(contractContentHash, null);
   assert.ok(contractCreatedAt instanceof Date);
   assert.ok(contractUpdatedAt instanceof Date);
   for (const [id, position] of [
@@ -1010,7 +1123,7 @@ async function exerciseRepository(harness: Harness) {
       slug: id.replaceAll("_", "-"),
       title: id,
       position,
-    });
+    }, undefined, null);
   }
   assert.deepEqual(
     (await harness.repository.listArticles(demoIds.workspace))
@@ -1028,18 +1141,26 @@ async function exerciseRepository(harness: Harness) {
   );
 
   const contractPublishedAt = new Date("2026-02-03T04:05:06.000Z");
-  await harness.repository.updateArticle({
+  const publishedContractArticle = {
     ...contractArticle,
     title: "Published repository contract",
     status: "published",
     publishedAt: contractPublishedAt,
-  });
+  } as const;
+  const publishedContractEvidence = articleEvidence(publishedContractArticle);
+  assert.ok(publishedContractEvidence);
+  await harness.repository.updateArticle(
+    publishedContractArticle,
+    undefined,
+    publishedContractEvidence,
+  );
 
   const updatedArticle = await harness.repository.getArticle(
     demoIds.workspace,
     contractArticle.id,
   );
   assert.ok(updatedArticle);
+  assert.equal(updatedArticle.contentHash, publishedContractEvidence.articleContentHash);
   assert.equal(updatedArticle.status, "published");
   assert.equal(updatedArticle.title, "Published repository contract");
   assert.equal(updatedArticle.position, 7);
@@ -1051,6 +1172,51 @@ async function exerciseRepository(harness: Harness) {
       (article) => article.id === contractArticle.id,
     ),
     `${harness.name} omitted a newly published article from the public listing`,
+  );
+  assert.equal(
+    await harness.repository.updateCategory({
+      ...contractCategory,
+      slug: "contract-moved",
+    }),
+    false,
+    `${harness.name} changed a category route while published evidence used it`,
+  );
+  assert.equal(
+    (await harness.repository.listCategories(demoIds.workspace)).find(
+      (category) => category.id === contractCategory.id,
+    )?.slug,
+    contractCategory.slug,
+  );
+  const stateBeforeCategoryMismatch = await harness.repository.getIndexingState(
+    demoIds.workspace,
+  );
+  const chunksBeforeCategoryMismatch = await harness.repository.listEvidenceChunks(
+    demoIds.workspace,
+  );
+  const mismatchedCategoryArticle = {
+    ...publishedContractArticle,
+    title: "Mismatched category evidence",
+  };
+  await assert.rejects(
+    harness.repository.updateArticle(
+      mismatchedCategoryArticle,
+      undefined,
+      articleEvidence(mismatchedCategoryArticle, "wrong-category"),
+    ),
+    `${harness.name} accepted evidence prepared for another category route`,
+  );
+  assert.equal(
+    (await harness.repository.getArticle(demoIds.workspace, contractArticle.id))
+      ?.title,
+    publishedContractArticle.title,
+  );
+  assert.deepEqual(
+    await harness.repository.getIndexingState(demoIds.workspace),
+    stateBeforeCategoryMismatch,
+  );
+  assert.deepEqual(
+    await harness.repository.listEvidenceChunks(demoIds.workspace),
+    chunksBeforeCategoryMismatch,
   );
   assert.deepEqual(
     (await harness.repository.listPublishedArticles(demoIds.workspace)).map(
@@ -1069,11 +1235,15 @@ async function exerciseRepository(harness: Harness) {
     ],
   );
 
-  await harness.repository.updateArticle({
-    ...contractArticle,
-    workspaceId: "workspace_missing",
-    title: "Wrong workspace",
-  });
+  await harness.repository.updateArticle(
+    {
+      ...contractArticle,
+      workspaceId: "workspace_missing",
+      title: "Wrong workspace",
+    },
+    undefined,
+    null,
+  );
   assert.equal(
     (await harness.repository.getArticle(demoIds.workspace, contractArticle.id))?.title,
     "Published repository contract",
@@ -1121,14 +1291,12 @@ async function exerciseRepository(harness: Harness) {
   );
   assert.equal(await harness.assetCount(), 1);
 
+  const attachedContractEvidence = articleEvidence(publishedContractArticle);
+  assert.ok(attachedContractEvidence);
   await harness.repository.updateArticle(
-    {
-      ...contractArticle,
-      title: "Published repository contract",
-      status: "published",
-      publishedAt: contractPublishedAt,
-    },
+    publishedContractArticle,
     { manifestId: firstManifest.id, hashes: [firstAsset.hash] },
+    attachedContractEvidence,
   );
   assert.deepEqual(
     await harness.repository.listArticleAssetHashes(
@@ -1142,21 +1310,48 @@ async function exerciseRepository(harness: Harness) {
     firstAsset.hash,
     `${harness.name} hid an asset attached to a published article`,
   );
-  await harness.repository.updateArticle({
+  const draftContractArticle = {
     ...contractArticle,
-    status: "draft",
+    status: "draft" as const,
     publishedAt: contractPublishedAt,
-  });
+  };
+  await harness.repository.updateArticle(draftContractArticle, undefined, null);
+  assert.equal(
+    (await harness.repository.getArticle(demoIds.workspace, contractArticle.id))
+      ?.contentHash,
+    null,
+  );
+  assert.equal(
+    (await harness.repository.listEvidenceChunks(demoIds.workspace)).some(
+      (chunk) => chunk.articleId === contractArticle.id,
+    ),
+    false,
+    `${harness.name} exposed evidence after unpublishing its article`,
+  );
+  assert.equal(
+    (
+      await harness.repository.getEmbeddingJob(
+        demoIds.workspace,
+        attachedContractEvidence.job.id,
+      )
+    )?.status,
+    "superseded",
+  );
   assert.equal(
     await harness.repository.getPublishedAsset(demoIds.workspace, firstAsset.hash),
     null,
     `${harness.name} exposed a draft-only asset publicly`,
   );
-  await harness.repository.updateArticle({
+  const republishedContractArticle = {
     ...contractArticle,
-    status: "published",
+    status: "published" as const,
     publishedAt: contractPublishedAt,
-  });
+  };
+  await harness.repository.updateArticle(
+    republishedContractArticle,
+    undefined,
+    articleEvidence(republishedContractArticle),
+  );
   let attachedAssetHash = firstAsset.hash;
 
   const retryAssetContent = importPng(31);
@@ -1185,6 +1380,11 @@ async function exerciseRepository(harness: Harness) {
         manifestId: failedUpdateManifest.id,
         hashes: [failedUpdateAsset.hash],
       },
+      articleEvidence({
+        ...articleBeforePersistenceFailure,
+        slug: demoContent.articles[0].slug,
+        title: "Rejected persistence update",
+      }),
     ),
   );
   assert.equal(
@@ -1215,10 +1415,14 @@ async function exerciseRepository(harness: Harness) {
     { mediaType: "image/png", content: retryAssetContent },
   );
   assert.equal(retryAsset.hash, failedUpdateAsset.hash);
-  await harness.repository.updateArticle(articleBeforePersistenceFailure, {
-    manifestId: retryManifest.id,
-    hashes: [retryAsset.hash],
-  });
+  await harness.repository.updateArticle(
+    articleBeforePersistenceFailure,
+    {
+      manifestId: retryManifest.id,
+      hashes: [retryAsset.hash],
+    },
+    articleEvidence(articleBeforePersistenceFailure),
+  );
   attachedAssetHash = retryAsset.hash;
   assert.deepEqual(
     await harness.repository.listArticleAssetHashes(
@@ -1293,6 +1497,7 @@ async function exerciseRepository(harness: Harness) {
         slug: demoContent.articles[0].slug,
       },
       { manifestId: failedManifest.id, hashes: [failedAsset.hash] },
+      null,
     ),
   );
   assert.equal(
@@ -1353,6 +1558,10 @@ async function exerciseRepository(harness: Harness) {
         title: "Rejected forged asset update",
       },
       { hashes: ["f".repeat(64)] },
+      articleEvidence({
+        ...attachedArticleBeforeRejectedUpdate,
+        title: "Rejected forged asset update",
+      }),
     ),
   );
   assert.equal(
@@ -1374,9 +1583,11 @@ async function exerciseRepository(harness: Harness) {
     `${harness.name} removed the current attachment during a rejected asset update`,
   );
 
-  await harness.repository.updateArticle(attachedArticleBeforeRejectedUpdate, {
-    hashes: [],
-  });
+  await harness.repository.updateArticle(
+    attachedArticleBeforeRejectedUpdate,
+    { hashes: [] },
+    articleEvidence(attachedArticleBeforeRejectedUpdate),
+  );
   assert.deepEqual(
     await harness.repository.listArticleAssetHashes(
       demoIds.workspace,
@@ -1605,7 +1816,11 @@ async function exerciseRepository(harness: Harness) {
     },
   ];
   for (const article of analyticsArticles) {
-    await harness.repository.createArticle(article);
+    await harness.repository.createArticle(
+      article,
+      undefined,
+      articleEvidence(article),
+    );
   }
 
   const viewArticleIds = [
@@ -1670,7 +1885,7 @@ async function exerciseRepository(harness: Harness) {
     description: null,
     position: 0,
   });
-  await harness.repository.createArticle({
+  const isolationArticle = {
     id: "article_analytics_isolation",
     workspaceId: isolationWorkspace.id,
     categoryId: "category_analytics_isolation",
@@ -1681,7 +1896,12 @@ async function exerciseRepository(harness: Harness) {
     isFaq: false,
     authorName: "OPAS",
     publishedAt: new Date(),
-  });
+  } as const;
+  await harness.repository.createArticle(
+    isolationArticle,
+    undefined,
+    articleEvidence(isolationArticle, "analytics"),
+  );
   for (let index = 0; index < 5; index += 1) {
     await harness.repository.recordView({
       id: `analytics_isolation_view_${index}`,
@@ -2230,6 +2450,80 @@ test("SQLite repository uses the native D1 client for atomic statement batches",
   assert.deepEqual(preparedStatements[1].parameters, ["workspace_d1_batch"]);
 });
 
+test("SQLite bulk publication stays below D1 query and parameter ceilings", () => {
+  const client = {
+    prepare() {
+      throw new Error("Publication planning must not execute D1 statements");
+    },
+  } as unknown as AnyD1Database;
+  const database = createD1Database(client, { schema: sqliteSchema });
+  const commits = Array.from({ length: 200 }, (_, index) => {
+    const article = {
+      id: `article_d1_bulk_${index}`,
+      workspaceId: demoIds.workspace,
+      categoryId: "category_d1_bulk",
+      slug: `bulk-${index}`,
+      title: `Bulk ${index}`,
+      mdx: `# Bulk ${index}\n\nD1 bulk publication.`,
+      status: "published" as const,
+      isFaq: false,
+      authorName: "OPAS",
+      publishedAt: new Date("2026-08-30T12:00:00.000Z"),
+    };
+    const commit = articleEvidence(article, "bulk");
+    assert.ok(commit);
+    return commit;
+  });
+  const statements = sqliteArticleEvidenceCommitStatements(
+    database,
+    commits,
+    new Date("2026-08-30T12:00:00.000Z"),
+  );
+  const queries = statements.map((statement) => database.run(statement).getQuery());
+
+  assert.equal(queries.length, 8);
+  assert.ok(queries.length <= 50);
+  assert.ok(queries.every((query) => query.params.length <= 100));
+  assert.ok(
+    queries.every((query) => new TextEncoder().encode(query.sql).byteLength <= 100_000),
+  );
+});
+
+test("SQLite evidence initialization stays below D1 statement ceilings", () => {
+  const client = {
+    prepare() {
+      throw new Error("Evidence initialization planning must not execute D1 statements");
+    },
+  } as unknown as AnyD1Database;
+  const database = createD1Database(client, { schema: sqliteSchema });
+  const seeded = demoContent.articles.find(
+    (article) => article.id === demoIds.publishedArticle,
+  );
+  assert.ok(seeded);
+  const initializedAt = new Date("2026-08-30T12:00:00.000Z");
+  const article = {
+    ...seeded,
+    publishedAt: seeded.publishedAt ? new Date(seeded.publishedAt) : null,
+    categorySlug: "getting-started",
+    updatedAt: initializedAt,
+  };
+  const evidence = articleEvidence(article, article.categorySlug);
+  assert.ok(evidence);
+  const queries = sqliteArticleEvidenceInitializationStatements(database, {
+    article,
+    evidence,
+    initializedAt,
+  }).map((statement) => database.run(statement).getQuery());
+
+  assert.ok(queries.length <= 10);
+  assert.ok(queries.every((query) => query.params.length <= 100));
+  assert.ok(
+    queries.every(
+      (query) => new TextEncoder().encode(query.sql).byteLength <= 100_000,
+    ),
+  );
+});
+
 test("SQLite repository keeps local atomic statements in one Drizzle transaction", async () => {
   const client = new Database(":memory:");
   client.exec(`
@@ -2277,7 +2571,7 @@ test("SQLite repository keeps local atomic statements in one Drizzle transaction
   }
 });
 
-test("SQLite upgrades populated v0.1 data to ordered article asset storage", () => {
+test("SQLite preserves populated v0.1 data through article evidence migration", () => {
   const client = new Database(":memory:");
   client.pragma("foreign_keys = ON");
 
@@ -2361,12 +2655,26 @@ test("SQLite upgrades populated v0.1 data to ordered article asset storage", () 
     client.transaction(() => {
       client.exec(readFileSync(path.join(migrationDirectory, "0003_melted_bloodscream.sql"), "utf8"));
     })();
+    client.transaction(() => {
+      client.exec(readFileSync(path.join(migrationDirectory, "0004_lumpy_boomerang.sql"), "utf8"));
+    })();
 
     assert.equal(
       (client
         .prepare("select position from articles where id = ?")
         .get(demoIds.publishedArticle) as { position: number }).position,
       0,
+    );
+    assert.equal(
+      (client
+        .prepare("select content_hash from articles where id = ?")
+        .get(demoIds.publishedArticle) as { content_hash: string | null }).content_hash,
+      null,
+    );
+    assert.throws(() =>
+      client
+        .prepare("update articles set content_hash = ? where id = ?")
+        .run("invalid", demoIds.publishedArticle),
     );
     assert.equal(
       (client.prepare("select count(*) as count from article_feedback").get() as { count: number })
@@ -2389,7 +2697,7 @@ test("SQLite upgrades populated v0.1 data to ordered article asset storage", () 
   }
 });
 
-test("Postgres upgrades populated v0.1 data to ordered article asset storage", { timeout: 120_000 }, async () => {
+test("Postgres preserves populated v0.1 data through article evidence migration", { timeout: 120_000 }, async () => {
   const container = await new PostgreSqlContainer("postgres:18.6-alpine").start();
   const pool = new Pool({ connectionString: container.getConnectionUri() });
 
@@ -2434,6 +2742,7 @@ test("Postgres upgrades populated v0.1 data to ordered article asset storage", {
 
     await applyPostgresMigration(pool, "0002_charming_dragon_lord.sql");
     await applyPostgresMigration(pool, "0003_harsh_goliath.sql");
+    await applyPostgresMigration(pool, "0004_reflective_paladin.sql");
 
     assert.equal(
       (
@@ -2443,6 +2752,22 @@ test("Postgres upgrades populated v0.1 data to ordered article asset storage", {
         )
       ).rows[0].position,
       0,
+    );
+    assert.equal(
+      (
+        await pool.query<{ content_hash: string | null }>(
+          "select content_hash from articles where id = $1",
+          [demoIds.publishedArticle],
+        )
+      ).rows[0].content_hash,
+      null,
+    );
+    await assert.rejects(
+      pool.query("update articles set content_hash = $1 where id = $2", [
+        "invalid",
+        demoIds.publishedArticle,
+      ]),
+      /articles_content_hash_check/u,
     );
     assert.equal(
       Number((await pool.query("select count(*) from article_feedback")).rows[0].count),

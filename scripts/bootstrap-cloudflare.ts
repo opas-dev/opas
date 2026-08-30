@@ -13,6 +13,9 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { createGenerationAdapter } from "../src/ai/generation-config";
+import { createAnswerGuardrails } from "../src/answers/guardrails";
+
 const protectedWorkerName = "opas-landing";
 const maintainedAccountId = "f8801c7e8853a113a25f8b52fd9ceec1";
 const maintainedCustomDomain = "demo.opas.dev";
@@ -133,6 +136,49 @@ function validateSiteOrigin(
   return siteUrl.origin;
 }
 
+function validateAnswerConfiguration(vars: JsonObject) {
+  const topicConfiguration = vars.OPAS_ANSWER_TOPIC_GUARDRAILS;
+  if (
+    topicConfiguration !== undefined &&
+    (typeof topicConfiguration !== "string" || topicConfiguration === "")
+  ) {
+    throw new Error(
+      "vars.OPAS_ANSWER_TOPIC_GUARDRAILS must be omitted or contain valid topic rules.",
+    );
+  }
+  if (
+    createAnswerGuardrails(topicConfiguration as string | undefined).status !==
+    "ready"
+  ) {
+    throw new Error(
+      "vars.OPAS_ANSWER_TOPIC_GUARDRAILS must be omitted or contain valid topic rules.",
+    );
+  }
+
+  createGenerationAdapter({
+    environment: {
+      OPAS_DATABASE_DRIVER: "d1",
+      OPAS_GENERATION_GATEWAY_ID: requireString(
+        vars.OPAS_GENERATION_GATEWAY_ID,
+        "vars.OPAS_GENERATION_GATEWAY_ID",
+      ),
+      OPAS_GENERATION_MODEL: requireString(
+        vars.OPAS_GENERATION_MODEL,
+        "vars.OPAS_GENERATION_MODEL",
+      ),
+      OPAS_GENERATION_RETENTION_DISCLOSURE: requireString(
+        vars.OPAS_GENERATION_RETENTION_DISCLOSURE,
+        "vars.OPAS_GENERATION_RETENTION_DISCLOSURE",
+      ),
+    },
+    workersAiBinding: {
+      async run() {
+        throw new Error("Cloudflare answer validation does not run inference.");
+      },
+    } as never,
+  });
+}
+
 export function validateCloudflareConfig(
   config: unknown,
   configPath = "wrangler.jsonc",
@@ -150,9 +196,33 @@ export function validateCloudflareConfig(
 
   const customDomain = validateRouting(config, accountId, workerName);
 
+  if (config.main !== "custom-worker.ts") {
+    throw new Error("main must use the scheduled OPAS custom Worker entry point.");
+  }
+
+  if (
+    !isObject(config.ai) ||
+    config.ai.binding !== "AI" ||
+    Object.keys(config.ai).length !== 1
+  ) {
+    throw new Error("ai must expose the single fixed Workers AI binding.");
+  }
+
+  if (
+    !isObject(config.triggers) ||
+    !Array.isArray(config.triggers.crons) ||
+    config.triggers.crons.length !== 1 ||
+    config.triggers.crons[0] !== "* * * * *" ||
+    Object.keys(config.triggers).length !== 1
+  ) {
+    throw new Error("triggers must run bounded embedding recovery every minute.");
+  }
+
   if (!isObject(config.vars) || config.vars.OPAS_DATABASE_DRIVER !== "d1") {
     throw new Error("vars.OPAS_DATABASE_DRIVER must be d1.");
   }
+
+  validateAnswerConfiguration(config.vars);
 
   const siteOrigin = validateSiteOrigin(
     config.vars.OPAS_SITE_URL,

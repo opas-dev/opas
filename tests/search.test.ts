@@ -158,6 +158,7 @@ test("excludes drafts and rebuilds when a publication snapshot changes", async (
       title: "Publication canary",
     }),
     status: "draft",
+    contentHash: null,
     publishedAt: null,
   };
   const categories = [category()];

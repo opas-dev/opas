@@ -3,7 +3,11 @@
 import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
-import { securityHeaders } from "./src/security/headers";
+import { embedParentOrigins } from "./src/embed/config";
+import {
+  createEmbedContentSecurityPolicy,
+  securityHeaders,
+} from "./src/security/headers";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -22,6 +26,15 @@ const nextConfig: NextConfig = {
           {
             key: "X-Llms-Txt",
             value: "/llms.txt",
+          },
+        ],
+      },
+      {
+        source: "/embed",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: createEmbedContentSecurityPolicy(embedParentOrigins()),
           },
         ],
       },

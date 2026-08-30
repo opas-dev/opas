@@ -29,6 +29,7 @@ RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle/postgres ./drizzle/postgres
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/run-embedding-recovery.mjs ./scripts/run-embedding-recovery.mjs
 
 USER nextjs
 EXPOSE 3000

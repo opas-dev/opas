@@ -1,5 +1,7 @@
 // ABOUTME: Defines the database-neutral records and operations used by OPAS application code.
 // ABOUTME: Keeps deployment driver details behind one small repository contract.
+import type { EmbeddingWorkerRepository } from "@/ai/embedding-worker";
+
 export type ArticleStatus = "draft" | "published";
 
 export type Article = {
@@ -9,6 +11,7 @@ export type Article = {
   slug: string;
   title: string;
   mdx: string;
+  contentHash: string | null;
   status: ArticleStatus;
   isFaq: boolean;
   authorName: string;
@@ -18,9 +21,12 @@ export type Article = {
   updatedAt: Date;
 };
 
-export type PublishedArticle = Omit<Article, "status">;
+export type PublishedArticle = Omit<Article, "contentHash" | "status">;
 
-export type ArticleSubmission = Omit<Article, "createdAt" | "updatedAt" | "position"> & {
+export type ArticleSubmission = Omit<
+  Article,
+  "contentHash" | "createdAt" | "updatedAt" | "position"
+> & {
   position?: number;
 };
 
@@ -73,6 +79,7 @@ export type KnowledgeImportArticle = Omit<
 > & {
   position: number;
   assetHashes: readonly string[];
+  evidence: ArticleEvidenceCommit | null;
 };
 
 export type KnowledgeImport = {
@@ -221,6 +228,7 @@ export type EmbeddingJob = {
 export type ArticleEvidenceCommit = {
   workspaceId: string;
   articleId: string;
+  categorySlug: string;
   articleContentHash: string;
   chunks: EvidenceChunkSubmission[];
   job: {
@@ -231,36 +239,51 @@ export type ArticleEvidenceCommit = {
   };
 };
 
-export type EmbeddingJobClaim = {
-  workspaceId: string;
-  claimedAt: Date;
-  leaseExpiresAt: Date;
-  leaseToken: string;
+export type UnindexedPublishedArticle = ArticleSubmission & {
+  categorySlug: string;
 };
 
-export type EmbeddingJobCheckpoint = {
-  workspaceId: string;
-  id: string;
-  leaseToken: string;
-  completedChunkCount: number;
-  checkedAt: Date;
+export type ArticleEvidenceInitialization = {
+  article: UnindexedPublishedArticle;
+  evidence: ArticleEvidenceCommit;
+  initializedAt: Date;
 };
 
-export type EmbeddingJobRetry = {
-  workspaceId: string;
-  id: string;
-  leaseToken: string;
-  checkedAt: Date;
-  availableAt: Date;
-  errorCode: string;
-};
+export type EmbeddingGenerationReconciliation = Parameters<
+  EmbeddingWorkerRepository["reconcileEmbeddingGeneration"]
+>[0];
 
-export type EmbeddingJobCompletion = {
-  workspaceId: string;
-  id: string;
-  leaseToken: string;
-  checkedAt: Date;
-};
+export type EmbeddingJobClaim = Parameters<
+  EmbeddingWorkerRepository["claimEmbeddingJob"]
+>[0];
+
+export type EmbeddingJobWorkRequest = Parameters<
+  EmbeddingWorkerRepository["getEmbeddingJobWork"]
+>[0];
+
+export type EmbeddingJobBatch = Parameters<
+  EmbeddingWorkerRepository["saveEmbeddingJobBatch"]
+>[0];
+
+export type EmbeddingJobCheckpoint = Parameters<
+  EmbeddingWorkerRepository["checkpointEmbeddingJob"]
+>[0];
+
+export type EmbeddingJobRetry = Parameters<
+  EmbeddingWorkerRepository["retryEmbeddingJob"]
+>[0];
+
+export type EmbeddingJobFailure = Parameters<
+  EmbeddingWorkerRepository["failEmbeddingJob"]
+>[0];
+
+export type EmbeddingJobCompletion = Parameters<
+  EmbeddingWorkerRepository["completeEmbeddingJob"]
+>[0];
+
+export type EmbeddingGenerationActivation = Parameters<
+  EmbeddingWorkerRepository["activateEmbeddingGeneration"]
+>[0];
 
 export type ChunkEmbeddingSubmission = {
   chunkId: string;
@@ -288,6 +311,19 @@ export type ActiveChunkEmbedding = {
   dimension: number;
   configurationHash: string;
   vector: readonly number[];
+};
+
+export type EvidenceCandidateIdentity = {
+  chunkId: string;
+  articleId: string;
+  articleContentHash: string;
+  contentHash: string;
+};
+
+export type EvidenceCandidateRevalidation = {
+  workspaceId: string;
+  generation: number;
+  candidates: readonly EvidenceCandidateIdentity[];
 };
 
 export type SavedQuestionClassification =
@@ -352,12 +388,20 @@ export type Repository = {
   listPublishedArticles(workspaceId: string): Promise<PublishedArticle[]>;
   listCategories(workspaceId: string): Promise<Category[]>;
   createCategory(category: Category): Promise<void>;
-  updateCategory(category: Category): Promise<void>;
+  updateCategory(category: Category): Promise<boolean>;
   deleteCategory(workspaceId: string, id: string): Promise<boolean>;
   listArticles(workspaceId: string): Promise<Article[]>;
   getArticle(workspaceId: string, id: string): Promise<Article | null>;
-  createArticle(article: ArticleSubmission, assets?: ArticleAssetSelection): Promise<void>;
-  updateArticle(article: ArticleSubmission, assets?: ArticleAssetSelection): Promise<void>;
+  createArticle(
+    article: ArticleSubmission,
+    assets: ArticleAssetSelection | undefined,
+    evidence: ArticleEvidenceCommit | null,
+  ): Promise<void>;
+  updateArticle(
+    article: ArticleSubmission,
+    assets: ArticleAssetSelection | undefined,
+    evidence: ArticleEvidenceCommit | null,
+  ): Promise<void>;
   deleteArticle(workspaceId: string, id: string): Promise<void>;
   createAssetManifest(workspaceId: string, expiresAt: Date): Promise<AssetManifest>;
   stageAsset(
@@ -378,6 +422,13 @@ export type Repository = {
   recordView(view: ArticleView): Promise<void>;
   recordSearchMiss(miss: SearchMiss): Promise<void>;
   getIndexingState(workspaceId: string): Promise<IndexingState | null>;
+  listUnindexedPublishedArticles(
+    workspaceId: string,
+    limit: number,
+  ): Promise<UnindexedPublishedArticle[]>;
+  initializeArticleEvidence(
+    initialization: ArticleEvidenceInitialization,
+  ): Promise<boolean>;
   createEmbeddingGeneration(generation: EmbeddingGeneration): Promise<void>;
   getActiveEmbeddingGeneration(workspaceId: string): Promise<EmbeddingGeneration | null>;
   commitArticleEvidence(commit: ArticleEvidenceCommit): Promise<IndexingState>;
@@ -388,40 +439,41 @@ export type Repository = {
   ): Promise<IndexingState>;
   listEvidenceChunks(workspaceId: string): Promise<EvidenceChunkRecord[]>;
   getEmbeddingJob(workspaceId: string, id: string): Promise<EmbeddingJob | null>;
-  claimEmbeddingJob(claim: EmbeddingJobClaim): Promise<EmbeddingJob | null>;
-  checkpointEmbeddingJob(checkpoint: EmbeddingJobCheckpoint): Promise<boolean>;
-  retryEmbeddingJob(retry: EmbeddingJobRetry): Promise<boolean>;
-  completeEmbeddingJob(completion: EmbeddingJobCompletion): Promise<boolean>;
   saveChunkEmbeddings(batch: ChunkEmbeddingBatch): Promise<void>;
-  activateEmbeddingGeneration(
-    workspaceId: string,
-    embeddingGenerationId: string,
-    activatedAt: Date,
-  ): Promise<boolean>;
   listActiveChunkEmbeddings(workspaceId: string): Promise<ActiveChunkEmbedding[]>;
+  revalidateEvidenceCandidates(
+    request: EvidenceCandidateRevalidation,
+  ): Promise<readonly EvidenceCandidateIdentity[]>;
   saveQuestionSet(questionSet: SavedQuestionSet): Promise<void>;
   getQuestionSet(workspaceId: string, id: string): Promise<SavedQuestionSet | null>;
   startEvaluationRun(run: EvaluationRunStart): Promise<void>;
   finishEvaluationRun(completion: EvaluationRunCompletion): Promise<void>;
   getEvaluationRun(workspaceId: string, id: string): Promise<EvaluationRun | null>;
-};
+} & EmbeddingWorkerRepository;
 
 export type EvidenceRepository = Pick<
   Repository,
   | "getIndexingState"
+  | "listUnindexedPublishedArticles"
+  | "initializeArticleEvidence"
   | "createEmbeddingGeneration"
   | "getActiveEmbeddingGeneration"
   | "commitArticleEvidence"
   | "invalidateArticleEvidence"
   | "listEvidenceChunks"
   | "getEmbeddingJob"
+  | "reconcileEmbeddingGeneration"
   | "claimEmbeddingJob"
+  | "getEmbeddingJobWork"
+  | "saveEmbeddingJobBatch"
   | "checkpointEmbeddingJob"
   | "retryEmbeddingJob"
+  | "failEmbeddingJob"
   | "completeEmbeddingJob"
   | "saveChunkEmbeddings"
   | "activateEmbeddingGeneration"
   | "listActiveChunkEmbeddings"
+  | "revalidateEvidenceCandidates"
   | "saveQuestionSet"
   | "getQuestionSet"
   | "startEvaluationRun"

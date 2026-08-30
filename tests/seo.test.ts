@@ -190,6 +190,7 @@ test("joins only published safe records from the requested workspace in stable o
   const draft: Article = {
     ...publishedArticle({ id: "article_draft", slug: "draft-answer" }),
     status: "draft",
+    contentHash: null,
   };
   const publications = joinPublishedArticles({
     workspaceId,

@@ -15,6 +15,26 @@ export const contentSecurityPolicy = [
   "frame-ancestors 'none'",
 ].join("; ");
 
+export function createEmbedContentSecurityPolicy(parentOrigins: readonly string[]) {
+  const frameAncestors =
+    parentOrigins.length > 0 ? parentOrigins.join(" ") : "'none'";
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'none'",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "media-src 'none'",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "worker-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    `frame-ancestors ${frameAncestors}`,
+  ].join("; ");
+}
+
 export const securityHeaders = [
   {
     key: "Content-Security-Policy",

@@ -3,7 +3,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "opas-mvp",
-  "main": ".open-next/worker.js",
+  "main": "custom-worker.ts",
   "account_id": "f8801c7e8853a113a25f8b52fd9ceec1",
   "workers_dev": true,
   "routes": [
@@ -18,6 +18,12 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "ai": {
+    "binding": "AI"
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
@@ -27,6 +33,9 @@
   "vars": {
     "NEXTJS_ENV": "production",
     "OPAS_DATABASE_DRIVER": "d1",
+    "OPAS_GENERATION_GATEWAY_ID": "opas-answers",
+    "OPAS_GENERATION_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
+    "OPAS_GENERATION_RETENTION_DISCLOSURE": "OPAS retains only configured redacted conversation records; Cloudflare AI Gateway logging is disabled and response caching is bypassed.",
     "OPAS_SITE_URL": "https://demo.opas.dev"
   },
   "d1_databases": [
