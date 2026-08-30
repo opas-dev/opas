@@ -137,6 +137,215 @@ export type Analytics = {
   searchMisses: SearchMissAnalytics[];
 };
 
+export type IndexingState = {
+  workspaceId: string;
+  generation: number;
+  activeEmbeddingGenerationId: string | null;
+  updatedAt: Date;
+};
+
+export type EvidenceChunkSubmission = {
+  id: string;
+  contentHash: string;
+  embeddingInputHash: string;
+  ordinal: number;
+  title: string;
+  headingPath: readonly string[];
+  canonicalUrl: string;
+  markdown: string;
+  evidenceText: string;
+  embeddingText: string;
+  sourceLineRange: {
+    start: number;
+    end: number;
+  };
+};
+
+export type EvidenceChunkRecord = EvidenceChunkSubmission & {
+  workspaceId: string;
+  articleId: string;
+  articleContentHash: string;
+  indexGeneration: number;
+  publicationState: "published";
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type EmbeddingGenerationStatus =
+  | "building"
+  | "active"
+  | "retired"
+  | "failed";
+
+export type EmbeddingGeneration = {
+  id: string;
+  workspaceId: string;
+  provider: string;
+  model: string;
+  dimension: number;
+  configurationHash: string;
+  status: EmbeddingGenerationStatus;
+  createdAt: Date;
+  activatedAt: Date | null;
+  retiredAt: Date | null;
+};
+
+export type EmbeddingJobStatus =
+  | "pending"
+  | "leased"
+  | "retryable"
+  | "completed"
+  | "failed"
+  | "superseded";
+
+export type EmbeddingJob = {
+  id: string;
+  workspaceId: string;
+  articleId: string;
+  articleContentHash: string;
+  embeddingGenerationId: string | null;
+  indexGeneration: number;
+  status: EmbeddingJobStatus;
+  attempts: number;
+  maximumAttempts: number;
+  checkpoint: number;
+  availableAt: Date;
+  leaseToken: string | null;
+  leaseExpiresAt: Date | null;
+  lastErrorCode: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
+};
+
+export type ArticleEvidenceCommit = {
+  workspaceId: string;
+  articleId: string;
+  articleContentHash: string;
+  chunks: EvidenceChunkSubmission[];
+  job: {
+    id: string;
+    embeddingGenerationId: string | null;
+    maximumAttempts: number;
+    availableAt: Date;
+  };
+};
+
+export type EmbeddingJobClaim = {
+  workspaceId: string;
+  claimedAt: Date;
+  leaseExpiresAt: Date;
+  leaseToken: string;
+};
+
+export type EmbeddingJobCheckpoint = {
+  workspaceId: string;
+  id: string;
+  leaseToken: string;
+  completedChunkCount: number;
+  checkedAt: Date;
+};
+
+export type EmbeddingJobRetry = {
+  workspaceId: string;
+  id: string;
+  leaseToken: string;
+  checkedAt: Date;
+  availableAt: Date;
+  errorCode: string;
+};
+
+export type EmbeddingJobCompletion = {
+  workspaceId: string;
+  id: string;
+  leaseToken: string;
+  checkedAt: Date;
+};
+
+export type ChunkEmbeddingSubmission = {
+  chunkId: string;
+  contentHash: string;
+  embeddingInputHash: string;
+  vector: readonly number[];
+};
+
+export type ChunkEmbeddingBatch = {
+  workspaceId: string;
+  embeddingGenerationId: string;
+  embeddings: readonly ChunkEmbeddingSubmission[];
+  createdAt: Date;
+};
+
+export type ActiveChunkEmbedding = {
+  workspaceId: string;
+  chunkId: string;
+  articleId: string;
+  contentHash: string;
+  embeddingInputHash: string;
+  embeddingGenerationId: string;
+  provider: string;
+  model: string;
+  dimension: number;
+  configurationHash: string;
+  vector: readonly number[];
+};
+
+export type SavedQuestionClassification =
+  | "answerable"
+  | "ambiguous"
+  | "unsupported"
+  | "stale-conflicting"
+  | "adversarial";
+
+export type SavedQuestion = {
+  id: string;
+  classification: SavedQuestionClassification;
+  question: string;
+  expectedOutcome: "answer" | "abstain" | "either";
+  acceptedSourceIds: readonly string[];
+  sourceContentHashes: readonly string[];
+};
+
+export type SavedQuestionSet = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  version: number;
+  sourceContentHash: string;
+  questions: readonly SavedQuestion[];
+  createdAt: Date;
+};
+
+export type EvaluationRunStatus = "running" | "completed" | "failed";
+
+export type EvaluationRun = {
+  id: string;
+  workspaceId: string;
+  questionSetId: string;
+  indexGeneration: number;
+  embeddingGenerationId: string | null;
+  retrievalMode: string;
+  provider: string | null;
+  model: string | null;
+  status: EvaluationRunStatus;
+  results: unknown;
+  startedAt: Date;
+  completedAt: Date | null;
+};
+
+export type EvaluationRunStart = Omit<
+  EvaluationRun,
+  "status" | "results" | "completedAt"
+>;
+
+export type EvaluationRunCompletion = Pick<
+  EvaluationRun,
+  "id" | "workspaceId" | "results" | "completedAt"
+> & {
+  status: Exclude<EvaluationRunStatus, "running">;
+  completedAt: Date;
+};
+
 export type Repository = {
   checkHealth(): Promise<void>;
   findPublishedArticle(workspaceId: string, slug: string): Promise<PublishedArticle | null>;
@@ -168,4 +377,54 @@ export type Repository = {
   createFeedback(feedback: Feedback): Promise<void>;
   recordView(view: ArticleView): Promise<void>;
   recordSearchMiss(miss: SearchMiss): Promise<void>;
+  getIndexingState(workspaceId: string): Promise<IndexingState | null>;
+  createEmbeddingGeneration(generation: EmbeddingGeneration): Promise<void>;
+  getActiveEmbeddingGeneration(workspaceId: string): Promise<EmbeddingGeneration | null>;
+  commitArticleEvidence(commit: ArticleEvidenceCommit): Promise<IndexingState>;
+  invalidateArticleEvidence(
+    workspaceId: string,
+    articleId: string,
+    invalidatedAt: Date,
+  ): Promise<IndexingState>;
+  listEvidenceChunks(workspaceId: string): Promise<EvidenceChunkRecord[]>;
+  getEmbeddingJob(workspaceId: string, id: string): Promise<EmbeddingJob | null>;
+  claimEmbeddingJob(claim: EmbeddingJobClaim): Promise<EmbeddingJob | null>;
+  checkpointEmbeddingJob(checkpoint: EmbeddingJobCheckpoint): Promise<boolean>;
+  retryEmbeddingJob(retry: EmbeddingJobRetry): Promise<boolean>;
+  completeEmbeddingJob(completion: EmbeddingJobCompletion): Promise<boolean>;
+  saveChunkEmbeddings(batch: ChunkEmbeddingBatch): Promise<void>;
+  activateEmbeddingGeneration(
+    workspaceId: string,
+    embeddingGenerationId: string,
+    activatedAt: Date,
+  ): Promise<boolean>;
+  listActiveChunkEmbeddings(workspaceId: string): Promise<ActiveChunkEmbedding[]>;
+  saveQuestionSet(questionSet: SavedQuestionSet): Promise<void>;
+  getQuestionSet(workspaceId: string, id: string): Promise<SavedQuestionSet | null>;
+  startEvaluationRun(run: EvaluationRunStart): Promise<void>;
+  finishEvaluationRun(completion: EvaluationRunCompletion): Promise<void>;
+  getEvaluationRun(workspaceId: string, id: string): Promise<EvaluationRun | null>;
 };
+
+export type EvidenceRepository = Pick<
+  Repository,
+  | "getIndexingState"
+  | "createEmbeddingGeneration"
+  | "getActiveEmbeddingGeneration"
+  | "commitArticleEvidence"
+  | "invalidateArticleEvidence"
+  | "listEvidenceChunks"
+  | "getEmbeddingJob"
+  | "claimEmbeddingJob"
+  | "checkpointEmbeddingJob"
+  | "retryEmbeddingJob"
+  | "completeEmbeddingJob"
+  | "saveChunkEmbeddings"
+  | "activateEmbeddingGeneration"
+  | "listActiveChunkEmbeddings"
+  | "saveQuestionSet"
+  | "getQuestionSet"
+  | "startEvaluationRun"
+  | "finishEvaluationRun"
+  | "getEvaluationRun"
+>;

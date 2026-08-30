@@ -66,8 +66,99 @@ const expectedColumns = {
     "created_at",
     "updated_at",
   ],
+  chunk_embeddings: [
+    "chunk_id",
+    "embedding_generation_id",
+    "workspace_id",
+    "content_hash",
+    "embedding_input_hash",
+    "dimension",
+    "vector",
+    "created_at",
+  ],
+  embedding_generations: [
+    "id",
+    "workspace_id",
+    "provider",
+    "model",
+    "dimension",
+    "configuration_hash",
+    "status",
+    "created_at",
+    "activated_at",
+    "retired_at",
+  ],
+  embedding_jobs: [
+    "id",
+    "workspace_id",
+    "article_id",
+    "article_content_hash",
+    "embedding_generation_id",
+    "index_generation",
+    "status",
+    "attempts",
+    "maximum_attempts",
+    "checkpoint",
+    "available_at",
+    "lease_token",
+    "lease_expires_at",
+    "last_error_code",
+    "created_at",
+    "updated_at",
+    "completed_at",
+  ],
+  evaluation_runs: [
+    "id",
+    "workspace_id",
+    "question_set_id",
+    "index_generation",
+    "embedding_generation_id",
+    "retrieval_mode",
+    "provider",
+    "model",
+    "status",
+    "results",
+    "started_at",
+    "completed_at",
+  ],
+  evidence_chunks: [
+    "id",
+    "workspace_id",
+    "article_id",
+    "article_content_hash",
+    "content_hash",
+    "embedding_input_hash",
+    "index_generation",
+    "ordinal",
+    "title",
+    "heading_path",
+    "canonical_url",
+    "markdown",
+    "evidence_text",
+    "embedding_text",
+    "source_line_start",
+    "source_line_end",
+    "publication_state",
+    "created_at",
+    "updated_at",
+  ],
+  saved_question_sets: [
+    "id",
+    "workspace_id",
+    "name",
+    "version",
+    "source_content_hash",
+    "questions",
+    "created_at",
+  ],
   search_misses: ["id", "workspace_id", "query", "created_at"],
   themes: ["id", "workspace_id", "name", "config", "created_at", "updated_at"],
+  workspace_index_states: [
+    "workspace_id",
+    "generation",
+    "active_embedding_generation_id",
+    "updated_at",
+  ],
   workspaces: ["id", "slug", "name", "created_at", "updated_at"],
 } as const;
 
@@ -744,8 +835,15 @@ async function exerciseRepository(harness: Harness) {
     asset_manifests: 0,
     assets: 0,
     categories: 2,
+    chunk_embeddings: 0,
+    embedding_generations: 0,
+    embedding_jobs: 0,
+    evaluation_runs: 0,
+    evidence_chunks: 0,
+    saved_question_sets: 0,
     search_misses: 0,
     themes: 1,
+    workspace_index_states: 0,
     workspaces: 1,
   });
 
@@ -761,8 +859,15 @@ async function exerciseRepository(harness: Harness) {
       asset_manifests: 0,
       assets: 0,
       categories: 2,
+      chunk_embeddings: 0,
+      embedding_generations: 0,
+      embedding_jobs: 0,
+      evaluation_runs: 0,
+      evidence_chunks: 0,
+      saved_question_sets: 0,
       search_misses: 0,
       themes: 1,
+      workspace_index_states: 0,
       workspaces: 1,
     });
   }
@@ -2253,6 +2358,10 @@ test("SQLite upgrades populated v0.1 data to ordered article asset storage", () 
       client.exec(readFileSync(path.join(migrationDirectory, "0002_tan_ezekiel.sql"), "utf8"));
     })();
 
+    client.transaction(() => {
+      client.exec(readFileSync(path.join(migrationDirectory, "0003_melted_bloodscream.sql"), "utf8"));
+    })();
+
     assert.equal(
       (client
         .prepare("select position from articles where id = ?")
@@ -2263,6 +2372,11 @@ test("SQLite upgrades populated v0.1 data to ordered article asset storage", () 
       (client.prepare("select count(*) as count from article_feedback").get() as { count: number })
         .count,
       1,
+    );
+    assert.equal(
+      (client.prepare("select count(*) as count from evidence_chunks").get() as { count: number })
+        .count,
+      0,
     );
     assert.equal(
       (client.prepare("select count(*) as count from article_views").get() as { count: number })
@@ -2319,6 +2433,7 @@ test("Postgres upgrades populated v0.1 data to ordered article asset storage", {
     );
 
     await applyPostgresMigration(pool, "0002_charming_dragon_lord.sql");
+    await applyPostgresMigration(pool, "0003_harsh_goliath.sql");
 
     assert.equal(
       (
@@ -2339,6 +2454,10 @@ test("Postgres upgrades populated v0.1 data to ordered article asset storage", {
     );
     assert.equal(
       Number((await pool.query("select count(*) from asset_manifests")).rows[0].count),
+      0,
+    );
+    assert.equal(
+      Number((await pool.query("select count(*) from evidence_chunks")).rows[0].count),
       0,
     );
   } finally {

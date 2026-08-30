@@ -19,6 +19,7 @@ import type {
   Repository,
 } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
+import { createPostgresEvidenceRepository } from "@/db/postgres/evidence-repository";
 import {
   articleFeedback,
   articleAssets,
@@ -358,6 +359,7 @@ function knowledgeImportStatements(
 
 export function createPostgresRepository(database: PostgresDatabase): Repository {
   return {
+    ...createPostgresEvidenceRepository(database),
     async checkHealth() {
       await database.execute(sql`select 1`);
     },

@@ -19,6 +19,7 @@ import type {
   Repository,
 } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
+import { createSqliteEvidenceRepository } from "@/db/sqlite/evidence-repository";
 import {
   articleFeedback,
   articleAssets,
@@ -365,6 +366,7 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
   const executableDatabase = database as DrizzleD1Database<typeof schema>;
 
   return {
+    ...createSqliteEvidenceRepository(database),
     async checkHealth() {
       await executableDatabase.run(sql`select 1`);
     },
