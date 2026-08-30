@@ -23,6 +23,7 @@ import {
   registerArtifactCleanup,
   runCloudflareProcess,
 } from "./cloudflare-process";
+import { pnpmStoreDirectory } from "./pnpm-store";
 
 const excludedProjectEntries = new Set([
   ".git",
@@ -225,6 +226,12 @@ export function cloudflareBuildEnvironment(
   for (const key of cloudflareCredentialNames) {
     delete sanitized[key];
   }
+
+  sanitized.NPM_CONFIG_OFFLINE = "true";
+  sanitized.NPM_CONFIG_STORE_DIR = pnpmStoreDirectory(
+    workspace,
+    "Cloudflare",
+  );
 
   return sanitized;
 }

@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -37,6 +38,7 @@ import {
   validateCloudflareSecretSource,
 } from "../scripts/cloudflare-artifact";
 import { runCloudflareProcess } from "../scripts/cloudflare-process";
+import { pnpmStoreDirectory } from "../scripts/pnpm-store";
 
 function fixture() {
   const workspace = mkdtempSync(join(tmpdir(), "opas-cloudflare-test-"));
@@ -47,6 +49,10 @@ function fixture() {
   writeFileSync(join(workspace, ".env.example"), "ADMIN_PASSWORD=example\n");
   mkdirSync(join(workspace, ".pnpm-store"));
   writeFileSync(join(workspace, ".pnpm-store", "cache"), "generated\n");
+  writeFileSync(
+    join(workspace, "node_modules", ".modules.yaml"),
+    `storeDir: ${join(workspace, ".pnpm-store")}\n`,
+  );
   writeFileSync(join(workspace, "tsconfig.tsbuildinfo"), "generated\n");
   return workspace;
 }
@@ -471,11 +477,54 @@ test("removes Cloudflare credentials from the build environment", () => {
       CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
       CLOUDFLARE_API_TOKEN: "cloudflare-token",
       PATH: "/bin",
+      PNPM_HOME: "/tmp/another-pnpm-home",
     });
 
     assert.equal(environment.CLOUDFLARE_ACCOUNT_ID, undefined);
     assert.equal(environment.CLOUDFLARE_API_TOKEN, undefined);
     assert.equal(environment.PATH, "/bin");
+    assert.equal(environment.PNPM_HOME, undefined);
+    assert.equal(environment.NPM_CONFIG_OFFLINE, "true");
+    assert.equal(
+      environment.NPM_CONFIG_STORE_DIR,
+      realpathSync(join(workspace, ".pnpm-store")),
+    );
+  } finally {
+    rmSync(workspace, { force: true, recursive: true });
+  }
+});
+
+test("rejects untrusted pnpm store metadata", () => {
+  const workspace = fixture();
+  const metadata = join(workspace, "node_modules", ".modules.yaml");
+  const storeFile = join(workspace, "store-file");
+
+  try {
+    writeFileSync(metadata, "storeDir: relative/store\n");
+    assert.throws(
+      () => pnpmStoreDirectory(workspace, "Cloudflare"),
+      /absolute path/u,
+    );
+
+    writeFileSync(metadata, `storeDir: ${join(workspace, "missing-store")}\n`);
+    assert.throws(
+      () => pnpmStoreDirectory(workspace, "Cloudflare"),
+      /contain a directory/u,
+    );
+
+    writeFileSync(storeFile, "not a directory\n");
+    writeFileSync(metadata, `storeDir: ${storeFile}\n`);
+    assert.throws(
+      () => pnpmStoreDirectory(workspace, "Cloudflare"),
+      /contain a directory/u,
+    );
+
+    rmSync(metadata);
+    mkdirSync(metadata);
+    assert.throws(
+      () => pnpmStoreDirectory(workspace, "Cloudflare"),
+      /Run pnpm install/u,
+    );
   } finally {
     rmSync(workspace, { force: true, recursive: true });
   }

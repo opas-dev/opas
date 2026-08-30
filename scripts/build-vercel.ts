@@ -39,6 +39,7 @@ import {
   runCloudflareProcess as runVercelProcess,
 } from "./cloudflare-process";
 import { requireNeonConnectionStrings } from "./neon-connections";
+import { pnpmStoreDirectory } from "./pnpm-store";
 
 const vercelTeamDomain = "timo-bejans-projects.vercel.app";
 const maintainedVercelOrigin = `https://opas-mvp-${vercelTeamDomain}`;
@@ -476,29 +477,6 @@ function removePrivateDirectory(directory: string) {
     recursive: true,
     retryDelay: 100,
   });
-}
-
-function pnpmStoreDirectory(workspace: string) {
-  const metadataPath = join(workspace, "node_modules", ".modules.yaml");
-  const status = lstatSync(metadataPath);
-  if (status.isSymbolicLink() || !status.isFile()) {
-    throw new Error("Run pnpm install before building the Vercel artifact.");
-  }
-  const match = /^storeDir:\s*([^'"\r\n][^\r\n]*)$/mu.exec(
-    readFileSync(metadataPath, "utf8"),
-  );
-  if (!match) {
-    throw new Error("The pnpm store metadata is unavailable.");
-  }
-  const requested = match[1]!.trim();
-  if (!isAbsolute(requested)) {
-    throw new Error("The pnpm store metadata must contain an absolute path.");
-  }
-  const resolved = realpathSync(requested);
-  if (!statSync(resolved).isDirectory()) {
-    throw new Error("The pnpm store path must contain a directory.");
-  }
-  return resolved;
 }
 
 export function prepareVercelProject(
@@ -1520,7 +1498,7 @@ export async function buildVercelArtifact(
       acceptanceProject: options.acceptance ? target.projectName : undefined,
     },
   );
-  const storeDirectory = pnpmStoreDirectory(target.workspace);
+  const storeDirectory = pnpmStoreDirectory(target.workspace, "Vercel");
   const prepared = prepareVercelProject(target.workspace, targetOptions);
 
   try {
