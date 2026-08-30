@@ -15,7 +15,7 @@
 - **v0.2:** 1 / 26 complete
 
 ## Blockers
-None.
+- B2 (design-partner inputs) — item 9.2 requires two or three partners' actual source inventories, refresh requirements, and question sets, but no partner material is present in the repository or configured environment. This blocks checking 9.2 and the partner-derived portions of 10.5, 11.6, and final pilot release gates; it does not block building or verifying the generic contracts against versioned representative fixtures. Recheck at every phase boundary without asking Timo to do plumbing.
 
 Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. B2 (Neon) — `NEON_DATABASE_URL` in `.env`, connection verified (Postgres 18.6, eu-central-1), 2026-08-27. B3 (rollout authority) — Timo authorized the complete rollout on 2026-08-28 and clarified that Cloudflare, not Vercel, is production.
 
@@ -46,6 +46,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-28 | OPAS Answers v0.2 centers on imported published knowledge, cited answers, explicit abstention, contextual handoff, and a content-gap loop | Competitor research shows this complete loop is the smallest product that creates customer value and can be operated safely; a chat bubble alone is not enough |
 | 2026-08-28 | Start with one portable Orama hybrid retrieval contract; benchmark Cloudflare AI Search but do not require it | OPAS must preserve Docker/Postgres and Vercel/Neon portability, while AI Search remains an open-beta Cloudflare service with future pricing unannounced |
 | 2026-08-30 | Include bounded Markdown-native WYSIWYG authoring in v0.2 | Interested non-technical content owners need to maintain imported knowledge visually, while canonical Markdown, lossless source mode, and the existing server safety boundary preserve portability and control scope |
+| 2026-08-30 | Build generic v0.2 contracts against committed representative fixtures until actual design-partner material is available | Synthetic fixtures can prove safety, portability, and deterministic behavior, but they must never be counted as the partner evidence required by item 9.2 or the final quality gates |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -170,6 +171,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-08-30 — v0.2 implementation kickoff — activated the autonomous v0.2 goal, updated the mission contract, recorded the missing design-partner inputs without blocking generic implementation, and established a green v0.1 baseline — complete `pnpm test` passed before v0.2 code changes; full log `/tmp/opas-v02-baseline.log` — this commit
 - 2026-08-30 — v0.2 scope amendment — moved bounded Markdown-native WYSIWYG authoring into the release with a lossless Visual/Source contract, cross-target acceptance gates, and canonical safe-MDX storage — roadmap wording, status count, definition of done, and explicit non-goals align — this commit
 - 2026-08-28 — 9.1 — researched current documentation platforms and adjacent AI-support products, reconciled pricing and capability evidence, and turned the highest-value gaps into the OPAS Answers v0.2 execution plan — current primary-source links, assumptions, architecture, release gates, limits, packaging, sequencing, and non-goals were audited in `docs/competitive-roadmap.md` — this commit
 - 2026-08-28 — production domain rollout — bound the maintained `opas-mvp` Worker to `demo.opas.dev`, made that Custom Domain authoritative for canonical and discovery URLs, retained workers.dev as a non-canonical fallback, and preserved the protected apex/`www` landing deployment — Cloudflare created the Custom Domain record and certificate; Worker version `dc03e4da-bd42-4c91-98ef-be64808defa6` passed lint, typecheck, the deployment guard suite, OpenNext build, Wrangler dry-run, the complete D1-backed smoke suite on `demo.opas.dev`, and the workers.dev health check — this commit

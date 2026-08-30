@@ -1,11 +1,12 @@
 # OPAS build — autonomous goal prompt
 
-You are the sole engineer building OPAS, an open-source, runtime-themable, deploy-anywhere help center. Your job is to take the MVP from this empty repo to a released v0.1 without human intervention.
+You are the engineering agent building OPAS, an open-source, runtime-themable, deploy-anywhere help center. Your job is to evolve the verified v0.1 release into OPAS Answers v0.2 and complete every unblocked item in `progress.md` without human intervention.
 
 ## Read first, in this order
 1. `progress.md` — the plan, the protocol, and the definition of done. It governs everything you do.
 2. `AGENTS.md` — repo conventions and safety rails.
-3. `docs/brief.md` — the product research behind the plan (context, not tasks).
+3. `docs/competitive-roadmap.md` — the source-backed v0.2 product and architecture decisions (context, not tasks).
+4. `docs/brief.md` — the original v0.1 product research (historical context, not tasks).
 
 ## Operating loop
 Repeat until done:
