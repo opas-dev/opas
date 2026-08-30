@@ -139,6 +139,29 @@ function validConfig() {
   };
 }
 
+function webhookConfig() {
+  const config = validConfig();
+  const { send_email: _sendEmail, ...target } = config;
+  const {
+    OPAS_HANDOFF_FROM_EMAIL: _fromEmail,
+    ...handoffVars
+  } = config.vars;
+  void _sendEmail;
+  void _fromEmail;
+  const vars = {
+    ...handoffVars,
+    OPAS_HANDOFF_PROVIDER: "webhook",
+  };
+
+  return {
+    ...target,
+    secrets: {
+      required: requiredCloudflareSecretNames(vars),
+    },
+    vars,
+  };
+}
+
 test("rejects symlinked configs before a bootstrap or remote data command", () => {
   const workspace = mkdtempSync(join(tmpdir(), "opas-config-test-"));
   const target = join(workspace, "target.jsonc");
@@ -370,6 +393,46 @@ test("requires one fixed support email binding and a secret-only destination", (
   }
 });
 
+test("accepts only an encrypted authenticated webhook without email bindings", () => {
+  const config = webhookConfig();
+  assert.deepEqual(validateCloudflareConfig(config).secretNames, [
+    "ADMIN_EMAIL",
+    "ADMIN_PASSWORD",
+    "ADMIN_SESSION_SECRET",
+    "OPAS_HANDOFF_WEBHOOK_URL",
+    "OPAS_HANDOFF_WEBHOOK_TOKEN",
+  ]);
+
+  const cases = [
+    Object.assign(webhookConfig(), { send_email: validConfig().send_email }),
+    Object.assign(webhookConfig(), {
+      vars: {
+        ...webhookConfig().vars,
+        OPAS_HANDOFF_FROM_EMAIL: "hello@opas.dev",
+      },
+    }),
+    Object.assign(webhookConfig(), {
+      vars: {
+        ...webhookConfig().vars,
+        OPAS_HANDOFF_WEBHOOK_URL: "https://hooks.example.com/opas",
+      },
+    }),
+    Object.assign(webhookConfig(), {
+      vars: {
+        ...webhookConfig().vars,
+        OPAS_HANDOFF_WEBHOOK_TOKEN: "must-remain-encrypted",
+      },
+    }),
+    Object.assign(webhookConfig(), {
+      secrets: { required: requiredCloudflareSecretNames() },
+    }),
+  ];
+
+  for (const candidate of cases) {
+    assert.throws(() => validateCloudflareConfig(candidate));
+  }
+});
+
 test("requires the exact secret names for base and fallback deployments", () => {
   const base = validConfig();
   assert.deepEqual(
@@ -409,6 +472,39 @@ test("validates the support destination with the encrypted deployment secrets", 
         ...environment,
         OPAS_HANDOFF_TO_EMAIL: destination,
       }),
+    );
+  }
+
+  assert.throws(() =>
+    validateCloudflareSecrets({
+      ...environment,
+      OPAS_HANDOFF_WEBHOOK_TOKEN: "w".repeat(32),
+      OPAS_HANDOFF_WEBHOOK_URL: "https://hooks.example.com/opas",
+    }),
+  );
+});
+
+test("validates authenticated webhook values as encrypted deployment secrets", () => {
+  const config = webhookConfig();
+  const environment = {
+    ADMIN_EMAIL: "admin@opas.dev",
+    ADMIN_PASSWORD: "password",
+    ADMIN_SESSION_SECRET: "s".repeat(32),
+    OPAS_HANDOFF_WEBHOOK_TOKEN: "w".repeat(32),
+    OPAS_HANDOFF_WEBHOOK_URL: "https://hooks.example.com/opas",
+  };
+  assert.deepEqual(validateCloudflareSecrets(environment, config.vars), environment);
+
+  for (const values of [
+    { OPAS_HANDOFF_WEBHOOK_URL: "http://hooks.example.com/opas" },
+    { OPAS_HANDOFF_WEBHOOK_URL: "https://localhost/opas" },
+    { OPAS_HANDOFF_WEBHOOK_URL: "https://hooks.example.com/opas?secret=value" },
+    { OPAS_HANDOFF_WEBHOOK_TOKEN: "" },
+    { OPAS_HANDOFF_WEBHOOK_TOKEN: "too-short" },
+    { OPAS_HANDOFF_TO_EMAIL: "support@example.com" },
+  ]) {
+    assert.throws(() =>
+      validateCloudflareSecrets({ ...environment, ...values }, config.vars),
     );
   }
 });

@@ -19,6 +19,7 @@ import { createGenerationAdapter } from "../src/ai/generation-config";
 import { maximumAnswerOutputTokens } from "../src/answers/answer";
 import { createAnswerAdmissionPolicy } from "../src/answers/admission";
 import { createAnswerGuardrails } from "../src/answers/guardrails";
+import { createCloudflareWebhookDelivery } from "../src/handoff/delivery";
 import { normalizeHandoffEmailAddress } from "../src/handoff/payload";
 import { configuredHandoffRetentionDays } from "../src/handoff/retention";
 import { createHandoffWriteAdmission } from "../src/outcomes/admission";
@@ -134,18 +135,30 @@ function requireOpasResource(value: unknown, field: string) {
   return name;
 }
 
-const baseCloudflareSecretNames = [
+const cloudflareAdminSecretNames = [
   "ADMIN_EMAIL",
   "ADMIN_PASSWORD",
   "ADMIN_SESSION_SECRET",
-  "OPAS_HANDOFF_TO_EMAIL",
 ] as const;
+const cloudflareEmailSecretNames = ["OPAS_HANDOFF_TO_EMAIL"] as const;
+const cloudflareWebhookSecretNames = [
+  "OPAS_HANDOFF_WEBHOOK_URL",
+  "OPAS_HANDOFF_WEBHOOK_TOKEN",
+] as const;
+
+function cloudflareHandoffSecretNames(vars: Readonly<Record<string, unknown>>) {
+  const provider = vars.OPAS_HANDOFF_PROVIDER ?? "cloudflare-email";
+  if (provider === "cloudflare-email") return cloudflareEmailSecretNames;
+  if (provider === "webhook") return cloudflareWebhookSecretNames;
+  throw new Error("vars.OPAS_HANDOFF_PROVIDER must select a supported provider.");
+}
 
 export function requiredCloudflareSecretNames(
   vars: Readonly<Record<string, unknown>> = {},
 ) {
   return [
-    ...baseCloudflareSecretNames,
+    ...cloudflareAdminSecretNames,
+    ...cloudflareHandoffSecretNames(vars),
     ...(vars.OPAS_GENERATION_FALLBACK_ENABLED === "true"
       ? [
           "OPAS_GENERATION_FALLBACK_API_KEY",
@@ -376,31 +389,41 @@ function validateAnswerConfiguration(vars: JsonObject) {
 }
 
 function validateHandoffConfiguration(config: JsonObject, vars: JsonObject) {
-  const bindings = config.send_email;
-  const binding = Array.isArray(bindings) && bindings.length === 1
-    ? bindings[0]
-    : undefined;
-  if (
-    !isObject(binding) ||
-    binding.name !== "SUPPORT_EMAIL" ||
-    !Array.isArray(binding.allowed_sender_addresses) ||
-    binding.allowed_sender_addresses.length !== 1 ||
-    binding.allowed_sender_addresses[0] !== "hello@opas.dev" ||
-    Object.keys(binding).sort().join(",") !==
-      "allowed_sender_addresses,name"
-  ) {
-    throw new Error(
-      "send_email must expose one SUPPORT_EMAIL binding limited to hello@opas.dev.",
-    );
-  }
-  if (
-    vars.OPAS_HANDOFF_PROVIDER !== "cloudflare-email" ||
-    vars.OPAS_HANDOFF_FROM_EMAIL !== "hello@opas.dev" ||
-    "OPAS_HANDOFF_TO_EMAIL" in vars
-  ) {
-    throw new Error(
-      "Cloudflare handoff delivery must use the fixed binding and a secret destination.",
-    );
+  const provider = vars.OPAS_HANDOFF_PROVIDER;
+  if (provider === "cloudflare-email") {
+    const bindings = config.send_email;
+    const binding = Array.isArray(bindings) && bindings.length === 1
+      ? bindings[0]
+      : undefined;
+    if (
+      !isObject(binding) ||
+      binding.name !== "SUPPORT_EMAIL" ||
+      !Array.isArray(binding.allowed_sender_addresses) ||
+      binding.allowed_sender_addresses.length !== 1 ||
+      binding.allowed_sender_addresses[0] !== "hello@opas.dev" ||
+      Object.keys(binding).sort().join(",") !==
+        "allowed_sender_addresses,name"
+    ) {
+      throw new Error(
+        "send_email must expose one SUPPORT_EMAIL binding limited to hello@opas.dev.",
+      );
+    }
+    if (
+      vars.OPAS_HANDOFF_FROM_EMAIL !== "hello@opas.dev" ||
+      "OPAS_HANDOFF_TO_EMAIL" in vars
+    ) {
+      throw new Error(
+        "Cloudflare email handoff must use the fixed binding and a secret destination.",
+      );
+    }
+  } else if (provider === "webhook") {
+    if ("send_email" in config || "OPAS_HANDOFF_FROM_EMAIL" in vars) {
+      throw new Error(
+        "Cloudflare webhook handoff cannot include email delivery configuration.",
+      );
+    }
+  } else {
+    throw new Error("vars.OPAS_HANDOFF_PROVIDER must select a supported provider.");
   }
   createHandoffWriteAdmission({
     environment: {
@@ -684,9 +707,6 @@ export function validateCloudflareSecrets(
   const email = (environment.ADMIN_EMAIL ?? "").trim().toLowerCase();
   const password = environment.ADMIN_PASSWORD ?? "";
   const sessionSecret = environment.ADMIN_SESSION_SECRET ?? "";
-  const handoffDestination = normalizeHandoffEmailAddress(
-    environment.OPAS_HANDOFF_TO_EMAIL,
-  );
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error("ADMIN_EMAIL must contain a valid email address.");
@@ -700,10 +720,49 @@ export function validateCloudflareSecrets(
     throw new Error("ADMIN_SESSION_SECRET must contain at least 32 bytes.");
   }
 
-  if (!handoffDestination) {
-    throw new Error(
-      "OPAS_HANDOFF_TO_EMAIL must contain a verified destination email address.",
+  const provider = vars.OPAS_HANDOFF_PROVIDER ?? "cloudflare-email";
+  let handoffSecrets: Readonly<Record<string, string>>;
+  if (provider === "cloudflare-email") {
+    const handoffDestination = normalizeHandoffEmailAddress(
+      environment.OPAS_HANDOFF_TO_EMAIL,
     );
+    if (!handoffDestination) {
+      throw new Error(
+        "OPAS_HANDOFF_TO_EMAIL must contain a verified destination email address.",
+      );
+    }
+    if (
+      environment.OPAS_HANDOFF_WEBHOOK_URL ||
+      environment.OPAS_HANDOFF_WEBHOOK_TOKEN
+    ) {
+      throw new Error("Cloudflare email deployment cannot include webhook secrets.");
+    }
+    handoffSecrets = { OPAS_HANDOFF_TO_EMAIL: handoffDestination };
+  } else if (provider === "webhook") {
+    const endpoint = environment.OPAS_HANDOFF_WEBHOOK_URL ?? "";
+    const token = environment.OPAS_HANDOFF_WEBHOOK_TOKEN ?? "";
+    const tokenBytes = new TextEncoder().encode(token).byteLength;
+    if (environment.OPAS_HANDOFF_TO_EMAIL) {
+      throw new Error("Cloudflare webhook deployment cannot include email secrets.");
+    }
+    try {
+      if (tokenBytes < 32 || tokenBytes > 4_096) {
+        throw new Error("invalid token length");
+      }
+      createCloudflareWebhookDelivery({
+        endpoint,
+        fetch: async () => new Response(null, { status: 204 }),
+        token,
+      });
+    } catch {
+      throw new Error("Cloudflare webhook secrets are invalid.");
+    }
+    handoffSecrets = {
+      OPAS_HANDOFF_WEBHOOK_URL: endpoint,
+      OPAS_HANDOFF_WEBHOOK_TOKEN: token,
+    };
+  } else {
+    throw new Error("vars.OPAS_HANDOFF_PROVIDER must select a supported provider.");
   }
 
   const fallbackEnabled = vars.OPAS_GENERATION_FALLBACK_ENABLED === "true";
@@ -741,7 +800,7 @@ export function validateCloudflareSecrets(
     ADMIN_EMAIL: email,
     ADMIN_PASSWORD: password,
     ADMIN_SESSION_SECRET: sessionSecret,
-    OPAS_HANDOFF_TO_EMAIL: handoffDestination,
+    ...handoffSecrets,
     ...(fallbackEnabled
       ? {
           OPAS_GENERATION_FALLBACK_API_KEY: fallbackApiKey,

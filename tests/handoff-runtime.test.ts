@@ -170,7 +170,7 @@ test("uses Workers fetch for a D1 webhook without loading Node DNS", async () =>
 
   assert.equal(calls.length, 1);
   assert.equal(String(calls[0]?.input), "https://hooks.example.com/opas/support");
-  assert.equal(calls[0]?.init?.redirect, "error");
+  assert.equal(calls[0]?.init?.redirect, "manual");
 });
 
 test("uses the portable Cloudflare REST email API for Docker or Vercel", async () => {

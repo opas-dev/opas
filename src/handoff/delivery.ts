@@ -371,7 +371,7 @@ async function postJson(
       credentials: "omit",
       headers,
       method: "POST",
-      redirect: "error",
+      redirect: "manual",
       signal,
     });
   } catch {

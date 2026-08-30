@@ -262,7 +262,7 @@ test("portable Cloudflare REST email uses the documented schema without exposing
   const headers = new Headers(calls[0]?.init?.headers);
   assert.equal(headers.get("authorization"), "Bearer private-email-token");
   assert.equal(headers.get("content-type"), "application/json; charset=utf-8");
-  assert.equal(calls[0]?.init?.redirect, "error");
+  assert.equal(calls[0]?.init?.redirect, "manual");
   assert.equal(calls[0]?.init?.credentials, "omit");
   assert.equal(calls[0]?.init?.cache, "no-store");
   const body = JSON.parse(String(calls[0]?.init?.body));
@@ -291,7 +291,7 @@ test("webhook sends a fixed envelope and never accepts a user-selected target", 
   const headers = new Headers(calls[0]?.init?.headers);
   assert.equal(headers.get("authorization"), "Bearer private-webhook-token");
   assert.equal(headers.get("idempotency-key"), idempotencyKey);
-  assert.equal(calls[0]?.init?.redirect, "error");
+  assert.equal(calls[0]?.init?.redirect, "manual");
   assert.equal(calls[0]?.init?.credentials, "omit");
   const body = JSON.parse(String(calls[0]?.init?.body));
   assert.equal(body.type, "opas.support-handoff");
