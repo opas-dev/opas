@@ -368,6 +368,37 @@ test("buffers split compact output from Workers AI without weakening validation"
   );
 });
 
+test("uses a unique verbatim supporting source when the provider selects the wrong letter", async () => {
+  const second = evidence({
+    articleContentHash: hashC,
+    articleId: "article-managed-services",
+    canonicalUrl: "https://help.example.test/services/managed",
+    chunkId: "chunk-managed-services",
+    contentHash: hashC,
+    evidenceText:
+      "The managed option includes demand generation and lead generation.",
+    score: 0.8,
+    sourceId: "chunk-managed-services",
+    title: "Managed services",
+  });
+  const service = answerService([evidence(), second], () =>
+    providerEvents(["ANSWER A\nDemand generation and lead generation."]),
+  );
+
+  const events = await collect(
+    service.stream({
+      question: "Which managed services are included?",
+      workspaceId: "workspace-demo",
+    }),
+  );
+
+  assert.equal(events[1]?.type, "citation");
+  if (events[1]?.type === "citation") {
+    assert.equal(events[1].citation.id, "C2");
+    assert.equal(events[1].citation.sourceId, "chunk-managed-services");
+  }
+});
+
 test("abstains before generation when retrieved evidence is weak", async () => {
   const fixture = admissionFixture();
   let providerCalls = 0;

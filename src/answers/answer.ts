@@ -652,6 +652,26 @@ function safeMarkdown(value: unknown) {
   return markdown;
 }
 
+function comparableText(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function supportingEntry(
+  markdown: string,
+  requested: CitationEntry,
+  entries: readonly CitationEntry[],
+) {
+  const answerText = comparableText(markdown);
+  const verbatimMatches = entries.filter(({ result }) =>
+    comparableText(result.evidenceText).includes(answerText),
+  );
+  return verbatimMatches.length === 1 ? verbatimMatches[0]! : requested;
+}
+
 function parsedAnswerOutput(
   value: string,
   entries: readonly CitationEntry[],
@@ -670,8 +690,8 @@ function parsedAnswerOutput(
   const sourceIndex = answerSourceLetters.indexOf(
     match[1] as (typeof answerSourceLetters)[number],
   );
-  const entry = entries[sourceIndex];
-  if (!entry) {
+  const requested = entries[sourceIndex];
+  if (!requested) {
     throw new AnswerError(
       "invalid-output",
       "Generated answer cited an unknown source",
@@ -683,15 +703,13 @@ function parsedAnswerOutput(
   if (match[2].trim() === "ABSTAIN insufficient-evidence") {
     return Object.freeze([abstention("insufficient-evidence")]);
   }
-  if (
-    /^(?:ANSWER [A-E]|ABSTAIN (?:conflicting-evidence|insufficient-evidence))$/mu.test(
-      match[2],
-    )
-  ) {
+  if (/^(?:ANSWER|ABSTAIN)(?:[ \t]|$)/mu.test(match[2])) {
     throw new AnswerError("invalid-output", "Generated answer record is malformed");
   }
+  const markdown = safeMarkdown(match[2]);
+  const entry = supportingEntry(markdown, requested, entries);
   return Object.freeze([
-    Object.freeze({ markdown: safeMarkdown(match[2]), type: "content" as const }),
+    Object.freeze({ markdown, type: "content" as const }),
     Object.freeze({ citation: entry.citation, type: "citation" as const }),
   ]);
 }
