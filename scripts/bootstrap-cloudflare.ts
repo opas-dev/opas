@@ -54,6 +54,7 @@ const allowedCloudflareConfigKeys = new Set([
   "main",
   "name",
   "observability",
+  "preview_urls",
   "routes",
   "secrets",
   "send_email",
@@ -212,6 +213,7 @@ function validateRouting(config: JsonObject, accountId: string, workerName: stri
     accountId === maintainedAccountId &&
     workerName === maintainedWorkerName &&
     config.workers_dev === true &&
+    config.preview_urls === false &&
     isObject(route) &&
     route.pattern === maintainedCustomDomain &&
     route.custom_domain === true &&
@@ -221,7 +223,7 @@ function validateRouting(config: JsonObject, accountId: string, workerName: stri
 
   if (!isMaintainedRoute) {
     throw new Error(
-      `Custom routing is limited to ${maintainedCustomDomain} on the maintained ${maintainedWorkerName} Worker, with workers.dev enabled.`,
+      `Custom routing is limited to ${maintainedCustomDomain} on the maintained ${maintainedWorkerName} Worker, with workers.dev enabled and preview URLs disabled.`,
     );
   }
 

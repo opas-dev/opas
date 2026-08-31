@@ -1583,7 +1583,15 @@ export async function deployVercelArtifact(
   try {
     await runVercelProcess(
       "vercel",
-      ["deploy", "--prebuilt", "--prod", "--skip-domain", "--yes"],
+      [
+        "deploy",
+        "--prebuilt",
+        "--prod",
+        "--regions",
+        "fra1",
+        "--skip-domain",
+        "--yes",
+      ],
       {
         cwd: prepared.directory,
         environment: commandEnvironment(

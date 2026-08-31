@@ -79,6 +79,7 @@ function validConfig() {
       directory: ".open-next/assets",
     },
     workers_dev: true,
+    preview_urls: false,
     routes: [
       {
         pattern: "demo.opas.dev",
@@ -663,6 +664,16 @@ test("limits the maintained custom domain to its exact account and Worker", () =
   );
   assert.throws(() =>
     validateCloudflareConfig(Object.assign(validConfig(), { name: "opas-another-worker" })),
+  );
+  assert.throws(() =>
+    validateCloudflareConfig(Object.assign(validConfig(), { preview_urls: true })),
+    /preview URLs disabled/,
+  );
+  const defaultPreviewUrls = validConfig();
+  delete (defaultPreviewUrls as Partial<typeof defaultPreviewUrls>).preview_urls;
+  assert.throws(
+    () => validateCloudflareConfig(defaultPreviewUrls),
+    /preview URLs disabled/,
   );
 });
 

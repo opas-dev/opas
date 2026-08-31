@@ -1335,6 +1335,8 @@ fs.writeFileSync(
       "deploy",
       "--prebuilt",
       "--prod",
+      "--regions",
+      "fra1",
       "--skip-domain",
       "--yes",
     ]);

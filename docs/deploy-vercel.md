@@ -153,7 +153,7 @@ Create a staged Production deployment without moving the public domain:
 pnpm vercel:deploy https://opas-mvp-timo-bejans-projects.vercel.app
 ```
 
-The deploy wrapper revalidates the project link and all local secret encodings, scans the saved prebuilt output again, copies it into a private temporary deployment project, rewrites internal links, scans the snapshot, and makes the snapshot read-only before invoking Vercel with fixed Production and `--skip-domain` flags. The checkout artifact can change only after the immutable snapshot has been selected, so the uploaded bytes are the bytes that passed the final scan. The command prints the staged deployment URL and does not promote it.
+The deploy wrapper revalidates the project link and all local secret encodings, scans the saved prebuilt output again, copies it into a private temporary deployment project, rewrites internal links, scans the snapshot, and makes the snapshot read-only before invoking Vercel with fixed Production, `fra1`, and `--skip-domain` flags. The explicit deploy region keeps prebuilt functions beside the `eu-central-1` Neon branch even when Vercel would otherwise apply its default function region. The checkout artifact can change only after the immutable snapshot has been selected, so the uploaded bytes are the bytes that passed the final scan. The command prints the staged deployment URL and does not promote it.
 
 Set `DEPLOYMENT_URL` to the HTTPS URL printed by Vercel and check the database-backed public surfaces:
 

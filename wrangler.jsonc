@@ -6,6 +6,7 @@
   "main": "custom-worker.ts",
   "account_id": "f8801c7e8853a113a25f8b52fd9ceec1",
   "workers_dev": true,
+  "preview_urls": false,
   "routes": [
     {
       "pattern": "demo.opas.dev",
