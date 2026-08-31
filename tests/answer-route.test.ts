@@ -15,7 +15,11 @@ import {
   handleAnswerRequest,
   maximumAnswerRequestUtf8Bytes,
 } from "@/answers/answer-route";
-import { createAnswerService, type AnswerRetriever } from "@/answers/answer";
+import {
+  createAnswerService,
+  type AnswerEvent,
+  type AnswerRetriever,
+} from "@/answers/answer";
 import type { AnswerRuntime } from "@/answers/answer-runtime";
 import type { EvidenceRetrievalResult } from "@/search/evidence";
 
@@ -161,11 +165,19 @@ test("starts the analytics clock before admission and runtime construction", asy
     createRecorder(options) {
       order.push("recorder");
       recorderStartedAt = options.startedAt;
+      let firstEventObserved = false;
       return Object.freeze({
         abandon: async () => {},
-        observeEvent: async () => {},
+        observeEvent: async () => {
+          if (firstEventObserved) return;
+          firstEventObserved = true;
+          order.push("observe");
+        },
         observeProvider: () => {},
         observeRetrieval: () => {},
+        start: async () => {
+          order.push("start");
+        },
       });
     },
     createRuntime: async () => {
@@ -179,8 +191,209 @@ test("starts the analytics clock before admission and runtime construction", asy
   });
 
   await response.text();
-  assert.deepEqual(order, ["clock", "allowance", "runtime", "recorder"]);
+  assert.deepEqual(order, [
+    "clock",
+    "allowance",
+    "runtime",
+    "recorder",
+    "start",
+    "observe",
+  ]);
   assert.equal(recorderStartedAt, requestStartedAt);
+});
+
+test("persists and issues metadata before provider work", async () => {
+  const recorderCalls: string[] = [];
+  let nextCalls = 0;
+  let providerPullAllowed = false;
+  const iterator: AsyncIterator<AnswerEvent> = {
+    async next() {
+      nextCalls += 1;
+      assert.equal(providerPullAllowed, true);
+      return { done: true, value: undefined };
+    },
+  };
+  const controlledRuntime: AnswerRuntime = Object.freeze({
+    metadata: generationPublicMetadata(outputGeneration([safeProviderOutput])),
+    service: Object.freeze({
+      stream() {
+        return Object.freeze({
+          [Symbol.asyncIterator]() {
+            return iterator;
+          },
+        });
+      },
+      validate() {},
+    }),
+  });
+
+  const response = await handleAnswerRequest(answerRequest(), {
+    createConversationId: () => conversationId,
+    createRecorder: () =>
+      Object.freeze({
+        async abandon(reason: string) {
+          recorderCalls.push(`abandon:${reason}`);
+        },
+        async observeEvent() {
+          recorderCalls.push("observe");
+        },
+        observeProvider: () => {},
+        observeRetrieval: () => {},
+        async start() {
+          recorderCalls.push("start");
+        },
+      }),
+    createRuntime: async () => controlledRuntime,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(nextCalls, 0);
+  assert.deepEqual(recorderCalls, ["start"]);
+  providerPullAllowed = true;
+  const streamed = await records(response);
+  assert.deepEqual(streamed, [
+    {
+      conversationId,
+      generation: controlledRuntime.metadata,
+      type: "metadata",
+    },
+    { code: "invalid-answer", type: "error" },
+  ]);
+  assert.equal(nextCalls, 1);
+  assert.deepEqual(recorderCalls, ["start", "abandon:stream-failed"]);
+});
+
+test("cancels an issued stream before provider work and records abandonment once", async () => {
+  const recorderCalls: string[] = [];
+  let answerSignal: AbortSignal | undefined;
+  let nextCalls = 0;
+  let returnCalls = 0;
+  const iterator: AsyncIterator<AnswerEvent> = {
+    async next() {
+      nextCalls += 1;
+      return { done: true, value: undefined };
+    },
+    async return() {
+      returnCalls += 1;
+      return { done: true, value: undefined };
+    },
+  };
+  const controlledRuntime: AnswerRuntime = Object.freeze({
+    metadata: generationPublicMetadata(outputGeneration([safeProviderOutput])),
+    service: Object.freeze({
+      stream(request: Parameters<AnswerRuntime["service"]["stream"]>[0]) {
+        answerSignal = request.signal;
+        return Object.freeze({
+          [Symbol.asyncIterator]() {
+            return iterator;
+          },
+        });
+      },
+      validate() {},
+    }),
+  });
+  const response = await handleAnswerRequest(answerRequest(), {
+    createConversationId: () => conversationId,
+    createRecorder: () =>
+      Object.freeze({
+        async abandon(reason: string) {
+          recorderCalls.push(`abandon:${reason}`);
+        },
+        async observeEvent() {
+          recorderCalls.push("observe");
+        },
+        observeProvider: () => {},
+        observeRetrieval: () => {},
+        async start() {
+          recorderCalls.push("start");
+        },
+      }),
+    createRuntime: async () => controlledRuntime,
+  });
+
+  await response.body!.cancel();
+
+  assert.equal(response.status, 200);
+  assert.equal(answerSignal?.aborted, true);
+  assert.equal(nextCalls, 0);
+  assert.equal(returnCalls, 1);
+  assert.deepEqual(recorderCalls, ["start", "abandon:cancelled"]);
+});
+
+test("returns a pre-stream cancellation when setup is aborted", async (context) => {
+  await context.test("runtime construction", async () => {
+    const controller = new AbortController();
+    let releaseRuntime: () => void = () => {};
+    let markRuntimeStarted: () => void = () => {};
+    const runtimeStarted = new Promise<void>((resolve) => {
+      markRuntimeStarted = resolve;
+    });
+    const runtimeRelease = new Promise<void>((resolve) => {
+      releaseRuntime = resolve;
+    });
+    const pending = handleAnswerRequest(
+      answerRequest(undefined, undefined, controller.signal),
+      {
+        createRuntime: async () => {
+          markRuntimeStarted();
+          await runtimeRelease;
+          return runtime(outputGeneration([safeProviderOutput]));
+        },
+      },
+    );
+
+    await runtimeStarted;
+    controller.abort();
+    releaseRuntime();
+    const response = await pending;
+
+    assert.equal(response.status, 499);
+    assert.deepEqual(await response.json(), { error: "cancelled" });
+  });
+
+  await context.test("provisional persistence", async () => {
+    const controller = new AbortController();
+    const recorderCalls: string[] = [];
+    let releaseStart: () => void = () => {};
+    let markStartCalled: () => void = () => {};
+    const startCalled = new Promise<void>((resolve) => {
+      markStartCalled = resolve;
+    });
+    const startRelease = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const pending = handleAnswerRequest(
+      answerRequest(undefined, undefined, controller.signal),
+      {
+        createRecorder: () =>
+          Object.freeze({
+            async abandon(reason: string) {
+              recorderCalls.push(`abandon:${reason}`);
+            },
+            async observeEvent() {
+              recorderCalls.push("observe");
+            },
+            observeProvider: () => {},
+            observeRetrieval: () => {},
+            async start() {
+              recorderCalls.push("start");
+              markStartCalled();
+              await startRelease;
+            },
+          }),
+        createRuntime: async () => runtime(outputGeneration([safeProviderOutput])),
+      },
+    );
+
+    await startCalled;
+    controller.abort();
+    releaseStart();
+    const response = await pending;
+
+    assert.equal(response.status, 499);
+    assert.deepEqual(await response.json(), { error: "cancelled" });
+    assert.deepEqual(recorderCalls, ["start", "abandon:cancelled"]);
+  });
 });
 
 test("Cloudflare and OpenAI-compatible fixtures expose the same NDJSON answer contract", async (context) => {
@@ -254,6 +467,7 @@ test("Cloudflare and OpenAI-compatible fixtures expose the same NDJSON answer co
         "application/x-ndjson; charset=utf-8",
       );
       assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(response.headers.get("set-cookie"), null);
       assert.equal(response.headers.get("x-content-type-options"), "nosniff");
       assert.equal(response.headers.get("x-accel-buffering"), "no");
       assert.deepEqual(streamed.slice(1), [
@@ -343,7 +557,7 @@ test("rejects oversized bodies before JSON parsing and oversized semantic input 
   assert.equal(retrievalCalls, 0);
 });
 
-test("fails closed before streaming for malformed, unknown-citation, and XSS provider output", async (context) => {
+test("issues metadata before reducing malformed, unknown-citation, and XSS provider output", async (context) => {
   for (const output of [
     "not-json\n",
     '{"type":"content","markdown":"Use settings."}\n' +
@@ -355,11 +569,17 @@ test("fails closed before streaming for malformed, unknown-citation, and XSS pro
       const response = await handleAnswerRequest(answerRequest(), {
         createRuntime: async () => runtime(outputGeneration([output])),
       });
-      const body = await response.text();
+      const streamed = await records(response);
 
-      assert.equal(response.status, 502);
-      assert.deepEqual(JSON.parse(body), { error: "invalid-answer" });
-      assert.doesNotMatch(body, /onerror|unknown|not-json|private/u);
+      assert.equal(response.status, 200);
+      assert.equal(streamed[0]?.type, "metadata");
+      assert.deepEqual(streamed.slice(1), [
+        { code: "invalid-answer", type: "error" },
+      ]);
+      assert.doesNotMatch(
+        JSON.stringify(streamed),
+        /onerror|unknown|not-json|private/u,
+      );
     });
   }
 });
@@ -423,6 +643,7 @@ test("propagates request cancellation and emits no private provider failure", as
           observeEvent: async () => {},
           observeProvider: () => {},
           observeRetrieval: () => {},
+          start: async () => {},
         }),
       createRuntime: async () => runtime(generation),
     },
@@ -478,13 +699,17 @@ test("contains runtime configuration and provider outages without logging reques
           observeEvent: async () => {},
           observeProvider: () => {},
           observeRetrieval: () => {},
+          start: async () => {},
         }),
       createRuntime: async () => runtime(generation),
     });
-    const body = await response.text();
-    assert.equal(response.status, 503);
-    assert.equal(recordedReason, "request-failed");
-    assert.deepEqual(JSON.parse(body), { error: "unavailable" });
-    assert.doesNotMatch(body, new RegExp(privateValue, "u"));
+    const streamed = await records(response);
+    assert.equal(response.status, 200);
+    assert.equal(recordedReason, "stream-failed");
+    assert.equal(streamed[0]?.type, "metadata");
+    assert.deepEqual(streamed.slice(1), [
+      { code: "unavailable", type: "error" },
+    ]);
+    assert.doesNotMatch(JSON.stringify(streamed), new RegExp(privateValue, "u"));
   });
 });

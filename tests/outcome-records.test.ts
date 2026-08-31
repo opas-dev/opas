@@ -4,16 +4,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  conversationStreamActiveReason,
   conversationAnalyticsSlotsPerDay,
   createConversationAnalyticsPolicy,
   estimateConversationCostMicrodollars,
+  maximumConversationAnalyticsJsonUtf8Bytes,
   maximumConversationAnalyticsMessageUtf8Bytes,
   maximumConversationAnalyticsMessages,
   maximumConversationAnalyticsUtf8Bytes,
   maximumRetrievalExcerptUtf8Bytes,
+  maximumRetrievalTraceJsonUtf8Bytes,
   maximumRetrievalTraceEntries,
   maximumRetrievalTraceUtf8Bytes,
   normalizeConversationAnalyticsId,
+  normalizeConversationRetrievalScore,
   prepareConversationAnalyticsRecord,
 } from "@/outcomes/records";
 
@@ -106,6 +110,36 @@ test("configured literal validation is deterministic across repeated pattern ent
         { status: "unavailable" },
       );
     }
+  }
+});
+
+test("preserves the reserved active-stream marker through configured redaction", () => {
+  const startedAt = new Date("2026-08-30T12:00:00.000Z");
+  for (const reason of [
+    conversationStreamActiveReason,
+    ` ${conversationStreamActiveReason} `,
+    `${conversationStreamActiveReason}\n`,
+    "stream\uff0dactive",
+    `${conversationStreamActiveReason}\u202e`,
+  ]) {
+    const record = prepareConversationAnalyticsRecord(
+      {
+        conversation: [{ content: "Question", role: "user" }],
+        durationMilliseconds: 0,
+        id,
+        model: "model",
+        outcome: "abandoned",
+        provider: "provider",
+        reason,
+        retrievalTrace: [],
+        startedAt,
+        updatedAt: startedAt,
+        workspaceId: "workspace_demo",
+      },
+      enabledPolicy(JSON.stringify([conversationStreamActiveReason])),
+    );
+
+    assert.equal(record?.reason, conversationStreamActiveReason);
   }
 });
 
@@ -205,6 +239,74 @@ test("prepares only bounded redacted conversation and server retrieval evidence"
   assert.equal("cookies" in record, false);
 });
 
+test("bounds escape-heavy analytics by raw text and stored JSON bytes", () => {
+  const startedAt = new Date("2026-08-30T12:00:00.000Z");
+  const record = prepareConversationAnalyticsRecord(
+    {
+      conversation: Array.from({ length: 10 }, (_, index) => ({
+        content: `${index} ${"\\".repeat(4_000)}`,
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      })),
+      durationMilliseconds: 500,
+      firstTokenMilliseconds: 100,
+      id,
+      model: "model",
+      outcome: "answered",
+      provider: "provider",
+      reason: "stop",
+      retrievalTrace: Array.from({ length: 5 }, (_, index) => ({
+        articleContentHash: "a".repeat(64),
+        articleId: `article-${index}`,
+        canonicalUrl: `https://help.example.com/article-${index}`,
+        contentHash: "b".repeat(64),
+        excerpt: "\\".repeat(4_000),
+        headingPath: ["\\".repeat(1_000)],
+        indexGeneration: 1,
+        mode: "hybrid" as const,
+        ordinal: index,
+        score: 0.9,
+        sourceId: `source-${index}`,
+        sourceLineRange: { end: 8, start: 3 },
+        title: "\\".repeat(2_000),
+      })),
+      startedAt,
+      updatedAt: new Date("2026-08-30T12:00:00.500Z"),
+      workspaceId: "workspace_demo",
+    },
+    enabledPolicy(),
+  );
+
+  assert.ok(record);
+  assert.equal(
+    encoder.encode(JSON.stringify(record.conversation)).byteLength <=
+      maximumConversationAnalyticsJsonUtf8Bytes,
+    true,
+  );
+  assert.equal(
+    encoder.encode(JSON.stringify(record.retrievalTrace)).byteLength <=
+      maximumRetrievalTraceJsonUtf8Bytes,
+    true,
+  );
+  assert.equal(
+    record.retrievalTrace.reduce(
+      (total, entry) =>
+        total +
+        [
+          entry.articleContentHash,
+          entry.articleId,
+          entry.canonicalUrl,
+          entry.contentHash,
+          entry.excerpt,
+          ...entry.headingPath,
+          entry.sourceId,
+          entry.title,
+        ].reduce((sum, value) => sum + encoder.encode(value).byteLength, 0),
+      0,
+    ) <= maximumRetrievalTraceUtf8Bytes,
+    true,
+  );
+});
+
 test("rejects first-content-token latency outside the total request duration", () => {
   const policy = enabledPolicy();
   const base = {
@@ -247,6 +349,9 @@ test("rejects caller IDs and arithmetic values outside the bounded contract", ()
   for (const value of ["", "123e4567-e89b-12d3-a456-426614174000", id.toUpperCase()]) {
     assert.equal(normalizeConversationAnalyticsId(value), null);
   }
+  assert.equal(normalizeConversationRetrievalScore(1e-7), 0);
+  assert.equal(normalizeConversationRetrievalScore(0.1234567), 0.123457);
+  assert.equal(normalizeConversationRetrievalScore(Number.MAX_VALUE), null);
   assert.equal(estimateConversationCostMicrodollars(1_000_000, 2_000_000, "3", "4"), 11);
   assert.equal(
     estimateConversationCostMicrodollars(

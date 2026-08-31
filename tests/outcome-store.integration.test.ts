@@ -28,6 +28,7 @@ import {
   type PublicWriteAdmissionStore,
 } from "@/outcomes/admission";
 import {
+  conversationStreamActiveReason,
   createConversationAnalyticsPolicy,
   prepareConversationAnalyticsRecord,
   type ConversationAnalyticsRecord,
@@ -91,6 +92,50 @@ function analyticsRecord(
   return Object.freeze({ ...record, ...overrides });
 }
 
+function escapeHeavyAnalyticsRecord(recordId: string) {
+  const policy = createConversationAnalyticsPolicy({});
+  if (policy.status !== "enabled") throw new Error("Expected analytics policy");
+  const record = prepareConversationAnalyticsRecord(
+    {
+      conversation: Array.from({ length: 10 }, (_, index) => ({
+        content: `${index} ${"\\".repeat(4_000)}`,
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      })),
+      costMicrodollars: 7,
+      durationMilliseconds: 500,
+      firstTokenMilliseconds: 275,
+      id: recordId,
+      inputTokens: 20,
+      model: "fixture-model",
+      outcome: "answered",
+      outputTokens: 10,
+      provider: "openai-compatible",
+      reason: "stop",
+      retrievalTrace: Array.from({ length: 5 }, (_, index) => ({
+        articleContentHash: "a".repeat(64),
+        articleId: `article-${index}`,
+        canonicalUrl: `https://help.example.com/article-${index}`,
+        contentHash: "b".repeat(64),
+        excerpt: "\\".repeat(4_000),
+        headingPath: ["\\".repeat(1_000)],
+        indexGeneration: 3,
+        mode: "hybrid" as const,
+        ordinal: index,
+        score: index === 0 ? 1e-7 : 0.91,
+        sourceId: `source-${index}`,
+        sourceLineRange: { end: 9, start: 4 },
+        title: "\\".repeat(2_000),
+      })),
+      startedAt: new Date("2026-08-30T11:59:59.500Z"),
+      updatedAt: current,
+      workspaceId,
+    },
+    policy,
+  );
+  if (!record) throw new Error("Expected escape-heavy analytics record");
+  return record;
+}
+
 function scope(readAt = current, retentionStartedAt = new Date("2026-07-31T12:00:00.000Z")) {
   return Object.freeze({ readAt, retentionStartedAt });
 }
@@ -130,7 +175,248 @@ type StoreSet = Readonly<{
 }>;
 
 async function exerciseStores(name: string, stores: StoreSet) {
+  assert.equal(
+    await stores.analytics.put(
+      analyticsRecord(id, "abandoned", {
+        reason: conversationStreamActiveReason,
+      }),
+    ),
+    true,
+  );
   assert.equal(await stores.analytics.put(analyticsRecord(id, "answered")), true);
+  assert.equal(
+    (await stores.analytics.get(workspaceId, id, scope()))?.outcome,
+    "answered",
+    `${name} kept a completed stream provisional`,
+  );
+
+  const escapedId = "123e456d-e89b-42d3-a456-426614174000";
+  const escaped = escapeHeavyAnalyticsRecord(escapedId);
+  assert.equal(escaped.retrievalTrace[0]?.score, 0);
+  assert.equal(await stores.analytics.put(escaped), true);
+  const escapedRoundTrip = await stores.analytics.get(
+    workspaceId,
+    escapedId,
+    scope(),
+  );
+  assert.deepEqual(escapedRoundTrip?.conversation, escaped.conversation);
+  assert.deepEqual(escapedRoundTrip?.retrievalTrace, escaped.retrievalTrace);
+
+  const concurrentAnsweredId = "123e4569-e89b-42d3-a456-426614174000";
+  const answeredConflictAt = new Date("2026-08-30T12:00:01.000Z");
+  const provisionalAnswer = analyticsRecord(concurrentAnsweredId, "abandoned", {
+    conversation: [{ content: "active answer", role: "user" }],
+    costMicrodollars: null,
+    durationMilliseconds: 125,
+    firstTokenMilliseconds: null,
+    inputTokens: null,
+    model: "active-model",
+    outputTokens: null,
+    provider: "active-provider",
+    reason: conversationStreamActiveReason,
+    retrievalTrace: [],
+    updatedAt: answeredConflictAt,
+  });
+  const concurrentAnswer = analyticsRecord(concurrentAnsweredId, "answered", {
+    conversation: [{ content: "completed answer", role: "assistant" }],
+    model: "completed-model",
+    updatedAt: answeredConflictAt,
+  });
+  assert.equal(await stores.analytics.put(provisionalAnswer), true);
+  assert.equal(await stores.analytics.put(concurrentAnswer), true);
+  const answeredRace = await stores.analytics.get(
+    workspaceId,
+    concurrentAnsweredId,
+    scope(),
+  );
+  assert.equal(answeredRace?.outcome, "answered");
+  assert.equal(answeredRace?.reason, "answered-reason");
+  assert.equal(answeredRace?.model, "completed-model");
+  assert.equal(answeredRace?.provider, "openai-compatible");
+  assert.equal(answeredRace?.durationMilliseconds, 500);
+  assert.equal(answeredRace?.firstTokenMilliseconds, 275);
+  assert.equal(answeredRace?.inputTokens, 20);
+  assert.equal(answeredRace?.outputTokens, 10);
+  assert.equal(answeredRace?.costMicrodollars, 7);
+  assert.equal(answeredRace?.retrievalTrace.length, 1);
+  assert.deepEqual(answeredRace?.conversation, [
+    { content: "completed answer", role: "assistant" },
+  ]);
+
+  const concurrentAbstainedId = "123e456a-e89b-42d3-a456-426614174000";
+  const abstainedConflictAt = new Date("2026-08-30T12:00:03.000Z");
+  const provisionalAbstention = analyticsRecord(
+    concurrentAbstainedId,
+    "abandoned",
+    {
+      conversation: [{ content: "active abstention", role: "user" }],
+      costMicrodollars: null,
+      durationMilliseconds: 125,
+      firstTokenMilliseconds: null,
+      inputTokens: null,
+      model: "active-model",
+      outputTokens: null,
+      provider: "active-provider",
+      reason: conversationStreamActiveReason,
+      retrievalTrace: [],
+      updatedAt: abstainedConflictAt,
+    },
+  );
+  const concurrentAbstention = analyticsRecord(
+    concurrentAbstainedId,
+    "abstained",
+    {
+      conversation: [{ content: "completed abstention", role: "assistant" }],
+      model: "completed-model",
+      updatedAt: abstainedConflictAt,
+    },
+  );
+  assert.equal(await stores.analytics.put(concurrentAbstention), true);
+  assert.equal(await stores.analytics.put(provisionalAbstention), true);
+  const abstainedRace = await stores.analytics.get(
+    workspaceId,
+    concurrentAbstainedId,
+    scope(),
+  );
+  assert.equal(abstainedRace?.outcome, "abstained");
+  assert.equal(abstainedRace?.reason, "abstained-reason");
+  assert.equal(abstainedRace?.model, "completed-model");
+  assert.equal(abstainedRace?.provider, "openai-compatible");
+  assert.equal(abstainedRace?.durationMilliseconds, 500);
+  assert.equal(abstainedRace?.firstTokenMilliseconds, null);
+  assert.equal(abstainedRace?.inputTokens, 20);
+  assert.equal(abstainedRace?.outputTokens, 10);
+  assert.equal(abstainedRace?.costMicrodollars, 7);
+  assert.equal(abstainedRace?.retrievalTrace.length, 1);
+  assert.deepEqual(abstainedRace?.conversation, [
+    { content: "completed abstention", role: "assistant" },
+  ]);
+
+  const abandonedId = "123e4568-e89b-42d3-a456-426614174000";
+  assert.equal(
+    await stores.analytics.put(
+      analyticsRecord(abandonedId, "abandoned", {
+        reason: conversationStreamActiveReason,
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    await stores.analytics.updateOutcome({
+      id: abandonedId,
+      outcome: "abandoned",
+      reason: "user-cancelled",
+      scope: scope(),
+      updatedAt: new Date("2026-08-30T12:00:01.000Z"),
+      workspaceId,
+    }),
+    true,
+  );
+  await stores.analytics.put(
+    analyticsRecord(abandonedId, "abandoned", {
+      reason: "cancelled",
+      updatedAt: new Date("2026-08-30T12:00:02.000Z"),
+    }),
+  );
+  assert.equal(
+    (await stores.analytics.get(workspaceId, abandonedId, scope()))?.reason,
+    "user-cancelled",
+    `${name} replaced an explicit cancellation with a transport reason`,
+  );
+  await stores.analytics.put(
+    analyticsRecord(abandonedId, "answered", {
+      reason: "late provider completion",
+      updatedAt: new Date("2026-08-30T12:00:03.000Z"),
+    }),
+  );
+  const abandoned = await stores.analytics.get(workspaceId, abandonedId, scope());
+  assert.equal(abandoned?.outcome, "abandoned", `${name} lost explicit cancellation`);
+  assert.equal(abandoned?.reason, "user-cancelled");
+  assert.equal(
+    await stores.analytics.updateOutcome({
+      id: abandonedId,
+      outcome: "low-rated",
+      reason: "cancelled answer was unhelpful",
+      scope: scope(),
+      updatedAt: new Date("2026-08-30T12:00:04.000Z"),
+      workspaceId,
+    }),
+    true,
+  );
+  await stores.analytics.put(
+    analyticsRecord(abandonedId, "abandoned", {
+      reason: "late pagehide",
+      updatedAt: new Date("2026-08-30T12:00:05.000Z"),
+    }),
+  );
+  assert.equal(
+    await stores.analytics.updateOutcome({
+      id: abandonedId,
+      outcome: "abandoned",
+      reason: "later cancellation",
+      scope: scope(),
+      updatedAt: new Date("2026-08-30T12:00:06.000Z"),
+      workspaceId,
+    }),
+    false,
+  );
+  const ratedAbandonment = await stores.analytics.get(
+    workspaceId,
+    abandonedId,
+    scope(),
+  );
+  assert.equal(ratedAbandonment?.outcome, "low-rated");
+  assert.equal(ratedAbandonment?.reason, "cancelled answer was unhelpful");
+
+  const equalCancellationId = "123e456c-e89b-42d3-a456-426614174000";
+  const cancellationAt = new Date("2026-08-30T12:00:01.000Z");
+  await stores.analytics.put(
+    analyticsRecord(equalCancellationId, "abandoned", {
+      reason: conversationStreamActiveReason,
+    }),
+  );
+  assert.equal(
+    await stores.analytics.updateOutcome({
+      id: equalCancellationId,
+      outcome: "abandoned",
+      reason: "page-closed",
+      scope: scope(),
+      updatedAt: cancellationAt,
+      workspaceId,
+    }),
+    true,
+  );
+  await stores.analytics.put(
+    analyticsRecord(equalCancellationId, "abandoned", {
+      reason: "cancelled",
+      updatedAt: cancellationAt,
+    }),
+  );
+  assert.equal(
+    (
+      await stores.analytics.get(workspaceId, equalCancellationId, scope())
+    )?.reason,
+    "page-closed",
+    `${name} replaced an equal-time explicit cancellation`,
+  );
+
+  const nullableAbandonedId = "123e456b-e89b-42d3-a456-426614174000";
+  await stores.analytics.put(
+    analyticsRecord(nullableAbandonedId, "abandoned", { reason: null }),
+  );
+  await stores.analytics.put(
+    analyticsRecord(nullableAbandonedId, "answered", {
+      updatedAt: new Date("2026-08-30T12:00:01.000Z"),
+    }),
+  );
+  const nullableAbandonment = await stores.analytics.get(
+    workspaceId,
+    nullableAbandonedId,
+    scope(),
+  );
+  assert.equal(nullableAbandonment?.outcome, "abandoned");
+  assert.equal(nullableAbandonment?.reason, null);
+
   assert.equal(
     await stores.analytics.updateOutcome({
       id,
@@ -230,7 +516,7 @@ async function exerciseStores(name: string, stores: StoreSet) {
     await stores.analytics.cleanup({ limit: 1, scope: scope(), workspaceId }),
     1,
   );
-  assert.equal(await stores.rawAnalyticsCount(), 2);
+  assert.equal(await stores.rawAnalyticsCount(), 8);
   await stores.corruptAnalyticsTrace(raceId);
   await assert.rejects(
     stores.analytics.get(workspaceId, raceId, scope()),

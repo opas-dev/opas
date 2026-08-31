@@ -4,6 +4,7 @@ import type { GenerationUsage } from "@/ai/generation";
 import type { AnswerEvent, AnswerHistoryMessage } from "@/answers/answer";
 import type { EvidenceRetrievalResult } from "@/search/evidence";
 import {
+  conversationStreamActiveReason,
   estimateConversationCostMicrodollars,
   type ConversationAnalyticsEnvironment,
   type ConversationAnalyticsInput,
@@ -58,6 +59,7 @@ export function createAnswerOutcomeRecorder(options: RecorderOptions) {
   const assistantContent: string[] = [];
   let trace: readonly EvidenceRetrievalResult[] = [];
   let finalization: Promise<void> | undefined;
+  let startWrite: Promise<void> | undefined;
   let firstTokenMilliseconds: number | null = null;
   let alternateProviderSelected = false;
   let model = options.model;
@@ -70,15 +72,14 @@ export function createAnswerOutcomeRecorder(options: RecorderOptions) {
     );
   }
 
-  function finalize(
+  function writeRecord(
     outcome: ConversationOutcome,
     reason: string | null,
+    updatedAt: Date,
     usage?: GenerationUsage,
     assistantMessage?: string,
   ) {
-    if (finalization) return finalization;
-    finalization = (async () => {
-      const updatedAt = now();
+    return (async () => {
       const answer = assistantMessage ?? assistantContent.join("\n\n");
       const input: ConversationAnalyticsInput = {
         conversation: Object.freeze([
@@ -145,6 +146,20 @@ export function createAnswerOutcomeRecorder(options: RecorderOptions) {
       ]);
       if (timeout) clearTimeout(timeout);
     })();
+  }
+
+  function finalize(
+    outcome: ConversationOutcome,
+    reason: string | null,
+    usage?: GenerationUsage,
+    assistantMessage?: string,
+  ) {
+    if (finalization) return finalization;
+    const updatedAt = now();
+    finalization = (async () => {
+      await startWrite;
+      await writeRecord(outcome, reason, updatedAt, usage, assistantMessage);
+    })();
     return finalization;
   }
 
@@ -157,6 +172,15 @@ export function createAnswerOutcomeRecorder(options: RecorderOptions) {
     },
     observeRetrieval(results: readonly EvidenceRetrievalResult[]) {
       trace = Object.freeze([...results]);
+    },
+    start() {
+      if (finalization) return finalization;
+      startWrite ??= writeRecord(
+        "abandoned",
+        conversationStreamActiveReason,
+        now(),
+      );
+      return startWrite;
     },
     async observeEvent(event: AnswerEvent) {
       if (event.type === "content" && firstTokenMilliseconds === null) {

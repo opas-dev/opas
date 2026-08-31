@@ -14,7 +14,12 @@ import {
   describeAnswerFailure,
   type AnswerStreamSnapshot,
 } from "@/app/answer-stream";
-import { Search } from "@/app/search";
+import {
+  answerSnapshotDisposition,
+  blockingAnswerRequest,
+  claimPageCloseOutcome,
+  Search,
+} from "@/app/search";
 
 const articleHash = "a".repeat(64);
 const chunkHash = "b".repeat(64);
@@ -179,6 +184,132 @@ test("builds bounded history only from completed turns while page context stays 
   assert.deepEqual(conversationHistory([]), []);
 });
 
+test("remembers a pre-metadata stop by request identity until its conversation is issued", () => {
+  const controller = new AbortController();
+  const stoppedRequest = {
+    controller,
+    conversationId: null,
+    id: 7,
+    stopReported: false,
+    stopRequested: true,
+    terminalObserved: false,
+  };
+  const retryWithSameTurnId = {
+    controller: new AbortController(),
+    conversationId: null,
+    id: 7,
+    stopReported: false,
+    stopRequested: false,
+    terminalObserved: false,
+  };
+  const streaming = Object.freeze({
+    abstention: null,
+    blocks: [],
+    conversationId: null,
+    failure: null,
+    finish: null,
+    metadata: null,
+    phase: "streaming" as const,
+  });
+  const issued = Object.freeze({
+    ...streaming,
+    conversationId: "123e4567-e89b-42d3-a456-426614174000",
+  });
+  const retryIssued = Object.freeze({
+    ...streaming,
+    conversationId: "223e4567-e89b-42d3-a456-426614174001",
+  });
+
+  assert.equal(
+    answerSnapshotDisposition(stoppedRequest, retryWithSameTurnId, streaming),
+    "ignore",
+  );
+  assert.equal(stoppedRequest.conversationId, null);
+  assert.equal(
+    answerSnapshotDisposition(stoppedRequest, retryWithSameTurnId, issued),
+    "abandon",
+  );
+  assert.equal(
+    stoppedRequest.conversationId,
+    "123e4567-e89b-42d3-a456-426614174000",
+  );
+  assert.equal(stoppedRequest.stopReported, true);
+  assert.equal(
+    answerSnapshotDisposition(stoppedRequest, retryWithSameTurnId, issued),
+    "ignore",
+  );
+
+  assert.equal(
+    answerSnapshotDisposition(
+      retryWithSameTurnId,
+      retryWithSameTurnId,
+      retryIssued,
+    ),
+    "publish",
+  );
+  assert.equal(
+    retryWithSameTurnId.conversationId,
+    "223e4567-e89b-42d3-a456-426614174001",
+  );
+  stoppedRequest.controller.abort();
+  assert.equal(stoppedRequest.controller.signal.aborted, true);
+  assert.equal(retryWithSameTurnId.controller.signal.aborted, false);
+
+  assert.equal(blockingAnswerRequest(null), null);
+  assert.equal(blockingAnswerRequest(stoppedRequest), null);
+  assert.equal(
+    blockingAnswerRequest(retryWithSameTurnId),
+    retryWithSameTurnId,
+  );
+
+  const completed = Object.freeze({
+    ...retryIssued,
+    finish: Object.freeze({
+      reason: "stop" as const,
+      usage: Object.freeze({ inputTokens: 10, outputTokens: 5, totalTokens: 15 }),
+    }),
+    phase: "complete" as const,
+  });
+  assert.equal(
+    answerSnapshotDisposition(
+      retryWithSameTurnId,
+      retryWithSameTurnId,
+      completed,
+    ),
+    "publish",
+  );
+  assert.equal(retryWithSameTurnId.terminalObserved, true);
+  assert.equal(blockingAnswerRequest(retryWithSameTurnId), null);
+  assert.equal(claimPageCloseOutcome(retryWithSameTurnId), null);
+
+  const closingRequest = {
+    controller: new AbortController(),
+    conversationId: "323e4567-e89b-42d3-a456-426614174002",
+    id: 8,
+    stopReported: false,
+    stopRequested: false,
+    terminalObserved: false,
+  };
+  assert.deepEqual(claimPageCloseOutcome(closingRequest), {
+    conversationId: "323e4567-e89b-42d3-a456-426614174002",
+    reason: "page-closed",
+  });
+  assert.equal(claimPageCloseOutcome(closingRequest), null);
+
+  const stoppedBeforeClose = {
+    controller: new AbortController(),
+    conversationId: "423e4567-e89b-42d3-a456-426614174003",
+    id: 9,
+    stopReported: false,
+    stopRequested: true,
+    terminalObserved: false,
+  };
+  assert.deepEqual(claimPageCloseOutcome(stoppedBeforeClose), {
+    conversationId: "423e4567-e89b-42d3-a456-426614174003",
+    reason: "user-cancelled",
+  });
+});
+
 test("renders keyboard and screen-reader semantics at the shared search entry point", () => {
   const markup = renderToStaticMarkup(
     <Search
@@ -211,7 +342,7 @@ test("keeps narrow-layout and reduced-motion behavior explicit", async () => {
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
   assert.match(css, /min-height: 2\.75rem/u);
   assert.match(source, /currentPagePath: safeCurrentPage\.path/u);
-  assert.match(source, /activeAnswer\.current\.conversationId = snapshot\.conversationId/u);
+  assert.match(source, /request\.conversationId = snapshot\.conversationId/u);
   assert.doesNotMatch(source, /conversationId: turn\.conversationId/u);
   assert.doesNotMatch(source, /conversationHistory\(safeCurrentPage/u);
   assert.doesNotMatch(source, /dangerouslySetInnerHTML|RuntimeMdx|<img\b/u);

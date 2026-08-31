@@ -7,6 +7,7 @@ import {
   handlePublicOutcomeRequest,
   maximumOutcomeWriteBodyUtf8Bytes,
 } from "@/outcomes/route";
+import { conversationStreamActiveReason } from "@/outcomes/records";
 
 const url = "https://help.example.test/api/answers/outcomes";
 const conversationId = "123e4567-e89b-42d3-a456-426614174000";
@@ -63,6 +64,21 @@ test("rejects methods, media types, malformed IDs, unknown fields, controls, and
     [request("{"), 400],
     [request(JSON.stringify({ conversationId: "caller-choice", outcome: "low-rated" })), 400],
     [request(JSON.stringify({ conversationId, outcome: "answered" })), 400],
+    ...[
+      conversationStreamActiveReason,
+      ` ${conversationStreamActiveReason} `,
+      `${conversationStreamActiveReason}\n`,
+      "stream\uff0dactive",
+      `${conversationStreamActiveReason}\u202e`,
+    ].map(
+      (reason) =>
+        [
+          request(
+            JSON.stringify({ conversationId, outcome: "abandoned", reason }),
+          ),
+          400,
+        ] as [Request, number],
+    ),
     [request(JSON.stringify({ conversationId, outcome: "low-rated", rawUa: "secret" })), 400],
     [
       request(

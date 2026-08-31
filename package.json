@@ -22,7 +22,7 @@
     "test:retrieval": "tsx --test tests/evidence-retrieval.test.ts tests/retrieval-evaluation.test.ts tests/retrieval-runtime.test.ts",
     "test:answers": "tsx --test tests/generation.test.ts tests/generation-config.test.ts tests/answer-admission.test.ts tests/answer-gate.test.ts tests/answer.test.ts tests/answer-policy-calibration.test.ts tests/answer-guardrails.test.ts tests/answer-runtime.test.ts tests/answer-route.test.ts tests/answer-assistant.test.tsx tests/embed.test.tsx",
     "test:handoff": "tsx --test --test-concurrency=1 tests/handoff.test.ts tests/handoff-gate.test.ts tests/handoff-runtime.test.ts tests/handoff-ui.test.tsx tests/handoff-store.integration.test.ts",
-    "test:outcomes": "tsx --test --test-concurrency=1 tests/outcome-records.test.ts tests/outcome-route.test.ts tests/outcome-runtime.test.ts tests/outcome-store.integration.test.ts tests/outcome-deployment.test.ts",
+    "test:outcomes": "tsx --test --test-concurrency=1 tests/outcome-records.test.ts tests/outcome-gate.test.ts tests/outcome-route.test.ts tests/outcome-runtime.test.ts tests/outcome-store.integration.test.ts tests/outcome-deployment.test.ts",
     "test:quality": "tsx --test tests/quality-console.test.ts tests/quality-http.test.ts tests/quality-review.test.ts tests/quality-ui.test.tsx tests/content-gaps.test.tsx",
     "test:mcp": "tsx --test tests/mcp.test.ts tests/article-actions.test.tsx",
     "test:import": "tsx --test tests/import-archive.test.ts tests/import-execute.test.ts tests/import-planner.test.ts tests/import-upload.test.ts",

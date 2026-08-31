@@ -158,6 +158,7 @@ export type AnswerServiceOptions = Readonly<{
 
 export interface AnswerService {
   stream(request: AnswerRequest): AsyncIterable<AnswerEvent>;
+  validate(request: AnswerRequest): void;
 }
 
 type PreparedAnswerRequest = {
@@ -1006,6 +1007,9 @@ export function createAnswerService(
   return Object.freeze({
     stream(request: AnswerRequest) {
       return answerStream(configuredOptions, request);
+    },
+    validate(request: AnswerRequest) {
+      prepareAnswerRequest(request, configuredOptions.generation);
     },
   });
 }

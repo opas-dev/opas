@@ -74,7 +74,54 @@ type ActiveAnswer = {
   conversationId: string | null;
   controller: AbortController;
   id: number;
+  stopReported: boolean;
+  stopRequested: boolean;
+  terminalObserved: boolean;
 };
+
+export function answerSnapshotDisposition(
+  request: ActiveAnswer,
+  activeRequest: ActiveAnswer | null,
+  snapshot: AnswerStreamSnapshot,
+): "abandon" | "ignore" | "publish" {
+  if (
+    snapshot.conversationId &&
+    request.conversationId === null &&
+    (activeRequest === request || request.stopRequested)
+  ) {
+    request.conversationId = snapshot.conversationId;
+  }
+  if (
+    snapshot.phase === "abstained" ||
+    snapshot.phase === "complete" ||
+    snapshot.phase === "error"
+  ) {
+    request.terminalObserved = true;
+  }
+  if (request.stopRequested) {
+    if (request.conversationId && !request.stopReported) {
+      request.stopReported = true;
+      return "abandon";
+    }
+    return "ignore";
+  }
+  return activeRequest === request ? "publish" : "ignore";
+}
+
+export function blockingAnswerRequest(request: ActiveAnswer | null) {
+  return request && !request.stopRequested && !request.terminalObserved
+    ? request
+    : null;
+}
+
+export function claimPageCloseOutcome(request: ActiveAnswer | null) {
+  if (!request || request.terminalObserved) return null;
+  const reason = request.stopRequested ? "user-cancelled" : "page-closed";
+  request.stopRequested = true;
+  if (!request.conversationId || request.stopReported) return null;
+  request.stopReported = true;
+  return Object.freeze({ conversationId: request.conversationId, reason });
+}
 
 type AnswerRating = "helpful" | "unhelpful";
 type FeedbackDetail = Readonly<{
@@ -302,14 +349,17 @@ export function Search({
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (activeAnswer.current?.conversationId) {
+      const request = activeAnswer.current;
+      if (!request) return;
+      const outcome = claimPageCloseOutcome(request);
+      if (outcome) {
         void sendAnswerOutcome(
-          activeAnswer.current.conversationId,
+          outcome.conversationId,
           "abandoned",
-          "page-closed",
+          outcome.reason,
         );
       }
-      activeAnswer.current?.controller.abort();
+      request.controller.abort();
     };
   }, []);
 
@@ -394,7 +444,7 @@ export function Search({
   }
 
   function requestAnswer(questionValue: string, retryId?: number) {
-    if (activeAnswer.current) return;
+    if (blockingAnswerRequest(activeAnswer.current)) return;
     const question = normalizeSearchQuery(constrainSearchInput(questionValue));
     if (searchQueryLength(question) < minimumSearchQueryLength) return;
 
@@ -414,7 +464,15 @@ export function Search({
     setFollowUp("");
 
     const controller = new AbortController();
-    activeAnswer.current = { controller, conversationId: null, id };
+    const request: ActiveAnswer = {
+      controller,
+      conversationId: null,
+      id,
+      stopReported: false,
+      stopRequested: false,
+      terminalObserved: false,
+    };
+    activeAnswer.current = request;
     void (async () => {
       try {
         const response = await fetch("/api/answers", {
@@ -434,23 +492,36 @@ export function Search({
         });
         const result = await consumeAnswerResponse(response, {
           onSnapshot: (snapshot) => {
-            if (activeAnswer.current?.id === id) {
-              if (snapshot.conversationId) {
-                activeAnswer.current.conversationId = snapshot.conversationId;
-              }
+            const disposition = answerSnapshotDisposition(
+              request,
+              activeAnswer.current,
+              snapshot,
+            );
+            if (disposition === "abandon") {
+              void sendAnswerOutcome(
+                request.conversationId!,
+                "abandoned",
+                "user-cancelled",
+              );
+              request.controller.abort();
+              return;
+            }
+            if (disposition === "publish") {
               replaceTurn(id, snapshot);
             }
           },
           signal: controller.signal,
         });
-        if (activeAnswer.current?.id === id) replaceTurn(id, result);
+        if (activeAnswer.current === request && !request.stopRequested) {
+          replaceTurn(id, result);
+        }
       } catch (error) {
         const failure: AnswerFailureCode = controller.signal.aborted
           ? "cancelled"
           : error instanceof AnswerStreamError
             ? error.code
             : "disconnected";
-        if (activeAnswer.current?.id === id) {
+        if (activeAnswer.current === request && !request.stopRequested) {
           setTurns((current) =>
             current.map((turn) =>
               turn.id === id
@@ -460,7 +531,7 @@ export function Search({
           );
         }
       } finally {
-        if (activeAnswer.current?.id === id) activeAnswer.current = null;
+        if (activeAnswer.current === request) activeAnswer.current = null;
       }
     })();
   }
@@ -468,13 +539,17 @@ export function Search({
   function stopAnswer() {
     const request = activeAnswer.current;
     if (!request) return;
-    request.controller.abort();
+    if (request.terminalObserved) return;
+    if (request.stopRequested) return;
+    request.stopRequested = true;
     if (request.conversationId) {
+      request.stopReported = true;
       void sendAnswerOutcome(
         request.conversationId,
         "abandoned",
         "user-cancelled",
       );
+      request.controller.abort();
     }
     setTurns((current) =>
       current.map((turn) =>
@@ -486,7 +561,8 @@ export function Search({
   }
 
   function startOver() {
-    if (activeAnswer.current) return;
+    if (blockingAnswerRequest(activeAnswer.current)) return;
+    activeAnswer.current = null;
     setTurns([]);
     setQuery("");
     setFollowUp("");

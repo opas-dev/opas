@@ -296,6 +296,7 @@ test("native answers resolve current-page paths to server-owned published metada
           type: "abstention",
         };
       },
+      validate() {},
     },
   };
   const answerRequest = (body: unknown) =>
@@ -316,13 +317,13 @@ test("native answers resolve current-page paths to server-owned published metada
     },
   );
   assert.equal(response.status, 200);
+  await response.text();
   assert.deepEqual(received?.currentPage, {
     articleId: "article_password",
     path: "/account/reset-password",
     title: "Reset your password",
   });
   assert.deepEqual(received?.history, undefined);
-  await response.body?.cancel();
 
   let runtimeCalls = 0;
   const forged = await handleAnswerRequest(

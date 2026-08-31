@@ -288,15 +288,11 @@ function streamingResponse(
   conversationId: string,
   runtime: AnswerRuntime,
   iterator: AsyncIterator<AnswerEvent>,
-  firstEvent: AnswerEvent,
   recorder: AnswerOutcomeRecorder,
   signal: ReturnType<typeof linkedSignal>,
 ) {
-  const pending: AnswerStreamRecord[] = [
-    Object.freeze({ conversationId, generation: runtime.metadata, type: "metadata" }),
-    firstEvent,
-  ];
   let closed = false;
+  let observedEvent = false;
 
   const close = () => {
     if (closed) return;
@@ -304,21 +300,36 @@ function streamingResponse(
     signal.close();
   };
   const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        encodedRecord(
+          Object.freeze({
+            conversationId,
+            generation: runtime.metadata,
+            type: "metadata",
+          }),
+        ),
+      );
+    },
     async pull(controller) {
-      if (pending.length > 0) {
-        controller.enqueue(encodedRecord(pending.shift()!));
-        return;
-      }
       try {
         const result = await iterator.next();
         if (result.done) {
+          if (!observedEvent) {
+            throw new AnswerError(
+              "invalid-output",
+              "Answer stream ended without a public result",
+            );
+          }
           close();
           controller.close();
           return;
         }
+        observedEvent = true;
         await recorder.observeEvent(result.value);
         controller.enqueue(encodedRecord(result.value));
       } catch (error) {
+        if (closed) return;
         const failure = signal.signal.aborted
           ? Object.freeze({ code: "cancelled" as const, type: "error" as const })
           : streamFailureCode(error);
@@ -333,8 +344,8 @@ function streamingResponse(
     },
     async cancel() {
       signal.abort();
-      await recorder.abandon("cancelled");
       close();
+      await recorder.abandon("cancelled");
       await closeIterator(iterator);
     },
   });
@@ -404,6 +415,7 @@ export async function handleAnswerRequest(
     const runtime = await (
       dependencies.createRuntime ?? createConfiguredAnswerRuntime
     )();
+    cancelledRequest(answerSignal.signal);
     const conversationId = (
       dependencies.createConversationId ?? (() => crypto.randomUUID())
     )();
@@ -420,29 +432,22 @@ export async function handleAnswerRequest(
       startedAt: requestStartedAt,
       workspaceId: demoIds.workspace,
     });
-    iterator = runtime.service
-      .stream({
-        ...answerInput,
-        ...(currentPage ? { currentPage } : {}),
-        observeProvider: recorder.observeProvider,
-        observeRetrieval: recorder.observeRetrieval,
-        signal: answerSignal.signal,
-        workspaceId: demoIds.workspace,
-      })
-      [Symbol.asyncIterator]();
-    const first = await iterator.next();
-    if (first.done) {
-      throw new AnswerError(
-        "invalid-output",
-        "Answer stream ended without a public result",
-      );
-    }
-    await recorder.observeEvent(first.value);
+    const serviceRequest = {
+      ...answerInput,
+      ...(currentPage ? { currentPage } : {}),
+      observeProvider: recorder.observeProvider,
+      observeRetrieval: recorder.observeRetrieval,
+      signal: answerSignal.signal,
+      workspaceId: demoIds.workspace,
+    };
+    runtime.service.validate(serviceRequest);
+    iterator = runtime.service.stream(serviceRequest)[Symbol.asyncIterator]();
+    await recorder.start();
+    cancelledRequest(answerSignal.signal);
     return streamingResponse(
       conversationId,
       runtime,
       iterator,
-      first.value,
       recorder,
       answerSignal,
     );

@@ -4,7 +4,10 @@ import {
   consumeOutcomeWriteAllowance,
   type OutcomeWriteAllowance,
 } from "@/outcomes/gate";
-import { normalizeConversationAnalyticsId } from "@/outcomes/records";
+import {
+  isConversationStreamActiveReason,
+  normalizeConversationAnalyticsId,
+} from "@/outcomes/records";
 import {
   outcomeFailureDetails,
   recordConfiguredPublicOutcome,
@@ -105,6 +108,8 @@ function parsedPayload(text: string) {
     keys.some((key, index) => key !== expected[index]) ||
     !normalizeConversationAnalyticsId(record.conversationId) ||
     (record.outcome !== "abandoned" && record.outcome !== "low-rated") ||
+    (record.outcome === "abandoned" &&
+      isConversationStreamActiveReason(record.reason)) ||
     ("reason" in record &&
       record.reason !== null &&
       (typeof record.reason !== "string" ||

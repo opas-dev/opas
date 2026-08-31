@@ -12,6 +12,7 @@ import type {
   ConversationRetrievalTrace,
 } from "@/outcomes/records";
 import {
+  conversationStreamActiveReason,
   maximumConversationAnalyticsMessageUtf8Bytes,
   maximumConversationAnalyticsMessages,
   maximumConversationAnalyticsUtf8Bytes,
@@ -20,6 +21,7 @@ import {
   maximumRetrievalHeadingUtf8Bytes,
   maximumRetrievalTraceEntries,
   maximumRetrievalTraceUtf8Bytes,
+  normalizeConversationRetrievalScore,
 } from "@/outcomes/records";
 import type { ConversationAnalyticsStore } from "@/outcomes/store";
 
@@ -210,8 +212,8 @@ function retrievalTrace(value: string): readonly ConversationRetrievalTrace[] {
         (record.indexGeneration as number) < 1 ||
         !Number.isSafeInteger(record.ordinal) ||
         (record.ordinal as number) < 0 ||
-        !Number.isFinite(record.score) ||
-        (record.score as number) < 0 ||
+        typeof record.score !== "number" ||
+        normalizeConversationRetrievalScore(record.score) !== record.score ||
         utf8Length(record.excerpt as string) > maximumRetrievalExcerptUtf8Bytes
       ) {
         throw new Error("Stored retrieval analytics are invalid");
@@ -280,6 +282,18 @@ export function createSqliteConversationAnalyticsStore(
   const store: ConversationAnalyticsStore = {
     async put(record) {
       const updatedAt = record.updatedAt.getTime();
+      const incomingPayloadWins =
+        record.outcome === "abandoned" &&
+        record.reason === conversationStreamActiveReason
+          ? sql`
+              ${updatedAt} > updated_at
+              or (
+                ${updatedAt} = updated_at
+                and outcome = 'abandoned'
+                and reason is ${conversationStreamActiveReason}
+              )
+            `
+          : sql`${updatedAt} >= updated_at`;
       const update = sql`
         update conversation_analytics
         set outcome = case
@@ -287,6 +301,13 @@ export function createSqliteConversationAnalyticsStore(
                 then 'escalated'
               when outcome = 'low-rated' or ${record.outcome} = 'low-rated'
                 then 'low-rated'
+              when (
+                outcome = 'abandoned'
+                and reason is not ${conversationStreamActiveReason}
+              ) or (
+                ${record.outcome} = 'abandoned'
+                and ${record.reason} is not ${conversationStreamActiveReason}
+              ) then 'abandoned'
               when outcome = 'answered' or ${record.outcome} = 'answered'
                 then 'answered'
               when outcome = 'abstained' or ${record.outcome} = 'abstained'
@@ -302,26 +323,61 @@ export function createSqliteConversationAnalyticsStore(
                 then ${record.reason}
               when outcome = 'low-rated' and ${record.outcome} not in ('escalated', 'low-rated')
                 then reason
-              when ${record.outcome} = 'answered' and outcome in ('abandoned', 'abstained')
+              when ${record.outcome} = 'abandoned'
+                and ${record.reason} is not ${conversationStreamActiveReason}
+                and not (
+                  outcome = 'abandoned'
+                  and reason is not ${conversationStreamActiveReason}
+                )
                 then ${record.reason}
-              when outcome = 'answered' and ${record.outcome} in ('abandoned', 'abstained')
+              when outcome = 'abandoned'
+                and reason is not ${conversationStreamActiveReason}
                 then reason
-              when ${record.outcome} = 'abstained' and outcome = 'abandoned'
+              when ${record.outcome} = 'answered' and (
+                outcome = 'abstained'
+                or (
+                  outcome = 'abandoned'
+                  and reason is ${conversationStreamActiveReason}
+                )
+              )
                 then ${record.reason}
-              when outcome = 'abstained' and ${record.outcome} = 'abandoned'
+              when outcome = 'answered' and (
+                ${record.outcome} = 'abstained'
+                or (
+                  ${record.outcome} = 'abandoned'
+                  and ${record.reason} is ${conversationStreamActiveReason}
+                )
+              )
+                then reason
+              when ${record.outcome} = 'abstained'
+                and outcome = 'abandoned'
+                and reason is ${conversationStreamActiveReason}
+                then ${record.reason}
+              when outcome = 'abstained'
+                and ${record.outcome} = 'abandoned'
+                and ${record.reason} is ${conversationStreamActiveReason}
                 then reason
               when ${updatedAt} >= updated_at then ${record.reason}
               else reason
             end,
-            conversation = ${JSON.stringify(record.conversation)},
-            retrieval_trace = ${JSON.stringify(record.retrievalTrace)},
-            provider = ${record.provider},
-            model = ${record.model},
-            duration_milliseconds = ${record.durationMilliseconds},
-            first_token_milliseconds = ${record.firstTokenMilliseconds},
-            input_tokens = ${record.inputTokens},
-            output_tokens = ${record.outputTokens},
-            cost_microdollars = ${record.costMicrodollars},
+            conversation = case when ${incomingPayloadWins}
+              then ${JSON.stringify(record.conversation)} else conversation end,
+            retrieval_trace = case when ${incomingPayloadWins}
+              then ${JSON.stringify(record.retrievalTrace)} else retrieval_trace end,
+            provider = case when ${incomingPayloadWins}
+              then ${record.provider} else provider end,
+            model = case when ${incomingPayloadWins}
+              then ${record.model} else model end,
+            duration_milliseconds = case when ${incomingPayloadWins}
+              then ${record.durationMilliseconds} else duration_milliseconds end,
+            first_token_milliseconds = case when ${incomingPayloadWins}
+              then ${record.firstTokenMilliseconds} else first_token_milliseconds end,
+            input_tokens = case when ${incomingPayloadWins}
+              then ${record.inputTokens} else input_tokens end,
+            output_tokens = case when ${incomingPayloadWins}
+              then ${record.outputTokens} else output_tokens end,
+            cost_microdollars = case when ${incomingPayloadWins}
+              then ${record.costMicrodollars} else cost_microdollars end,
             updated_at = max(updated_at, ${updatedAt})
         where id = ${record.id}
           and workspace_id = ${record.workspaceId}
@@ -377,7 +433,8 @@ export function createSqliteConversationAnalyticsStore(
           and (
             (outcome = ${request.outcome} and ${request.updatedAt.getTime()} >= updated_at)
             or (${request.outcome} = 'escalated' and outcome <> 'escalated')
-            or (${request.outcome} = 'low-rated' and outcome = 'answered')
+            or (${request.outcome} = 'low-rated' and outcome in ('answered', 'abandoned'))
+            or (${request.outcome} = 'abandoned' and outcome in ('answered', 'abstained'))
           )
         returning id
       `);

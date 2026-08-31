@@ -15,7 +15,10 @@ import type {
   ConversationAnalyticsStore,
   ConversationOutcomeUpdate,
 } from "@/outcomes/store";
-import type { ConversationAnalyticsRecord } from "@/outcomes/records";
+import {
+  conversationStreamActiveReason,
+  type ConversationAnalyticsRecord,
+} from "@/outcomes/records";
 import type { HandoffStore } from "@/handoff/service";
 import type { PublicWriteAdmissionStore } from "@/outcomes/admission";
 
@@ -176,6 +179,58 @@ test("public outcomes retry an in-flight server write but never create a random 
   );
   assert.equal(missing, "missing");
   assert.equal(store.records.has(randomId), false);
+});
+
+test("records an active stream before metadata and replaces it on completion", async () => {
+  const store = new MemoryAnalyticsStore();
+  const runtime = createConversationAnalyticsRuntime({ now: () => now, store });
+  const clock = recorderClock([50, 450]);
+  const recorder = createAnswerOutcomeRecorder({
+    getRuntime: async () => runtime,
+    id,
+    model: "fixture-model",
+    now: clock.now,
+    provider: "openai-compatible",
+    question: "Question",
+    startedAt: clock.startedAt,
+    workspaceId: "workspace_demo",
+  });
+
+  await recorder.observeEvent({ markdown: "First", type: "content" });
+  const firstStart = recorder.start();
+  assert.equal(recorder.start(), firstStart);
+  await firstStart;
+  assert.equal(store.records.get(id)?.outcome, "abandoned");
+  assert.equal(store.records.get(id)?.reason, conversationStreamActiveReason);
+
+  await recorder.observeEvent({
+    reason: "stop",
+    type: "finish",
+    usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+  });
+  assert.equal(store.records.get(id)?.outcome, "answered");
+  assert.equal(store.records.get(id)?.reason, "stop");
+
+  const abstainedId = "223e4567-e89b-42d3-a456-426614174000";
+  const abstainedClock = recorderClock([40, 250]);
+  const abstainedRecorder = createAnswerOutcomeRecorder({
+    getRuntime: async () => runtime,
+    id: abstainedId,
+    model: "fixture-model",
+    now: abstainedClock.now,
+    provider: "openai-compatible",
+    question: "Unsupported question",
+    startedAt: abstainedClock.startedAt,
+    workspaceId: "workspace_demo",
+  });
+  await abstainedRecorder.start();
+  await abstainedRecorder.observeEvent({
+    message: "Not enough published evidence.",
+    reason: "insufficient-evidence",
+    type: "abstention",
+  });
+  assert.equal(store.records.get(abstainedId)?.outcome, "abstained");
+  assert.equal(store.records.get(abstainedId)?.reason, "insufficient-evidence");
 });
 
 function recorderClock(milliseconds: readonly number[]) {

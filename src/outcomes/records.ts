@@ -6,12 +6,15 @@ export const conversationAnalyticsSlotsPerDay = 1_024;
 export const maximumConversationAnalyticsMessages = 10;
 export const maximumConversationAnalyticsMessageUtf8Bytes = 2_048;
 export const maximumConversationAnalyticsUtf8Bytes = 12_288;
+export const maximumConversationAnalyticsJsonUtf8Bytes = 16_384;
 export const maximumRetrievalTraceEntries = 5;
 export const maximumRetrievalTraceUtf8Bytes = 6_144;
+export const maximumRetrievalTraceJsonUtf8Bytes = 8_192;
 export const maximumRetrievalExcerptUtf8Bytes = 1_024;
 export const maximumRetrievalHeadingCount = 10;
 export const maximumRetrievalHeadingUtf8Bytes = 500;
 export const maximumOutcomeReasonUtf8Bytes = 256;
+export const conversationStreamActiveReason = "stream-active";
 
 const millisecondsPerDay = 86_400_000;
 const maximumDurationMilliseconds = 300_000;
@@ -19,6 +22,8 @@ const maximumTokens = 1_000_000;
 const maximumCostMicrodollars = 2_000_000_000;
 const maximumConfiguredPatterns = 32;
 const maximumConfiguredPatternCodePoints = 128;
+const maximumRetrievalScore = 1_000_000;
+const retrievalScorePrecision = 1_000_000;
 const conversationIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const contentHashPattern = /^[a-f\d]{64}$/u;
@@ -259,6 +264,27 @@ export function normalizeConversationAnalyticsId(value: unknown) {
     : null;
 }
 
+export function normalizeConversationRetrievalScore(value: unknown) {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > maximumRetrievalScore
+  ) {
+    return null;
+  }
+  const score = Math.round(value * retrievalScorePrecision) /
+    retrievalScorePrecision;
+  return Object.is(score, -0) ? 0 : score;
+}
+
+export function isConversationStreamActiveReason(value: unknown) {
+  return (
+    typeof value === "string" &&
+    normalizedText(value).trim() === conversationStreamActiveReason
+  );
+}
+
 export function prepareConversationOutcomeReason(
   value: unknown,
   policy: Extract<ConversationAnalyticsPolicy, { status: "enabled" }>,
@@ -285,12 +311,33 @@ function boundedIdentity(value: string, maximumBytes: number) {
   return truncateUtf8(normalized || "unknown", maximumBytes);
 }
 
+function jsonTextUtf8Length(value: string) {
+  return utf8Length(JSON.stringify(value)) - 2;
+}
+
+function truncateJsonText(value: string, maximumBytes: number) {
+  if (jsonTextUtf8Length(value) <= maximumBytes) return value;
+  const characters = Array.from(value);
+  let lower = 0;
+  let upper = characters.length;
+  while (lower < upper) {
+    const middle = Math.ceil((lower + upper) / 2);
+    if (jsonTextUtf8Length(characters.slice(0, middle).join("")) <= maximumBytes) {
+      lower = middle;
+    } else {
+      upper = middle - 1;
+    }
+  }
+  return characters.slice(0, lower).join("").trimEnd();
+}
+
 function preparedConversation(
   messages: readonly ConversationAnalyticsMessage[],
   redact: (value: string) => string,
 ) {
   const prepared: ConversationAnalyticsMessage[] = [];
   let remaining = maximumConversationAnalyticsUtf8Bytes;
+  let remainingJson = maximumConversationAnalyticsUtf8Bytes;
   for (const message of messages.slice(-maximumConversationAnalyticsMessages)) {
     if (
       !message ||
@@ -300,13 +347,17 @@ function preparedConversation(
     ) {
       continue;
     }
-    const content = truncateUtf8(
-      redact(message.content).trim(),
-      Math.min(maximumConversationAnalyticsMessageUtf8Bytes, remaining),
+    const content = truncateJsonText(
+      truncateUtf8(
+        redact(message.content).trim(),
+        Math.min(maximumConversationAnalyticsMessageUtf8Bytes, remaining),
+      ),
+      remainingJson,
     );
     if (!content) continue;
     prepared.push(Object.freeze({ content, role: message.role }));
     remaining -= utf8Length(content);
+    remainingJson -= jsonTextUtf8Length(content);
   }
   return Object.freeze(prepared);
 }
@@ -317,7 +368,11 @@ function preparedTrace(
 ) {
   const prepared: ConversationRetrievalTrace[] = [];
   let remaining = maximumRetrievalTraceUtf8Bytes;
+  let remainingJson = maximumRetrievalTraceUtf8Bytes;
   for (const entry of entries.slice(0, maximumRetrievalTraceEntries)) {
+    const score = entry
+      ? normalizeConversationRetrievalScore(entry.score)
+      : null;
     if (
       !entry ||
       remaining < 1 ||
@@ -326,8 +381,7 @@ function preparedTrace(
       !["hybrid", "lexical", "vector"].includes(entry.mode) ||
       !Number.isSafeInteger(entry.ordinal) ||
       entry.ordinal < 0 ||
-      !Number.isFinite(entry.score) ||
-      entry.score < 0 ||
+      score === null ||
       typeof entry.articleContentHash !== "string" ||
       !contentHashPattern.test(entry.articleContentHash) ||
       typeof entry.contentHash !== "string" ||
@@ -344,6 +398,13 @@ function preparedTrace(
     ) {
       continue;
     }
+    let candidateRemaining = remaining;
+    let candidateJsonRemaining = remainingJson;
+    for (const hash of [entry.articleContentHash, entry.contentHash]) {
+      candidateRemaining -= utf8Length(hash);
+      candidateJsonRemaining -= jsonTextUtf8Length(hash);
+    }
+    if (candidateRemaining < 0 || candidateJsonRemaining < 0) continue;
     const values = [
       ["articleId", entry.articleId, 200],
       ["canonicalUrl", entry.canonicalUrl, 2_048],
@@ -358,51 +419,66 @@ function preparedTrace(
         accepted = false;
         break;
       }
-      const text = truncateUtf8(
-        redact(value).trim(),
-        Math.min(maximum, remaining),
+      const text = truncateJsonText(
+        truncateUtf8(
+          redact(value).trim(),
+          Math.min(maximum, candidateRemaining),
+        ),
+        candidateJsonRemaining,
       );
       if (!text) {
         accepted = false;
         break;
       }
       normalized[key] = text;
-      remaining -= utf8Length(text);
+      candidateRemaining -= utf8Length(text);
+      candidateJsonRemaining -= jsonTextUtf8Length(text);
     }
     const headingPath: string[] = [];
     for (const heading of entry.headingPath) {
-      const text = truncateUtf8(
-        redact(heading).trim(),
-        Math.min(maximumRetrievalHeadingUtf8Bytes, remaining),
+      const text = truncateJsonText(
+        truncateUtf8(
+          redact(heading).trim(),
+          Math.min(maximumRetrievalHeadingUtf8Bytes, candidateRemaining),
+        ),
+        candidateJsonRemaining,
       );
       if (!text) {
         accepted = false;
         break;
       }
       headingPath.push(text);
-      remaining -= utf8Length(text);
+      candidateRemaining -= utf8Length(text);
+      candidateJsonRemaining -= jsonTextUtf8Length(text);
     }
     if (accepted) {
-      prepared.push(
-        Object.freeze({
-          articleContentHash: entry.articleContentHash,
-          articleId: normalized.articleId!,
-          canonicalUrl: normalized.canonicalUrl!,
-          contentHash: entry.contentHash,
-          excerpt: normalized.excerpt!,
-          headingPath: Object.freeze(headingPath),
-          indexGeneration: entry.indexGeneration,
-          mode: entry.mode,
-          ordinal: entry.ordinal,
-          score: entry.score,
-          sourceId: normalized.sourceId!,
-          sourceLineRange: Object.freeze({
-            end: entry.sourceLineRange.end,
-            start: entry.sourceLineRange.start,
-          }),
-          title: normalized.title!,
+      const candidate = Object.freeze({
+        articleContentHash: entry.articleContentHash,
+        articleId: normalized.articleId!,
+        canonicalUrl: normalized.canonicalUrl!,
+        contentHash: entry.contentHash,
+        excerpt: normalized.excerpt!,
+        headingPath: Object.freeze(headingPath),
+        indexGeneration: entry.indexGeneration,
+        mode: entry.mode,
+        ordinal: entry.ordinal,
+        score,
+        sourceId: normalized.sourceId!,
+        sourceLineRange: Object.freeze({
+          end: entry.sourceLineRange.end,
+          start: entry.sourceLineRange.start,
         }),
-      );
+        title: normalized.title!,
+      });
+      if (
+        utf8Length(JSON.stringify([...prepared, candidate])) >
+        maximumRetrievalTraceJsonUtf8Bytes
+      ) {
+        continue;
+      }
+      prepared.push(candidate);
+      remaining = candidateRemaining;
+      remainingJson = candidateJsonRemaining;
     }
   }
   return Object.freeze(prepared);
@@ -450,7 +526,10 @@ export function prepareConversationAnalyticsRecord(
   ) {
     return null;
   }
-  const reason = prepareConversationOutcomeReason(input.reason, policy);
+  const reason =
+    input.outcome === "abandoned" && isConversationStreamActiveReason(input.reason)
+      ? conversationStreamActiveReason
+      : prepareConversationOutcomeReason(input.reason, policy);
   const expiresAt = new Date(
     input.startedAt.getTime() + policy.retentionDays * millisecondsPerDay,
   );

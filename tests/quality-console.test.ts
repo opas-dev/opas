@@ -302,6 +302,7 @@ function answerRuntime(
           usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
         };
       },
+      validate() {},
     },
   };
 }
@@ -563,6 +564,7 @@ test("reproduces a retained failure using only its redacted evidence snapshot", 
                 usage: { inputTokens: 18, outputTokens: 7, totalTokens: 25 },
               };
             },
+            validate() {},
           },
         };
       },
@@ -727,6 +729,7 @@ test("rejects retained generation citations that do not exactly map to the snaps
                   type: "citation" as const,
                 };
               },
+              validate() {},
             },
           };
         },
@@ -1238,6 +1241,7 @@ test("keeps playground lexical preflight distinct from generated citations", asy
           usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
         };
       },
+      validate() {},
     },
   } as AnswerRuntime;
   const playground = await runQualityPlayground(
