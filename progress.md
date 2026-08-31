@@ -12,7 +12,7 @@
 ## Status
 - **Current phase:** Phase 13 — release readiness
 - **v0.1:** 40 / 40 complete
-- **v0.2:** 25 / 26 complete
+- **v0.2:** 26 / 26 complete
 
 ## Blockers
 - None.
@@ -169,7 +169,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 13.2 Add authenticated redacted conversation/source trace review, saved-question runs, result comparison, CSV export, and a test playground. **Verify:** an administrator can reproduce a failed answer from retained redacted evidence, inspect retrieved chunks and scores, compare releases, and export only the active workspace's unexpired data.
 - [x] 13.3 Add ranked unsupported/low-rated/escalated questions, source usefulness, topic guardrails, and corrective editor suggestions that enter retrieval only after they are merged into a published, citable article. **Verify:** known failure fixtures move predictably after a published correction, while unpublished suggestions never appear in retrieval and every answer retains a canonical citation.
 - [x] 13.4 Add read-only MCP search/read tools and `Copy page`, `View Markdown`, and `Open in ChatGPT/Claude` actions. **Verify:** the current Streamable HTTP protocol passes with a patched SDK and fresh stateless transport per request; tools expose only published scoped content and reject malformed origins and protocol versions.
-- [ ] 13.5 Release v0.2 after complete portability and production checks. **Verify:** lint, typecheck, both-dialect tests, Next/OpenNext/Docker builds, Docker smoke, isolated Cloudflare/D1 stage, disposable Vercel compatibility project/Neon database, migration/rollback, eval gates, security/privacy headers, and post-confirmation production smoke all pass; the exact tag CI is green.
+- [x] 13.5 Release v0.2 after complete portability and production checks. **Verify:** lint, typecheck, both-dialect tests, Next/OpenNext/Docker builds, Docker smoke, isolated Cloudflare/D1 stage, disposable Vercel compatibility project/Neon database, migration/rollback, eval gates, security/privacy headers, and post-confirmation production smoke all pass; the exact tag CI is green.
 
 ## Definition of done (v0.2)
 
@@ -185,6 +185,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
+
+- 2026-09-01 — 13.5 and OPAS Answers v0.2 release — exact candidate `3a250b6275377116c72402fe04889a70694d5080` passed lint, typecheck, all 630 tests including both repository dialects, native Next, OpenNext/workerd, and guarded Vercel builds. A fresh isolated Docker/Postgres stack built, migrated, ran healthy as non-root, and passed every smoke route before its containers and volume were removed. Prior isolated Cloudflare/D1 and disposable Vercel/Neon acceptance covered migration/rollback, browser, security/privacy, and runtime portability; the saved production evaluation gates passed; both current Cloudflare production origins passed the post-rollout smoke. Annotated tag `v0.2.0` points to the exact candidate, tag CI run `33451756941` passed, and the [OPAS v0.2.0 release](https://github.com/opas-dev/opas/releases/tag/v0.2.0) is published — evidence `/private/tmp/opas-v020-release-full-test.log`, `/private/tmp/opas-v020-release-next-build.log`, `/private/tmp/opas-v020-release-cloudflare-build.log`, `/private/tmp/opas-v020-release-vercel-build.log`, `/private/tmp/opas-v020-release-docker-up.log`, `/private/tmp/opas-v020-release-docker-smoke.log`, `/private/tmp/opas-v020-release-docker-user.log`, `/private/tmp/opas-v020-release-production-smoke.log`, and `/private/tmp/opas-v020-release-tag-ci.log` — this commit
 
 - 2026-09-01 — 10.5 and 11.6 closure — completed the real production publication-to-active measurement at 12/12 current jobs and 6,289 ms p95; lexical retrieved accepted top-five evidence for 18/20 answerable questions, while Orama hybrid and live Workers AI each reached 20/20, with sub-250 ms warm retrieval, sub-3 ms rebuild, 95,682,560-byte workerd peak RSS, and $0.000002 average evaluated inference cost. Saved production evaluation `d27fa924-ff9c-4d8b-a1ac-5846c98df82c` ran all 50 CROFusion questions: 19/20 answerable, 10/10 unsupported, and 10/10 adversarial cases passed automatically; manual review passed 22/22 grounded/materially-correct answers and 20/22 citation-covered material claims; all 22/22 citation URLs were server-derived. The run exposed 25,135 input tokens, 650 output tokens, 4,049 microdollars, and 2,993 ms total-latency p95. A separate balanced retained D1 sample reached 84 answered conversations with a 2,969 ms first-content p95 and 3,065 ms total-latency p95. Worker version `4477ac72-e283-4b56-890c-2d27e9ede7dd` passed both production origins and a cited CROFusion answer; exact-main CI run `33450095850` passed — evidence `/private/tmp/opas-crofusion-production-activation-latency.json`, `/private/tmp/opas-citation-reconciliation-production-reviewed-results.json`, `/private/tmp/opas-citation-reconciliation-production-latency-final.json`, `/private/tmp/opas-citation-reconciliation-production-smoke.log`, and `/private/tmp/opas-citation-reconciliation-full-test.log` — this commit
 
