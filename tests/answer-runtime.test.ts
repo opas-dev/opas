@@ -765,24 +765,29 @@ test("rejects malformed admission policy before bindings and provider or reposit
   assert.equal(repositoryCalls, 0);
 });
 
-test("publishes the fixed synthetic-v1 sufficiency policy", () => {
+test("publishes the fixed CROFusion production sufficiency policy", () => {
   assert.deepEqual(answerEvidencePolicy, {
-    minimumScore: 0.7,
-    minimumScoreGapAcrossArticles: 0.07,
+    minimumScore: 0.58,
+    minimumScoreGapAcrossArticles: 0.007,
   });
   assert.ok(Object.isFrozen(answerEvidencePolicy));
   assert.deepEqual(answerEvidencePolicyCalibration, {
-    fixtureId: "synthetic_retrieval_v1",
+    fixtureId: "crofusion_answer_policy_v1",
     sourceContentHash:
-      "4297d85a9c014d8f8a2f2fc275091bdc31af84ef6220c5d01e5b67ac3c5eb712",
-    provenance: "synthetic",
-    requiredAnswerScoreFloor: 1,
-    unsupportedScoreCeiling: 1 / 3,
-    minimumScoreMidpoint: 2 / 3,
-    minimumScoreGuard: 0.7,
-    conflictingArticleGapCeiling: 0,
-    conflictingArticleGapGuard: 0.07,
-    designPartnerCalibration: "pending",
+      "dcc95593262ca7e1ef67686210e58be180e38d68d8b0ee6967f85f643c8d235b",
+    provenance: "launch-partner-production",
+    embeddingProvider: "cloudflare-workers-ai",
+    embeddingModel: "@cf/baai/bge-base-en-v1.5",
+    requiredAnswerCount: 20,
+    unsupportedCount: 10,
+    conflictingCount: 2,
+    requiredAnswerScoreFloor: 0.5877803360052762,
+    unsupportedScoreCeiling: 0.7538107319495362,
+    minimumScoreGuard: 0.58,
+    conflictingArticleGapCeiling: 0.00673885965448362,
+    conflictingArticleGapGuard: 0.007,
+    unsupportedResolution: "generation-abstention",
+    designPartnerCalibration: "complete",
   });
   assert.ok(Object.isFrozen(answerEvidencePolicyCalibration));
 });

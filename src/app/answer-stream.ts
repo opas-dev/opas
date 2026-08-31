@@ -115,6 +115,7 @@ type AnswerStreamRecord =
       message: string;
       reason: AnswerAbstention["reason"];
       type: "abstention";
+      usage?: AnswerFinish["usage"];
     }>
   | Readonly<{
       reason: AnswerFinish["reason"];
@@ -333,9 +334,15 @@ function parseRecord(line: string): AnswerStreamRecord {
   if (record.type === "citation" && exactKeys(record, ["citation", "type"])) {
     return Object.freeze({ citation: answerCitation(record.citation), type: "citation" });
   }
+  const abstentionHasUsage = record.type === "abstention" && "usage" in record;
   if (
     record.type === "abstention" &&
-    exactKeys(record, ["message", "reason", "type"]) &&
+    exactKeys(
+      record,
+      abstentionHasUsage
+        ? ["message", "reason", "type", "usage"]
+        : ["message", "reason", "type"],
+    ) &&
     (record.reason === "conflicting-evidence" ||
       record.reason === "insufficient-evidence" ||
       record.reason === "out-of-scope" ||
@@ -347,6 +354,7 @@ function parseRecord(line: string): AnswerStreamRecord {
       message: record.message as string,
       reason: record.reason,
       type: "abstention" as const,
+      ...(abstentionHasUsage ? { usage: usage(record.usage) } : {}),
     });
   }
   const finishReasons = new Set([

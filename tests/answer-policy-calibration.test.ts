@@ -1,5 +1,5 @@
-// ABOUTME: Recomputes answer evidence boundaries from the versioned synthetic retrieval fixture.
-// ABOUTME: Keeps provisional score and conflict thresholds tied to explicit measured provenance.
+// ABOUTME: Recomputes answer evidence boundaries from production and synthetic retrieval fixtures.
+// ABOUTME: Keeps score and conflict thresholds tied to explicit hash-bound measurements.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -12,6 +12,7 @@ import type {
   EvidenceCandidateIdentity,
   EvidenceChunkRecord,
 } from "@/db/repository";
+import { crofusionAnswerPolicyCalibrationV1 } from "@/evaluation/fixtures/crofusion-answer-policy-v1";
 import { syntheticRetrievalFixtureV1 } from "@/evaluation/fixtures/synthetic-retrieval-v1";
 import {
   createEvidenceRetriever,
@@ -101,88 +102,50 @@ function calibrationSource(): EvidenceRetrievalSource {
   };
 }
 
-function rounded(value: number) {
-  return Math.round(value * 1_000_000) / 1_000_000;
-}
+test("derives answer boundaries from the hash-bound production calibration", () => {
+  const fixture = crofusionAnswerPolicyCalibrationV1;
+  const requiredAnswerScores = fixture.answerable.map(([, score]) => score);
+  const requiredAnswerGaps = fixture.answerable.map(([, , gap]) => gap);
+  const unsupportedScores = fixture.unsupported.map(([, score]) => score);
+  const conflictingArticleGaps = fixture.conflictCanaries.map(
+    ([, , gap]) => gap,
+  );
 
-test("derives provisional answer boundaries from the hash-bound 50-question fixture", async () => {
-  const fixture = syntheticRetrievalFixtureV1;
-  const retrieve = createEvidenceRetriever(calibrationSource());
-  const requiredAnswerScores: number[] = [];
-  const unsupportedScores: number[] = [];
-  const conflictingArticleGaps: number[] = [];
-
-  for (const question of fixture.questions) {
-    const results = await retrieve({
-      workspaceId: fixture.workspaceId,
-      query: question.question,
-      mode: "hybrid",
-      queryVector: question.queryVector,
-      topK: 5,
-    });
-    const strongest = results[0];
-    if (question.expectedOutcome === "answer") {
-      assert.ok(strongest);
-      requiredAnswerScores.push(strongest.score);
-    }
-    if (question.classification === "unsupported") {
-      unsupportedScores.push(strongest?.score ?? 0);
-    }
-    if (
-      question.expectedOutcome === "abstain" &&
-      question.id.startsWith("conflicting_")
-    ) {
-      assert.ok(strongest);
-      const competitor = results.find(
-        ({ articleId }) => articleId !== strongest.articleId,
-      );
-      assert.ok(competitor);
-      conflictingArticleGaps.push(strongest.score - competitor.score);
-    }
-  }
-
-  const requiredAnswerScoreFloor = Math.min(...requiredAnswerScores);
-  const unsupportedScoreCeiling = Math.max(...unsupportedScores);
-  const conflictingArticleGapCeiling = rounded(
+  assert.equal(
+    fixture.sourceContentHash,
+    answerEvidencePolicyCalibration.sourceContentHash,
+  );
+  assert.equal(
+    fixture.embeddingProvider,
+    answerEvidencePolicyCalibration.embeddingProvider,
+  );
+  assert.equal(
+    fixture.embeddingModel,
+    answerEvidencePolicyCalibration.embeddingModel,
+  );
+  assert.equal(
+    requiredAnswerScores.length,
+    answerEvidencePolicyCalibration.requiredAnswerCount,
+  );
+  assert.equal(
+    unsupportedScores.length,
+    answerEvidencePolicyCalibration.unsupportedCount,
+  );
+  assert.equal(
+    conflictingArticleGaps.length,
+    answerEvidencePolicyCalibration.conflictingCount,
+  );
+  assert.equal(
+    Math.min(...requiredAnswerScores),
+    answerEvidencePolicyCalibration.requiredAnswerScoreFloor,
+  );
+  assert.equal(
+    Math.max(...unsupportedScores),
+    answerEvidencePolicyCalibration.unsupportedScoreCeiling,
+  );
+  assert.equal(
     Math.max(...conflictingArticleGaps),
-  );
-  const minimumScoreMidpoint =
-    (requiredAnswerScoreFloor + unsupportedScoreCeiling) / 2;
-
-  assert.deepEqual(
-    {
-      fixtureId: fixture.id,
-      sourceContentHash: fixture.sourceContentHash,
-      provenance: fixture.provenance,
-      requiredAnswerCount: requiredAnswerScores.length,
-      unsupportedCount: unsupportedScores.length,
-      conflictingCount: conflictingArticleGaps.length,
-      requiredAnswerScoreFloor,
-      unsupportedScoreCeiling,
-      minimumScoreMidpoint,
-      conflictingArticleGapCeiling,
-    },
-    {
-      fixtureId: answerEvidencePolicyCalibration.fixtureId,
-      sourceContentHash: answerEvidencePolicyCalibration.sourceContentHash,
-      provenance: answerEvidencePolicyCalibration.provenance,
-      requiredAnswerCount: 22,
-      unsupportedCount: 10,
-      conflictingCount: 2,
-      requiredAnswerScoreFloor:
-        answerEvidencePolicyCalibration.requiredAnswerScoreFloor,
-      unsupportedScoreCeiling:
-        answerEvidencePolicyCalibration.unsupportedScoreCeiling,
-      minimumScoreMidpoint:
-        answerEvidencePolicyCalibration.minimumScoreMidpoint,
-      conflictingArticleGapCeiling:
-        answerEvidencePolicyCalibration.conflictingArticleGapCeiling,
-    },
-  );
-  assert.ok(
-    unsupportedScores.every(
-      (score) => score < answerEvidencePolicy.minimumScore,
-    ),
+    answerEvidencePolicyCalibration.conflictingArticleGapCeiling,
   );
   assert.ok(
     requiredAnswerScores.every(
@@ -190,16 +153,23 @@ test("derives provisional answer boundaries from the hash-bound 50-question fixt
     ),
   );
   assert.ok(
+    requiredAnswerGaps.every(
+      (gap) => gap > answerEvidencePolicy.minimumScoreGapAcrossArticles,
+    ),
+  );
+  assert.ok(
     conflictingArticleGaps.every(
       (gap) => gap <= answerEvidencePolicy.minimumScoreGapAcrossArticles,
+    ),
+  );
+  assert.ok(
+    unsupportedScores.some(
+      (score) => score >= answerEvidencePolicy.minimumScore,
     ),
   );
   assert.equal(
     answerEvidencePolicyCalibration.minimumScoreGuard,
     answerEvidencePolicy.minimumScore,
-  );
-  assert.ok(
-    answerEvidencePolicyCalibration.minimumScoreGuard > minimumScoreMidpoint,
   );
   assert.equal(
     answerEvidencePolicyCalibration.conflictingArticleGapGuard,
@@ -207,9 +177,13 @@ test("derives provisional answer boundaries from the hash-bound 50-question fixt
   );
   assert.ok(
     answerEvidencePolicyCalibration.conflictingArticleGapGuard >
-      conflictingArticleGapCeiling,
+      answerEvidencePolicyCalibration.conflictingArticleGapCeiling,
   );
-  assert.equal(answerEvidencePolicyCalibration.designPartnerCalibration, "pending");
+  assert.equal(
+    answerEvidencePolicyCalibration.unsupportedResolution,
+    "generation-abstention",
+  );
+  assert.equal(answerEvidencePolicyCalibration.designPartnerCalibration, "complete");
 });
 
 test("lexical fallback admits the fixed answerable class and rejects unsupported questions", async () => {

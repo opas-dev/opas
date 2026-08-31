@@ -287,6 +287,10 @@ test("records first content token once and total request latency for every termi
     const runtime = createConversationAnalyticsRuntime({ now: () => now, store });
     const clock = recorderClock([90]);
     const recorder = createAnswerOutcomeRecorder({
+      environment: {
+        OPAS_ANSWER_INPUT_MICRODOLLARS_PER_MILLION_TOKENS: "1000000",
+        OPAS_ANSWER_OUTPUT_MICRODOLLARS_PER_MILLION_TOKENS: "2000000",
+      },
       getRuntime: async () => runtime,
       id,
       model: "fixture-model",
@@ -300,10 +304,14 @@ test("records first content token once and total request latency for every termi
       message: "I do not have enough published evidence.",
       reason: "insufficient-evidence",
       type: "abstention",
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
     });
     assert.equal(store.records.get(id)?.outcome, "abstained");
     assert.equal(store.records.get(id)?.firstTokenMilliseconds, null);
     assert.equal(store.records.get(id)?.durationMilliseconds, 90);
+    assert.equal(store.records.get(id)?.inputTokens, 10);
+    assert.equal(store.records.get(id)?.outputTokens, 5);
+    assert.equal(store.records.get(id)?.costMicrodollars, 20);
   });
 
   await context.test("failed before a content token", async () => {

@@ -217,6 +217,10 @@ test("streams safe answer blocks and maps opaque IDs to canonical retrieved meta
     .join("\n") ?? "";
   assert.match(prompt, /"citationId":"C1"/u);
   assert.match(prompt, /Reset password/u);
+  assert.match(prompt, /exactly one supplied citation/u);
+  assert.match(prompt, /"type":"abstention"/u);
+  assert.match(prompt, /"reason":"insufficient-evidence"/u);
+  assert.match(prompt, /Never put citation IDs/u);
   assert.doesNotMatch(prompt, /help\.example\.test/u);
   assert.doesNotMatch(prompt, /chunk-password-reset/u);
   assert.doesNotMatch(prompt, new RegExp(hashA, "u"));
@@ -244,6 +248,64 @@ test("streams safe answer blocks and maps opaque IDs to canonical retrieved meta
   ]);
   assert.ok(events.every(Object.isFrozen));
   assert.ok(Object.isFrozen(events[1]?.type === "citation" && events[1].citation));
+});
+
+test("returns a provider-usage-bearing abstention when evidence cannot answer", async () => {
+  const fixture = admissionFixture();
+  const service = answerService(
+    [evidence()],
+    () =>
+      providerEvents([
+        '{"type":"abstention","reason":"insufficient-evidence"}\n',
+      ]),
+    undefined,
+    fixture.admission,
+  );
+
+  assert.deepEqual(
+    await collect(
+      service.stream({
+        question: "Is telephone support available on weekends?",
+        workspaceId: "workspace-demo",
+      }),
+    ),
+    [
+      {
+        message: "I couldn’t find enough published information to answer that.",
+        reason: "insufficient-evidence",
+        type: "abstention",
+        usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+      },
+    ],
+  );
+  assert.deepEqual(fixture.settlements, [
+    {
+      outcome: "completed",
+      usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+    },
+  ]);
+});
+
+test("rejects malformed generated abstentions without exposing partial output", async (context) => {
+  for (const output of [
+    '{"type":"abstention","reason":"unsafe-request"}\n',
+    '{"type":"abstention","reason":"insufficient-evidence"}\n{"type":"content","markdown":"Trailing output."}\n',
+    '{"type":"content","markdown":"Partial answer."}\n{"type":"abstention","reason":"insufficient-evidence"}\n',
+  ]) {
+    await context.test(output.slice(0, 48), async () => {
+      const emitted: AnswerEvent[] = [];
+      const service = answerService([evidence()], () => providerEvents([output]));
+      await assert.rejects(async () => {
+        for await (const event of service.stream({
+          question: "Is telephone support available on weekends?",
+          workspaceId: "workspace-demo",
+        })) {
+          emitted.push(event);
+        }
+      });
+      assert.deepEqual(emitted, []);
+    });
+  }
 });
 
 test("frames adjacent complete JSON objects from Workers AI without weakening validation", async () => {

@@ -727,6 +727,10 @@ async function evaluateSavedQuestion(
       }
       outcome = "abstain";
       reason = event.reason;
+      usage = validUsage(event.usage);
+      if (event.usage !== undefined && (usage === null || generation === null)) {
+        throw new QualityConsoleError("unavailable");
+      }
       continue;
     }
     if (
@@ -745,6 +749,7 @@ async function evaluateSavedQuestion(
 
   if (
     outcome === null ||
+    (outcome === "abstain" && generation !== null && usage === null) ||
     (outcome === "answer" &&
       (!finished ||
         firstTokenMilliseconds === null ||
@@ -767,19 +772,20 @@ async function evaluateSavedQuestion(
         citationCovered && provenanceValid,
     );
   const sourceHit = citations.some(({ accepted }) => accepted);
-  const rates =
-    outcome === "answer"
-      ? dependencies.costRates?.find(
-          (rate) =>
-            rate.provider === generation?.provider &&
-            rate.model === generation.model,
-        )
-      : undefined;
-  const inputTokens = outcome === "abstain" ? 0 : usage?.inputTokens ?? null;
-  const outputTokens = outcome === "abstain" ? 0 : usage?.outputTokens ?? null;
-  const totalTokens = outcome === "abstain" ? 0 : usage?.totalTokens ?? null;
+  const selectedGeneration = generation as QualityQuestionResult["generation"];
+  const rates = selectedGeneration
+    ? dependencies.costRates?.find(
+        (rate) =>
+          rate.provider === selectedGeneration.provider &&
+          rate.model === selectedGeneration.model,
+      )
+    : undefined;
+  const preGenerationAbstention = outcome === "abstain" && generation === null;
+  const inputTokens = preGenerationAbstention ? 0 : usage?.inputTokens ?? null;
+  const outputTokens = preGenerationAbstention ? 0 : usage?.outputTokens ?? null;
+  const totalTokens = preGenerationAbstention ? 0 : usage?.totalTokens ?? null;
   const costMicrodollars =
-    outcome === "abstain"
+    preGenerationAbstention
       ? 0
       : estimateConversationCostMicrodollars(
           inputTokens,

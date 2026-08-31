@@ -188,7 +188,7 @@ export function createAnswerOutcomeRecorder(options: RecorderOptions) {
       }
       if (event.type === "content") assistantContent.push(event.markdown);
       if (event.type === "abstention") {
-        await finalize("abstained", event.reason, undefined, event.message);
+        await finalize("abstained", event.reason, event.usage, event.message);
       }
       if (event.type === "finish") {
         await finalize("answered", event.reason, event.usage);

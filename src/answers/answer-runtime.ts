@@ -36,6 +36,7 @@ import {
   type AnswerGuardrailEnvironment,
 } from "@/answers/guardrails";
 import type { EmbeddingGeneration, Repository } from "@/db/repository";
+import { crofusionAnswerPolicyCalibrationV1 } from "@/evaluation/fixtures/crofusion-answer-policy-v1";
 import {
   createEvidenceRetriever,
   createRepositoryEvidenceSource,
@@ -44,23 +45,35 @@ import {
 
 export const answerEvidencePolicy: Readonly<AnswerEvidencePolicy> =
   Object.freeze({
-    minimumScore: 0.7,
-    minimumScoreGapAcrossArticles: 0.07,
+    minimumScore: 0.58,
+    minimumScoreGapAcrossArticles: 0.007,
   });
 
+const answerCalibration = crofusionAnswerPolicyCalibrationV1;
+
 export const answerEvidencePolicyCalibration = Object.freeze({
-  fixtureId: "synthetic_retrieval_v1",
-  sourceContentHash:
-    "4297d85a9c014d8f8a2f2fc275091bdc31af84ef6220c5d01e5b67ac3c5eb712",
-  provenance: "synthetic" as const,
-  requiredAnswerScoreFloor: 1,
-  unsupportedScoreCeiling: 1 / 3,
-  minimumScoreMidpoint: 2 / 3,
+  fixtureId: answerCalibration.id,
+  sourceContentHash: answerCalibration.sourceContentHash,
+  provenance: answerCalibration.provenance,
+  embeddingProvider: answerCalibration.embeddingProvider,
+  embeddingModel: answerCalibration.embeddingModel,
+  requiredAnswerCount: answerCalibration.answerable.length,
+  unsupportedCount: answerCalibration.unsupported.length,
+  conflictingCount: answerCalibration.conflictCanaries.length,
+  requiredAnswerScoreFloor: Math.min(
+    ...answerCalibration.answerable.map(([, score]) => score),
+  ),
+  unsupportedScoreCeiling: Math.max(
+    ...answerCalibration.unsupported.map(([, score]) => score),
+  ),
   minimumScoreGuard: answerEvidencePolicy.minimumScore,
-  conflictingArticleGapCeiling: 0,
+  conflictingArticleGapCeiling: Math.max(
+    ...answerCalibration.conflictCanaries.map(([, , gap]) => gap),
+  ),
   conflictingArticleGapGuard:
     answerEvidencePolicy.minimumScoreGapAcrossArticles,
-  designPartnerCalibration: "pending" as const,
+  unsupportedResolution: "generation-abstention" as const,
+  designPartnerCalibration: "complete" as const,
 });
 
 export type AnswerRuntimeEnvironment = GenerationEnvironment &

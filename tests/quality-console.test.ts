@@ -248,6 +248,7 @@ function retrievedEvidence(): EvidenceRetrievalResult {
 function answerRuntime(
   options: Readonly<{
     abstain?: boolean;
+    generatedAbstention?: boolean;
     citationContentHash?: string;
     generation?: Readonly<{
       model: string;
@@ -281,6 +282,15 @@ function answerRuntime(
             provider: "openai-compatible",
           },
         );
+        if (options.generatedAbstention) {
+          yield {
+            message: "I could not find enough published information.",
+            reason: "insufficient-evidence" as const,
+            type: "abstention" as const,
+            usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
+          };
+          return;
+        }
         yield { markdown: "Use Workspace settings.", type: "content" as const };
         yield {
           citation: {
@@ -1116,6 +1126,54 @@ test("scores the runtime abstention rather than the retrieved source IDs", async
   assert.equal(response.results.questions[0]?.inputTokens, 0);
   assert.equal(response.results.questions[0]?.costMicrodollars, 0);
   assert.equal(response.results.questions[0]?.passed, true);
+});
+
+test("accounts for generated abstention tokens and cost", async () => {
+  const response = await runSavedQuestionSet(workspaceId, "question_set_one", {
+    costRates: [
+      {
+        inputMicrodollarsPerMillionTokens: "1000000",
+        model: "answer-v1",
+        outputMicrodollarsPerMillionTokens: "2000000",
+        provider: "openai-compatible",
+      },
+    ],
+    createAnswerRuntime: async () =>
+      answerRuntime({ generatedAbstention: true }),
+    repository: qualityRepository({
+      async getQuestionSet() {
+        return {
+          ...questionSet(),
+          questions: [
+            {
+              ...questionSet().questions[0]!,
+              acceptedSourceIds: [],
+              expectedOutcome: "abstain",
+              sourceContentHashes: [],
+            },
+          ],
+        };
+      },
+    }),
+  });
+
+  assert.deepEqual(response.results.questions[0]?.generation, {
+    model: "answer-v1",
+    provider: "openai-compatible",
+  });
+  assert.equal(response.results.questions[0]?.actualOutcome, "abstain");
+  assert.equal(response.results.questions[0]?.inputTokens, 20);
+  assert.equal(response.results.questions[0]?.outputTokens, 5);
+  assert.equal(response.results.questions[0]?.totalTokens, 25);
+  assert.equal(response.results.questions[0]?.costMicrodollars, 30);
+  assert.deepEqual(response.results.summary.generations, [
+    {
+      costMicrodollars: 30,
+      model: "answer-v1",
+      provider: "openai-compatible",
+      questions: 1,
+    },
+  ]);
 });
 
 test("bounds saved-set generation concurrency and fails before the route deadline", async () => {

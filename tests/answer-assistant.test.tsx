@@ -130,6 +130,24 @@ test("parses fragmented cited-answer records without exposing uncited content", 
   );
 });
 
+test("accepts a usage-bearing generated abstention as a terminal public result", async () => {
+  const generatedAbstention = JSON.stringify({
+    message: "I couldn’t find enough published information to answer that.",
+    reason: "insufficient-evidence",
+    type: "abstention",
+    usage: { inputTokens: 41, outputTokens: 9, totalTokens: 50 },
+  });
+  const result = await consumeAnswerResponse(
+    streamResponse([`${metadata}\n${generatedAbstention}\n`]),
+  );
+
+  assert.equal(result.phase, "abstained");
+  assert.deepEqual(result.abstention, {
+    message: "I couldn’t find enough published information to answer that.",
+    reason: "insufficient-evidence",
+  });
+});
+
 test("rejects streamed and stored XSS instead of rendering model-owned links", async () => {
   const unsafeRecords = [
     { markdown: '<img src=x onerror="alert(1)">', type: "content" },
