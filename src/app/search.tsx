@@ -155,7 +155,7 @@ export async function sendAnswerOutcome(
     const response = await fetch("/api/answers/outcomes", {
       body: JSON.stringify({ conversationId, outcome, ...(reason ? { reason } : {}) }),
       cache: "no-store",
-      credentials: "same-origin",
+      credentials: "omit",
       headers: {
         accept: "application/json",
         "content-type": "application/json; charset=utf-8",

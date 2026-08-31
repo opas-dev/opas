@@ -50,6 +50,7 @@ test("accepts bounded optional feedback without revealing whether a record exist
     assert.equal(response.status, 202);
     assert.deepEqual(await response.json(), { accepted: true });
     assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("set-cookie"), null);
   }
   assert.deepEqual(calls, [
     [conversationId, "low-rated", "The steps skipped my device."],

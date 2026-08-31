@@ -19,6 +19,7 @@ import {
   blockingAnswerRequest,
   claimPageCloseOutcome,
   Search,
+  sendAnswerOutcome,
 } from "@/app/search";
 
 const articleHash = "a".repeat(64);
@@ -68,6 +69,32 @@ const finish = JSON.stringify({
   reason: "stop",
   type: "finish",
   usage: { inputTokens: 24, outputTokens: 8, totalTokens: 32 },
+});
+
+test("sends public answer outcomes without browser credentials", async (context) => {
+  const requests: Array<Readonly<{ input: RequestInfo | URL; init?: RequestInit }>> = [];
+  context.mock.method(
+    globalThis,
+    "fetch",
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, init });
+      return new Response(null, { status: 202 });
+    },
+  );
+
+  assert.equal(
+    await sendAnswerOutcome(
+      "123e4567-e89b-42d3-a456-426614174000",
+      "abandoned",
+      "page-closed",
+    ),
+    true,
+  );
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.input, "/api/answers/outcomes");
+  assert.equal(requests[0]?.init?.credentials, "omit");
+  assert.equal(requests[0]?.init?.cache, "no-store");
+  assert.equal(requests[0]?.init?.keepalive, true);
 });
 
 test("parses fragmented cited-answer records without exposing uncited content", async () => {
