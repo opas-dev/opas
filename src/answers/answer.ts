@@ -496,6 +496,7 @@ function evidenceDecision(
     ({ articleId }) => articleId !== strongest.articleId,
   );
   if (
+    policy.minimumScoreGapAcrossArticles > 0 &&
     competingArticle &&
     strongest.score - competingArticle.score <=
       policy.minimumScoreGapAcrossArticles

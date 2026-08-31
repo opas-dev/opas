@@ -46,7 +46,7 @@ import {
 export const answerEvidencePolicy: Readonly<AnswerEvidencePolicy> =
   Object.freeze({
     minimumScore: 0.58,
-    minimumScoreGapAcrossArticles: 0.007,
+    minimumScoreGapAcrossArticles: 0,
   });
 
 const answerCalibration = crofusionAnswerPolicyCalibrationV1;
@@ -73,6 +73,7 @@ export const answerEvidencePolicyCalibration = Object.freeze({
   conflictingArticleGapGuard:
     answerEvidencePolicy.minimumScoreGapAcrossArticles,
   unsupportedResolution: "generation-abstention" as const,
+  conflictingResolution: "generation-abstention" as const,
   designPartnerCalibration: "complete" as const,
 });
 

@@ -768,7 +768,7 @@ test("rejects malformed admission policy before bindings and provider or reposit
 test("publishes the fixed CROFusion production sufficiency policy", () => {
   assert.deepEqual(answerEvidencePolicy, {
     minimumScore: 0.58,
-    minimumScoreGapAcrossArticles: 0.007,
+    minimumScoreGapAcrossArticles: 0,
   });
   assert.ok(Object.isFrozen(answerEvidencePolicy));
   assert.deepEqual(answerEvidencePolicyCalibration, {
@@ -785,8 +785,9 @@ test("publishes the fixed CROFusion production sufficiency policy", () => {
     unsupportedScoreCeiling: 0.7538107319495362,
     minimumScoreGuard: 0.58,
     conflictingArticleGapCeiling: 0.00673885965448362,
-    conflictingArticleGapGuard: 0.007,
+    conflictingArticleGapGuard: 0,
     unsupportedResolution: "generation-abstention",
+    conflictingResolution: "generation-abstention",
     designPartnerCalibration: "complete",
   });
   assert.ok(Object.isFrozen(answerEvidencePolicyCalibration));

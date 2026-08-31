@@ -8,6 +8,7 @@ import {
   createAnswerService,
   maximumAnswerHistoryMessages,
   maximumAnswerQuestionCodePoints,
+  type AnswerEvidencePolicy,
   type AnswerEvent,
   type AnswerRetriever,
 } from "@/answers/answer";
@@ -97,6 +98,10 @@ function answerService(
   run: (request: GenerationRequest) => AsyncIterable<GenerationEvent>,
   onRetrieve?: (request: Parameters<AnswerRetriever>[0]) => void,
   admission?: AnswerInferenceAdmission,
+  evidencePolicy: AnswerEvidencePolicy = {
+    minimumScore: 0.7,
+    minimumScoreGapAcrossArticles: 0.05,
+  },
 ) {
   const retriever: AnswerRetriever = async (request) => {
     onRetrieve?.(request);
@@ -104,10 +109,7 @@ function answerService(
   };
   return createAnswerService({
     admission,
-    evidencePolicy: {
-      minimumScore: 0.7,
-      minimumScoreGapAcrossArticles: 0.05,
-    },
+    evidencePolicy,
     generation: generator(run),
     retriever,
   });
@@ -420,6 +422,45 @@ test("abstains before generation when distinct current articles compete inside t
     ],
   );
   assert.equal(providerCalls, 0);
+});
+
+test("delegates semantic conflict decisions to generation when the score-gap guard is disabled", async () => {
+  let providerCalls = 0;
+  const service = answerService(
+    [
+      evidence({ articleId: "article-current-a", score: 0.91 }),
+      evidence({
+        articleContentHash: hashC,
+        articleId: "article-current-b",
+        canonicalUrl: "https://help.example.test/security/password-policy",
+        chunkId: "chunk-password-conflict",
+        contentHash: hashC,
+        score: 0.91,
+        sourceId: "chunk-password-conflict",
+      }),
+    ],
+    () => {
+      providerCalls += 1;
+      return providerEvents([
+        '{"type":"content","markdown":"Use the current password policy."}\n' +
+          '{"type":"citation","id":"C1"}\n',
+      ]);
+    },
+    undefined,
+    undefined,
+    { minimumScore: 0.58, minimumScoreGapAcrossArticles: 0 },
+  );
+
+  const events = await collect(
+    service.stream({
+      question: "Which password policy applies?",
+      workspaceId: "workspace-demo",
+    }),
+  );
+
+  assert.equal(providerCalls, 1);
+  assert.equal(events[0]?.type, "content");
+  assert.equal(events[1]?.type, "citation");
 });
 
 test("does not mistake multiple supporting chunks in one current article for a conflict", async () => {

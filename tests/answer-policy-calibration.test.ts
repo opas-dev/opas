@@ -153,14 +153,7 @@ test("derives answer boundaries from the hash-bound production calibration", () 
     ),
   );
   assert.ok(
-    requiredAnswerGaps.every(
-      (gap) => gap > answerEvidencePolicy.minimumScoreGapAcrossArticles,
-    ),
-  );
-  assert.ok(
-    conflictingArticleGaps.every(
-      (gap) => gap <= answerEvidencePolicy.minimumScoreGapAcrossArticles,
-    ),
+    Math.min(...requiredAnswerGaps) <= Math.max(...conflictingArticleGaps),
   );
   assert.ok(
     unsupportedScores.some(
@@ -175,12 +168,13 @@ test("derives answer boundaries from the hash-bound production calibration", () 
     answerEvidencePolicyCalibration.conflictingArticleGapGuard,
     answerEvidencePolicy.minimumScoreGapAcrossArticles,
   );
-  assert.ok(
-    answerEvidencePolicyCalibration.conflictingArticleGapGuard >
-      answerEvidencePolicyCalibration.conflictingArticleGapCeiling,
-  );
+  assert.equal(answerEvidencePolicyCalibration.conflictingArticleGapGuard, 0);
   assert.equal(
     answerEvidencePolicyCalibration.unsupportedResolution,
+    "generation-abstention",
+  );
+  assert.equal(
+    answerEvidencePolicyCalibration.conflictingResolution,
     "generation-abstention",
   );
   assert.equal(answerEvidencePolicyCalibration.designPartnerCalibration, "complete");

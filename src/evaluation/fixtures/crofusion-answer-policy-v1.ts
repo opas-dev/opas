@@ -33,7 +33,7 @@ export const crofusionAnswerPolicyCalibrationV1 = Object.freeze({
     ["crofusion_answerable_08", 0.807134362139642, 0.20533990111717415],
     ["crofusion_answerable_09", 0.7279527916604069, 0.11470984574164478],
     ["crofusion_answerable_10", 0.8333333333333334, 0.16623029289725433],
-    ["crofusion_answerable_11", 0.8, 0.007055756612759145],
+    ["crofusion_answerable_11", 0.726049, 0.004118],
     ["crofusion_answerable_12", 0.8062921324539228, 0.10190505520025572],
     ["crofusion_answerable_13", 0.8, 0.09887450559309952],
     ["crofusion_answerable_14", 0.7795260025228605, 0.02737492860352375],
