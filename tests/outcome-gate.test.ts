@@ -4,11 +4,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  consumeConfiguredOutcomeWriteAllowance,
   createOutcomeWriteGate,
-  outcomeWriteProcessLimit,
   outcomeWriteRequesterLimit,
-  outcomeWriteWindowMilliseconds,
 } from "@/outcomes/gate";
+import {
+  maximumOutcomeWritesPerWindow,
+  outcomeWriteWindowMilliseconds,
+} from "@/outcomes/admission";
 
 const url = "https://help.example.test/api/answers/outcomes";
 
@@ -26,7 +29,7 @@ function setDatabaseDriver(value: string | undefined) {
 
 test("limits every warm process and resets only when the minute advances", async () => {
   const gate = createOutcomeWriteGate(async () => null);
-  for (let index = 0; index < outcomeWriteProcessLimit; index += 1) {
+  for (let index = 0; index < maximumOutcomeWritesPerWindow; index += 1) {
     assert.deepEqual(await gate(request(), 0), { accepted: true });
   }
   assert.deepEqual(await gate(request(), 0), {
@@ -38,6 +41,38 @@ test("limits every warm process and resets only when the minute advances", async
     accepted: true,
   });
   assert.deepEqual(await gate(request(), 0), { accepted: true });
+});
+
+test("requires both the local and durable deployment allowances", async () => {
+  let durableCalls = 0;
+  const locallyLimited = await consumeConfiguredOutcomeWriteAllowance(request(), {
+    consumeLocalAllowance: async () => ({
+      accepted: false,
+      retryAfterSeconds: 17,
+    }),
+    reserveDeploymentAllowance: async () => {
+      durableCalls += 1;
+      return { accepted: true };
+    },
+  });
+  assert.deepEqual(locallyLimited, {
+    accepted: false,
+    retryAfterSeconds: 17,
+  });
+  assert.equal(durableCalls, 0);
+
+  const deploymentLimited = await consumeConfiguredOutcomeWriteAllowance(request(), {
+    consumeLocalAllowance: async () => ({ accepted: true }),
+    reserveDeploymentAllowance: async () => {
+      durableCalls += 1;
+      return { accepted: false, retryAfterSeconds: 29 };
+    },
+  });
+  assert.deepEqual(deploymentLimited, {
+    accepted: false,
+    retryAfterSeconds: 29,
+  });
+  assert.equal(durableCalls, 1);
 });
 
 test("limits each Cloudflare requester without trusting forwarded identity", async (context) => {

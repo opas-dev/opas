@@ -764,6 +764,24 @@ export const workspacePublicWriteStates = sqliteTable(
   },
 );
 
+export const publicOutcomeWriteWindows = sqliteTable(
+  "public_outcome_write_windows",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    windowStartedAt: integer("window_started_at", { mode: "timestamp_ms" })
+      .notNull(),
+    writeCount: integer("write_count").notNull(),
+  },
+  (table) => [
+    check(
+      "public_outcome_write_windows_count_check",
+      sql`${table.writeCount} between 1 and 300`,
+    ),
+  ],
+);
+
 export const publicWriteReservations = sqliteTable(
   "public_write_reservations",
   {

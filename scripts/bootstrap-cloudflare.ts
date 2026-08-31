@@ -436,6 +436,9 @@ function validateHandoffConfiguration(config: JsonObject, vars: JsonObject) {
       async cleanup() {
         return 0;
       },
+      async consumeOutcomeWindow() {
+        return true;
+      },
       async reserve() {
         return { accepted: true as const };
       },

@@ -1,9 +1,7 @@
 // ABOUTME: Validates bounded public low-rating and abandonment outcome updates.
-// ABOUTME: Applies ephemeral abuse limits and returns only fixed privacy-safe responses.
-import {
-  consumeOutcomeWriteAllowance,
-  type OutcomeWriteAllowance,
-} from "@/outcomes/gate";
+// ABOUTME: Applies local and durable limits and returns fixed privacy-safe responses.
+import type { OutcomeWriteAllowance } from "@/outcomes/admission";
+import { consumeConfiguredOutcomeWriteAllowance } from "@/outcomes/gate";
 import {
   isConversationStreamActiveReason,
   normalizeConversationAnalyticsId,
@@ -143,7 +141,7 @@ export async function handlePublicOutcomeRequest(
   let allowance: OutcomeWriteAllowance;
   try {
     allowance = await (
-      dependencies.consumeAllowance ?? consumeOutcomeWriteAllowance
+      dependencies.consumeAllowance ?? consumeConfiguredOutcomeWriteAllowance
     )(request);
   } catch {
     return response({ error: "unavailable" }, 503);

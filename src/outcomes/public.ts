@@ -1,6 +1,9 @@
-// ABOUTME: Updates retained conversation outcomes without exposing record existence publicly.
-// ABOUTME: Keeps disabled analytics a no-op and contains storage failures outside answer flows.
+// ABOUTME: Admits and updates public conversation outcomes without exposing record existence.
+// ABOUTME: Keeps requester data ephemeral and disabled analytics free of conversation rows.
+import { demoIds } from "@/db/demo";
+import { createOutcomeWriteAdmission } from "@/outcomes/admission";
 import { createConfiguredConversationAnalyticsRuntime } from "@/outcomes/runtime";
+import { getConfiguredPublicWriteAdmissionStore } from "@/outcomes/storage-runtime";
 
 const missingRecordRetryDelaysMilliseconds = Object.freeze([50, 100, 200, 400]);
 
@@ -10,6 +13,14 @@ type PublicOutcomeRuntime = Awaited<
 
 function wait(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export async function reserveConfiguredOutcomeWrite() {
+  const admission = createOutcomeWriteAdmission({
+    store: await getConfiguredPublicWriteAdmissionStore(),
+    workspaceId: demoIds.workspace,
+  });
+  return admission.reserve();
 }
 
 export async function recordConfiguredPublicOutcome(

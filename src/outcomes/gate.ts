@@ -1,12 +1,13 @@
-// ABOUTME: Rate-limits public outcome updates before they can reach portable storage.
+// ABOUTME: Applies local and deployment-wide limits before public outcome storage.
 // ABOUTME: Retains only salted one-minute Cloudflare requester keys in process memory.
-export const outcomeWriteWindowMilliseconds = 60_000;
-export const outcomeWriteProcessLimit = 300;
-export const outcomeWriteRequesterLimit = 20;
+import {
+  maximumOutcomeWritesPerWindow,
+  outcomeWriteWindowMilliseconds,
+  type OutcomeWriteAllowance,
+} from "@/outcomes/admission";
+import { reserveConfiguredOutcomeWrite } from "@/outcomes/public";
 
-export type OutcomeWriteAllowance =
-  | Readonly<{ accepted: true }>
-  | Readonly<{ accepted: false; retryAfterSeconds: number }>;
+export const outcomeWriteRequesterLimit = 20;
 
 type RequesterKey = (request: Request) => Promise<string | null>;
 type Window = { count: number; id: number; requesterCounts: Map<string, number> };
@@ -52,7 +53,7 @@ export function createOutcomeWriteGate(key: RequesterKey = requesterKey) {
       ),
     );
     if (
-      window.count >= outcomeWriteProcessLimit ||
+      window.count >= maximumOutcomeWritesPerWindow ||
       (requester !== null && requesterCount >= outcomeWriteRequesterLimit)
     ) {
       return Object.freeze({ accepted: false, retryAfterSeconds });
@@ -66,3 +67,19 @@ export function createOutcomeWriteGate(key: RequesterKey = requesterKey) {
 }
 
 export const consumeOutcomeWriteAllowance = createOutcomeWriteGate();
+
+export async function consumeConfiguredOutcomeWriteAllowance(
+  request: Request,
+  dependencies: Readonly<{
+    consumeLocalAllowance?: (request: Request) => Promise<OutcomeWriteAllowance>;
+    reserveDeploymentAllowance?: () => Promise<OutcomeWriteAllowance>;
+  }> = {},
+) {
+  const local = await (
+    dependencies.consumeLocalAllowance ?? consumeOutcomeWriteAllowance
+  )(request);
+  if (!local.accepted) return local;
+  return (
+    dependencies.reserveDeploymentAllowance ?? reserveConfiguredOutcomeWrite
+  )();
+}

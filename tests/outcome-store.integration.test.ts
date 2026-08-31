@@ -25,6 +25,8 @@ import { createSqliteSupportHandoffStore } from "@/db/sqlite/support-handoff-sto
 import type { HandoffStorageRecord, HandoffStore } from "@/handoff/service";
 import {
   createHandoffWriteAdmission,
+  createOutcomeWriteAdmission,
+  maximumOutcomeWritesPerWindow,
   type PublicWriteAdmissionStore,
 } from "@/outcomes/admission";
 import {
@@ -169,8 +171,12 @@ type StoreSet = Readonly<{
   corruptAnalyticsTrace(id: string): Promise<void>;
   handoffs: HandoffStore;
   publicWrites: PublicWriteAdmissionStore;
+  secondaryPublicWrites: PublicWriteAdmissionStore;
   rawAnalyticsCount(): Promise<number>;
   rawHandoffCount(): Promise<number>;
+  rawOutcomeWindow(): Promise<
+    Readonly<{ windowStartedAt: number; writeCount: number }> | null
+  >;
   rawPublicWriteCount(): Promise<number>;
 }>;
 
@@ -558,6 +564,75 @@ async function exerciseStores(name: string, stores: StoreSet) {
   );
   assert.equal(await stores.rawPublicWriteCount(), 1);
 
+  const outcomeAdmissions = [stores.publicWrites, stores.secondaryPublicWrites].map(
+    (store) =>
+      createOutcomeWriteAdmission({
+        now: () => current,
+        store,
+        workspaceId,
+      }),
+  );
+  const outcomeAllowances = await Promise.all(
+    Array.from({ length: maximumOutcomeWritesPerWindow + 12 }, (_, index) =>
+      outcomeAdmissions[index % outcomeAdmissions.length]!.reserve(),
+    ),
+  );
+  assert.equal(
+    outcomeAllowances.filter(({ accepted }) => accepted).length,
+    maximumOutcomeWritesPerWindow,
+    `${name} overspent the durable outcome cap`,
+  );
+  const deniedOutcome = outcomeAllowances.find(
+    (allowance): allowance is { accepted: false; retryAfterSeconds: number } =>
+      !allowance.accepted,
+  );
+  assert.equal(deniedOutcome?.retryAfterSeconds, 60);
+  assert.deepEqual(await stores.rawOutcomeWindow(), {
+    windowStartedAt: current.getTime(),
+    writeCount: maximumOutcomeWritesPerWindow,
+  });
+  assert.deepEqual(
+    await createOutcomeWriteAdmission({
+      now: () => new Date(current.getTime() + 59_999),
+      store: stores.publicWrites,
+      workspaceId,
+    }).reserve(),
+    { accepted: false, retryAfterSeconds: 1 },
+  );
+  assert.deepEqual(
+    await createOutcomeWriteAdmission({
+      now: () => new Date(current.getTime() - 60_000),
+      store: stores.secondaryPublicWrites,
+      workspaceId,
+    }).reserve(),
+    { accepted: false, retryAfterSeconds: 60 },
+  );
+  assert.deepEqual(
+    await createOutcomeWriteAdmission({
+      now: () => new Date(current.getTime() + 60_000),
+      store: stores.publicWrites,
+      workspaceId,
+    }).reserve(),
+    { accepted: true },
+  );
+  assert.deepEqual(await stores.rawOutcomeWindow(), {
+    windowStartedAt: current.getTime() + 60_000,
+    writeCount: 1,
+  });
+  assert.equal(
+    await stores.publicWrites.cleanup(
+      workspaceId,
+      new Date("2026-10-01T12:00:00.000Z"),
+      1_000,
+    ),
+    1,
+  );
+  assert.equal(await stores.rawPublicWriteCount(), 0);
+  assert.deepEqual(await stores.rawOutcomeWindow(), {
+    windowStartedAt: current.getTime() + 60_000,
+    writeCount: 1,
+  });
+
   const oldHandoffId = "323e4567-e89b-42d3-a456-426614174000";
   const activeHandoffId = "423e4567-e89b-42d3-a456-426614174000";
   await stores.handoffs.reserve(
@@ -650,8 +725,19 @@ function sqliteStores(
     },
     handoffs: createSqliteSupportHandoffStore(database),
     publicWrites: createSqlitePublicWriteAdmissionStore(database),
+    secondaryPublicWrites: createSqlitePublicWriteAdmissionStore(database),
     rawAnalyticsCount: () => count("conversation_analytics"),
     rawHandoffCount: () => count("support_handoffs"),
+    async rawOutcomeWindow() {
+      const row = client
+        .prepare(
+          "select window_started_at as windowStartedAt, write_count as writeCount from public_outcome_write_windows where workspace_id = ?",
+        )
+        .get(workspaceId) as
+        | Readonly<{ windowStartedAt: number; writeCount: number }>
+        | undefined;
+      return row ?? null;
+    },
     rawPublicWriteCount: () => count("public_write_reservations"),
   };
 }
@@ -701,8 +787,25 @@ test(
         },
         handoffs: createPostgresSupportHandoffStore(database),
         publicWrites: createPostgresPublicWriteAdmissionStore(database),
+        secondaryPublicWrites: createPostgresPublicWriteAdmissionStore(database),
         rawAnalyticsCount: () => count("conversation_analytics"),
         rawHandoffCount: () => count("support_handoffs"),
+        async rawOutcomeWindow() {
+          const result = await pool.query<{
+            windowStartedAt: Date;
+            writeCount: number;
+          }>(
+            'select window_started_at as "windowStartedAt", write_count::integer as "writeCount" from public_outcome_write_windows where workspace_id = $1',
+            [workspaceId],
+          );
+          const row = result.rows[0];
+          return row
+            ? {
+                windowStartedAt: row.windowStartedAt.getTime(),
+                writeCount: row.writeCount,
+              }
+            : null;
+        },
         rawPublicWriteCount: () => count("public_write_reservations"),
       });
     } finally {

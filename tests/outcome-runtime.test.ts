@@ -363,6 +363,7 @@ test("cleanup repeatedly drains conversations, public writes, and separate hando
   };
   const publicWriteStore = {
     cleanup: async () => publicWriteValues(),
+    consumeOutcomeWindow: async () => true,
     reserve: async () => ({ accepted: true as const }),
   } satisfies PublicWriteAdmissionStore;
   const handoffStore = {
@@ -413,6 +414,7 @@ test("rejects handoff retention outside 1 to 365 days", async () => {
         now: () => now,
         publicWriteStore: {
           cleanup: async () => 0,
+          consumeOutcomeWindow: async () => true,
           reserve: async () => ({ accepted: true as const }),
         },
       }),

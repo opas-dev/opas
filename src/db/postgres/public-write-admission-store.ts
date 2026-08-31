@@ -1,11 +1,12 @@
 // ABOUTME: Serializes durable public-write reservations for Postgres and Neon workspaces.
-// ABOUTME: Enforces rolling handoff caps atomically while preserving idempotent retries.
+// ABOUTME: Enforces handoff reservations and one-minute outcome caps atomically.
 import { sql } from "drizzle-orm";
 import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import type * as schema from "@/db/schema/postgres";
 import type {
+  PublicOutcomeWriteWindow,
   PublicWriteAdmissionStore,
   PublicWriteReservation,
   PublicWriteReservationResult,
@@ -139,10 +140,41 @@ async function reserve(
   });
 }
 
+async function consumeOutcomeWindow(
+  database: PostgresDatabase,
+  window: PublicOutcomeWriteWindow,
+) {
+  const rows = resultRows<{ writeCount: number }>(
+    await database.execute(sql`
+      insert into public_outcome_write_windows (
+        workspace_id, window_started_at, write_count
+      )
+      values (${window.workspaceId}, ${window.windowStartedAt}, 1)
+      on conflict (workspace_id) do update
+      set
+        window_started_at = excluded.window_started_at,
+        write_count = case
+          when public_outcome_write_windows.window_started_at = excluded.window_started_at
+          then public_outcome_write_windows.write_count + 1
+          else 1
+        end
+      where
+        public_outcome_write_windows.window_started_at < excluded.window_started_at
+        or (
+          public_outcome_write_windows.window_started_at = excluded.window_started_at
+          and public_outcome_write_windows.write_count < ${window.maximumWrites}
+        )
+      returning write_count as "writeCount"
+    `),
+  );
+  return rows.length === 1;
+}
+
 export function createPostgresPublicWriteAdmissionStore(
   database: PostgresDatabase,
 ): PublicWriteAdmissionStore {
   const store: PublicWriteAdmissionStore = {
+    consumeOutcomeWindow: (window) => consumeOutcomeWindow(database, window),
     reserve: (reservation) => reserve(database, reservation),
     async cleanup(workspaceId, expiredAt, limit) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {

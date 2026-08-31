@@ -149,3 +149,23 @@ test("0008 adds nullable bounded first-content-token latency without inventing o
     /SELECT "id", "workspace_id"[^;]+"duration_milliseconds", NULL, "input_tokens"/u,
   );
 });
+
+test("0009 adds only the aggregate outcome window without requester metadata", () => {
+  for (const migration of [
+    "drizzle/postgres/0009_public_outcome_admission.sql",
+    "drizzle/sqlite/0009_public_outcome_admission.sql",
+  ]) {
+    const sql = source(migration);
+    assert.match(sql, /public_outcome_write_windows/u);
+    assert.deepEqual(
+      Array.from(
+        sql.matchAll(/^\s*["`]([^"`]+)["`]\s+(?:text|integer|timestamp\b)/gmu),
+        (match) => match[1],
+      ),
+      ["workspace_id", "window_started_at", "write_count"],
+    );
+    assert.match(sql, /write_count[^;]+between 1 and 300/u);
+    assert.doesNotMatch(sql, /public_write_reservations/u);
+    assert.doesNotMatch(sql, /requester|user_agent|cookie|contact|email|phone/u);
+  }
+});

@@ -1,11 +1,12 @@
 // ABOUTME: Serializes durable public-write reservations for SQLite and Cloudflare D1.
-// ABOUTME: Uses one atomic batch to enforce rolling handoff caps without requester data.
+// ABOUTME: Enforces handoff reservations and one-minute outcome caps atomically.
 import { sql, type SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { AnyD1Database, DrizzleD1Database } from "drizzle-orm/d1";
 
 import type * as schema from "@/db/schema/sqlite";
 import type {
+  PublicOutcomeWriteWindow,
   PublicWriteAdmissionStore,
   PublicWriteReservation,
   PublicWriteReservationResult,
@@ -146,10 +147,42 @@ async function reserve(
   });
 }
 
+async function consumeOutcomeWindow(
+  database: SqliteDatabase,
+  window: PublicOutcomeWriteWindow,
+) {
+  const statement = sql`
+    insert into public_outcome_write_windows (
+      workspace_id, window_started_at, write_count
+    )
+    values (${window.workspaceId}, ${window.windowStartedAt.getTime()}, 1)
+    on conflict (workspace_id) do update
+    set
+      window_started_at = excluded.window_started_at,
+      write_count = case
+        when public_outcome_write_windows.window_started_at = excluded.window_started_at
+        then public_outcome_write_windows.write_count + 1
+        else 1
+      end
+    where
+      public_outcome_write_windows.window_started_at < excluded.window_started_at
+      or (
+        public_outcome_write_windows.window_started_at = excluded.window_started_at
+        and public_outcome_write_windows.write_count < ${window.maximumWrites}
+      )
+    returning write_count as "writeCount"
+  `;
+  return (
+    (await database.get<{ writeCount: number } | undefined>(statement)) !==
+    undefined
+  );
+}
+
 export function createSqlitePublicWriteAdmissionStore(
   database: SqliteDatabase,
 ): PublicWriteAdmissionStore {
   const store: PublicWriteAdmissionStore = {
+    consumeOutcomeWindow: (window) => consumeOutcomeWindow(database, window),
     reserve: (reservation) => reserve(database, reservation),
     async cleanup(workspaceId, expiredAt, limit) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
