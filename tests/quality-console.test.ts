@@ -1099,6 +1099,7 @@ test("attributes saved answers and cost to the provider that actually completed"
       questions: 1,
     },
   ]);
+  assert.ok(parseQualityEvaluationResults(response.results));
 });
 
 test("scores the runtime abstention rather than the retrieved source IDs", async () => {
@@ -1174,6 +1175,7 @@ test("accounts for generated abstention tokens and cost", async () => {
       questions: 1,
     },
   ]);
+  assert.ok(parseQualityEvaluationResults(response.results));
 });
 
 test("bounds saved-set generation concurrency and fails before the route deadline", async () => {

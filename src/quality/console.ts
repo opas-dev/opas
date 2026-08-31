@@ -940,7 +940,6 @@ function parsedQuestionResult(value: unknown): QualityQuestionResult | null {
       : answer === null &&
         citations.length === 0 &&
         claims.length === 0 &&
-        generation === null &&
         manualReview === null &&
         value.firstTokenMilliseconds === null;
   const tokenUsageValid =
@@ -952,11 +951,13 @@ function parsedQuestionResult(value: unknown): QualityQuestionResult | null {
         (value.inputTokens as number) + (value.outputTokens as number));
   const abstentionMetricsValid =
     value.actualOutcome === "answer" ||
-    (value.inputTokens === 0 &&
-      value.outputTokens === 0 &&
-      value.totalTokens === 0 &&
-      value.costMicrodollars === 0 &&
-      value.reason !== null);
+    (value.reason !== null &&
+      (generation === null
+        ? value.inputTokens === 0 &&
+          value.outputTokens === 0 &&
+          value.totalTokens === 0 &&
+          value.costMicrodollars === 0
+        : value.inputTokens !== null && value.outputTokens !== null));
   if (
     !answerShapeValid ||
     !tokenUsageValid ||
