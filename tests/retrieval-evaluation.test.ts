@@ -4,7 +4,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  createSyntheticRetrievalTarget,
+  crofusionLaunchPartnerFixtureV1,
+  crofusionLaunchPartnerManifestV1,
+  crofusionLaunchPartnerSourceHashInputV1,
+} from "@/evaluation/fixtures/crofusion-launch-partner-v1";
+import { createFixtureRetrievalTarget } from "@/evaluation/fixtures/fixture-target";
+import {
   syntheticRetrievalFixtureV1,
   syntheticRetrievalSourceHashInputV1,
 } from "@/evaluation/fixtures/synthetic-retrieval-v1";
@@ -59,6 +64,33 @@ test("synthetic fixture v1 contains the frozen 50-question class mix", () => {
   );
 });
 
+test("CROFusion launch-partner fixture contains the frozen 50-question class mix", () => {
+  assert.equal(crofusionLaunchPartnerFixtureV1.provenance, "launch-partner");
+  assert.equal(crofusionLaunchPartnerFixtureV1.version, 1);
+  assert.equal(crofusionLaunchPartnerFixtureV1.questions.length, 50);
+  assert.equal(crofusionLaunchPartnerManifestV1.partnerId, "crofusion");
+  assert.match(crofusionLaunchPartnerManifestV1.rightsGrantId, /2026-08-31/u);
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.keys(expectedClassCounts).map((classification) => [
+        classification,
+        crofusionLaunchPartnerFixtureV1.questions.filter(
+          (question) => question.classification === classification,
+        ).length,
+      ]),
+    ),
+    expectedClassCounts,
+  );
+  assert.ok(
+    crofusionLaunchPartnerFixtureV1.questions.some(({ id }) => id.includes("stale_")),
+  );
+  assert.ok(
+    crofusionLaunchPartnerFixtureV1.questions.some(({ id }) =>
+      id.includes("conflicting_"),
+    ),
+  );
+});
+
 test("fixture hashes bind every accepted source to the versioned corpus", async () => {
   assert.equal(
     await sha256(syntheticRetrievalSourceHashInputV1),
@@ -79,12 +111,32 @@ test("fixture hashes bind every accepted source to the versioned corpus", async 
   }
 });
 
+test("CROFusion fixture hashes bind original summaries and accepted sources", async () => {
+  assert.equal(
+    await sha256(crofusionLaunchPartnerSourceHashInputV1),
+    crofusionLaunchPartnerFixtureV1.sourceContentHash,
+  );
+  const sources = new Map(
+    crofusionLaunchPartnerFixtureV1.sources.map((source) => [source.id, source]),
+  );
+  for (const source of sources.values()) {
+    assert.equal(await sha256(source.evidenceText), source.contentHash, source.id);
+  }
+  for (const question of crofusionLaunchPartnerFixtureV1.questions) {
+    assert.deepEqual(
+      question.sourceContentHashes,
+      question.acceptedSourceIds.map((id) => sources.get(id)?.contentHash),
+      question.id,
+    );
+  }
+});
+
 test("lexical and Orama hybrid evaluate the same synthetic fixture", async () => {
   const report = await runRetrievalEvaluation({
     fixture: syntheticRetrievalFixtureV1,
     targets: [
-      createSyntheticRetrievalTarget(syntheticRetrievalFixtureV1, "lexical"),
-      createSyntheticRetrievalTarget(syntheticRetrievalFixtureV1, "hybrid"),
+      createFixtureRetrievalTarget(syntheticRetrievalFixtureV1, "lexical"),
+      createFixtureRetrievalTarget(syntheticRetrievalFixtureV1, "hybrid"),
     ],
     rebuildSamples: 2,
   });
@@ -113,6 +165,24 @@ test("lexical and Orama hybrid evaluate the same synthetic fixture", async () =>
     assert.equal("activationP95Ms" in target, false);
     assert.ok((target.rebuildP95Ms ?? -1) >= 0);
     assert.equal(target.averageEvaluatedInferenceCostUsd, 0);
+    assert.deepEqual(target.costCoverage, { numerator: 50, denominator: 50 });
+  }
+});
+
+test("CROFusion lexical and hybrid controls clear the launch-partner answerable gate", async () => {
+  const report = await runRetrievalEvaluation({
+    fixture: crofusionLaunchPartnerFixtureV1,
+    targets: [
+      createFixtureRetrievalTarget(crofusionLaunchPartnerFixtureV1, "lexical"),
+      createFixtureRetrievalTarget(crofusionLaunchPartnerFixtureV1, "hybrid"),
+    ],
+    rebuildSamples: 2,
+  });
+
+  for (const target of report.targets) {
+    assert.equal(target.status, "completed");
+    if (target.status !== "completed") continue;
+    assert.ok(target.recallAt5.rate >= 0.9, target.id);
     assert.deepEqual(target.costCoverage, { numerator: 50, denominator: 50 });
   }
 });

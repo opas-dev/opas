@@ -24,7 +24,7 @@ export type RetrievalEvaluationFixture = {
   workspaceId: string;
   name: string;
   version: number;
-  provenance: "synthetic" | "design-partner";
+  provenance: "synthetic" | "launch-partner";
   sourceContentHash: string;
   createdAt: Date;
   sources: readonly RetrievalEvaluationSource[];

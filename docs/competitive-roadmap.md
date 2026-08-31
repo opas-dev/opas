@@ -140,7 +140,7 @@ Every answer exposes “Contact support.” Abstention and negative feedback mak
 
 ### Quality, privacy, and cost are part of the MVP
 
-Freeze and version a 50-question design-partner fixture by source-content hash: at least 20 answerable, 5 ambiguous, 10 unsupported, 5 stale/conflicting with both types represented, and 10 adversarial. Save retrieval and answer runs with per-class numerator/denominator so releases can be compared.
+Freeze and version a 50-question launch-partner fixture by source-content hash: at least 20 answerable, 5 ambiguous, 10 unsupported, 5 stale/conflicting with both types represented, and 10 adversarial. Save retrieval and answer runs with per-class numerator/denominator so releases can be compared. The first release may use one operator-authorized launch partner plus the independent synthetic safety fixture; it must not invent additional customer evidence.
 
 These are OPAS release targets, not claimed market benchmarks:
 
@@ -162,7 +162,7 @@ Private sources remain out of v0.2. They require signed viewer identity, source-
 
 ### Milestone 0 — Pilot intake and migration
 
-- Capture two or three interested teams' source of truth, format, required refresh cadence, and the frozen 50-question fixture.
+- Capture the first operator-authorized launch partner's source of truth, format, required refresh cadence, and frozen 50-question fixture; retain the synthetic fixture as an independent control and add further partners as they enter an actual pilot.
 - Add deterministic shallow-navigation mapping, article order, and bounded content-addressed database assets.
 - Import Markdown files and ZIPs, including GitBook `SUMMARY.md`, frontmatter, safe assets, relative links, and redirect candidates.
 - Replace raw-text-only authoring with the Markdown-native Visual/Source editor and prove lossless round trips over imported and hand-authored fixtures.
@@ -221,6 +221,6 @@ Use hosted or `/ee` packaging for managed inference and credits, organization-wi
 ## Research limits
 
 - Capability evidence is primarily first-party vendor documentation. It proves that features are marketed and documented, not that one vendor is objectively more accurate.
-- No credible public apples-to-apples RAG benchmark was found. OPAS needs its own design-partner test set.
+- No credible public apples-to-apples RAG benchmark was found. OPAS needs its own launch-partner test set plus an independent synthetic control.
 - Enterprise prices, some overage rules, self-hosting mechanics, and retention details are private or ambiguous.
 - Cloudflare AI Search, AI model catalogs, MCP, pricing, and vendor plans are moving targets and must be rechecked at implementation time.

@@ -1,12 +1,7 @@
 // ABOUTME: Defines a versioned synthetic corpus and 50-question retrieval quality fixture.
 // ABOUTME: Provides deterministic vectors and local Orama targets without claiming partner evidence.
 import type { SavedQuestion, SavedQuestionClassification } from "@/db/repository";
-import type {
-  RetrievalEvaluationAdapter,
-  RetrievalEvaluationFixture,
-} from "@/evaluation/retrieval";
-import { createEvaluationEvidenceSource } from "@/evaluation/retrieval-source";
-import { createEvidenceRetriever } from "@/search/evidence";
+import type { RetrievalEvaluationFixture } from "@/evaluation/retrieval";
 
 export type SyntheticRetrievalSource = {
   id: string;
@@ -260,53 +255,3 @@ export const syntheticRetrievalFixtureV1: RetrievalEvaluationFixture = Object.fr
   sources,
   questions,
 });
-
-export function createSyntheticRetrievalTarget(
-  fixture: RetrievalEvaluationFixture,
-  mode: "lexical" | "hybrid",
-): RetrievalEvaluationAdapter {
-  const source = createEvaluationEvidenceSource(fixture, {
-    configurationHash: fixture.sourceContentHash,
-    model: "one-hot-v1",
-    provider: "deterministic-fixture",
-    vectors: fixture.sources.map(({ vector }) => vector),
-  });
-  let retrieve = createEvidenceRetriever(source);
-  const warmupQuestion = fixture.questions.find(
-    ({ classification }) => classification === "answerable",
-  );
-
-  return {
-    id: mode === "lexical" ? "synthetic-lexical" : "synthetic-orama-hybrid",
-    label: mode === "lexical" ? "Lexical" : "Orama hybrid",
-    kind: mode === "lexical" ? "lexical" : "orama-hybrid",
-    provider: mode === "hybrid" ? "deterministic-fixture" : null,
-    model: mode === "hybrid" ? "one-hot-v1" : null,
-    costBasis: "No paid inference; vectors are committed synthetic fixture data",
-    async rebuild() {
-      retrieve = createEvidenceRetriever(source);
-      if (warmupQuestion) {
-        await retrieve({
-          workspaceId: fixture.workspaceId,
-          query: warmupQuestion.question,
-          mode,
-          queryVector: mode === "hybrid" ? warmupQuestion.queryVector : undefined,
-          topK: 5,
-        });
-      }
-    },
-    async retrieve({ question, topK }) {
-      const results = await retrieve({
-        workspaceId: fixture.workspaceId,
-        query: question.question,
-        mode,
-        queryVector: mode === "hybrid" ? question.queryVector : undefined,
-        topK,
-      });
-      return {
-        sourceIds: results.map(({ sourceId }) => sourceId),
-        inferenceCostUsd: 0,
-      };
-    },
-  };
-}

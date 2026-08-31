@@ -1,7 +1,8 @@
-// ABOUTME: Runs the synthetic retrieval benchmark and prints its complete machine-readable report.
-// ABOUTME: Marks external providers as unconfigured unless a real adapter is supplied by deployment tooling.
+// ABOUTME: Runs a selected frozen retrieval benchmark and prints its complete machine-readable report.
+// ABOUTME: Keeps synthetic controls and launch-partner evidence explicit while selecting configured providers.
+import { crofusionLaunchPartnerFixtureV1 } from "@/evaluation/fixtures/crofusion-launch-partner-v1";
+import { createFixtureRetrievalTarget } from "@/evaluation/fixtures/fixture-target";
 import {
-  createSyntheticRetrievalTarget,
   syntheticRetrievalFixtureV1,
 } from "@/evaluation/fixtures/synthetic-retrieval-v1";
 import {
@@ -10,14 +11,24 @@ import {
 import { configuredProviderRetrievalTargets } from "@/evaluation/provider-targets";
 
 async function main() {
+  const fixtureName = process.argv[2] ?? "synthetic";
+  const fixture =
+    fixtureName === "synthetic"
+      ? syntheticRetrievalFixtureV1
+      : fixtureName === "crofusion"
+        ? crofusionLaunchPartnerFixtureV1
+        : undefined;
+  if (!fixture) {
+    throw new Error("Usage: pnpm evaluate:retrieval [synthetic|crofusion]");
+  }
   const providerTargets = await configuredProviderRetrievalTargets(
-    syntheticRetrievalFixtureV1,
+    fixture,
   );
   const report = await runRetrievalEvaluation({
-    fixture: syntheticRetrievalFixtureV1,
+    fixture,
     targets: [
-      createSyntheticRetrievalTarget(syntheticRetrievalFixtureV1, "lexical"),
-      createSyntheticRetrievalTarget(syntheticRetrievalFixtureV1, "hybrid"),
+      createFixtureRetrievalTarget(fixture, "lexical"),
+      createFixtureRetrievalTarget(fixture, "hybrid"),
       ...providerTargets,
     ],
     readMemoryBytes: () => process.memoryUsage().heapUsed,
