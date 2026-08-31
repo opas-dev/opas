@@ -22,8 +22,14 @@ import {
 import {
   notConfiguredRetrievalTarget,
   runRetrievalEvaluation,
+  type CompletedRetrievalTargetReport,
+  type RetrievalEvaluationReport,
   type RetrievalEvaluationAdapter,
 } from "@/evaluation/retrieval";
+import {
+  retrievalReleaseThresholds,
+  verifyRetrievalRelease,
+} from "@/evaluation/release-gate";
 import { createOpenAiCompatibleEmbeddingAdapter } from "@/ai/embeddings";
 
 const expectedClassCounts = {
@@ -184,6 +190,136 @@ test("CROFusion lexical and hybrid controls clear the launch-partner answerable 
     if (target.status !== "completed") continue;
     assert.ok(target.recallAt5.rate >= 0.9, target.id);
     assert.deepEqual(target.costCoverage, { numerator: 50, denominator: 50 });
+  }
+});
+
+function completedReleaseTarget(
+  id: string,
+  overrides: Partial<CompletedRetrievalTargetReport> = {},
+): CompletedRetrievalTargetReport {
+  return {
+    id,
+    label: id,
+    kind: id === "workers-ai" ? "embedding-provider" : id === "lexical" ? "lexical" : "orama-hybrid",
+    status: "completed",
+    provider: id === "workers-ai" ? "cloudflare-workers-ai" : null,
+    model: id === "workers-ai" ? "fixture-model" : null,
+    costBasis: "test",
+    perClass: {
+      answerable: { numerator: 18, denominator: 20 },
+      ambiguous: { numerator: 0, denominator: 5 },
+      unsupported: { numerator: 0, denominator: 10 },
+      "stale-conflicting": { numerator: 0, denominator: 5 },
+      adversarial: { numerator: 0, denominator: 10 },
+    },
+    recallAt5: { numerator: 18, denominator: 20, rate: 0.9 },
+    warmP95Ms: 250,
+    sourceEmbeddingP95Ms: id === "workers-ai" ? 100 : null,
+    rebuildP95Ms: id === "workers-ai" ? null : 2_000,
+    peakMemoryBytes: 1,
+    memoryMeasurement: "test",
+    averageEvaluatedInferenceCostUsd: 0.02,
+    costCoverage: { numerator: 50, denominator: 50 },
+    questions: [],
+    ...overrides,
+  };
+}
+
+function passingReleaseReport(): RetrievalEvaluationReport {
+  return {
+    fixture: {
+      id: crofusionLaunchPartnerFixtureV1.id,
+      version: 1,
+      provenance: "launch-partner",
+      sourceContentHash: crofusionLaunchPartnerFixtureV1.sourceContentHash,
+      sourceCount: crofusionLaunchPartnerFixtureV1.sources.length,
+      questionCount: 50,
+    },
+    targets: [
+      completedReleaseTarget("lexical"),
+      completedReleaseTarget("orama-hybrid"),
+      completedReleaseTarget("workers-ai"),
+      notConfiguredRetrievalTarget({
+        id: "cloudflare-ai-search",
+        label: "Cloudflare AI Search",
+        kind: "ai-search",
+        reason: "optional",
+      }),
+    ],
+  };
+}
+
+test("retrieval release verification accepts exact threshold evidence", () => {
+  const gate = verifyRetrievalRelease(passingReleaseReport(), {
+    activationP95Ms: retrievalReleaseThresholds.activationP95Ms,
+    workerdPeakMemoryBytes: retrievalReleaseThresholds.workerdPeakMemoryBytes,
+  });
+  assert.equal(gate.status, "passed");
+  assert.deepEqual(gate.requiredTargets, [
+    "lexical",
+    "orama-hybrid",
+    "workers-ai",
+  ]);
+});
+
+test("retrieval release verification fails closed without live provider completion", () => {
+  const passing = passingReleaseReport();
+  const report: RetrievalEvaluationReport = {
+    ...passing,
+    targets: [
+      ...passing.targets.slice(0, 2),
+      notConfiguredRetrievalTarget({
+        id: "workers-ai",
+        label: "Workers AI",
+        kind: "embedding-provider",
+        reason: "missing",
+      }),
+      ...passing.targets.slice(3),
+    ],
+  };
+  assert.throws(
+    () =>
+      verifyRetrievalRelease(report, {
+        activationP95Ms: 1,
+        workerdPeakMemoryBytes: 1,
+      }),
+    /workers-ai is not completed/u,
+  );
+});
+
+test("retrieval release verification rejects activation, memory, recall, latency, and cost misses", () => {
+  const evidence = { activationP95Ms: 1, workerdPeakMemoryBytes: 1 };
+  assert.throws(
+    () =>
+      verifyRetrievalRelease(passingReleaseReport(), {
+        ...evidence,
+        activationP95Ms: 60_001,
+      }),
+    /activation p95 misses/u,
+  );
+  assert.throws(
+    () =>
+      verifyRetrievalRelease(passingReleaseReport(), {
+        ...evidence,
+        workerdPeakMemoryBytes: 96 * 1024 * 1024 + 1,
+      }),
+    /workerd peak memory misses/u,
+  );
+  for (const [overrides, message] of [
+    [{ recallAt5: { numerator: 17, denominator: 20, rate: 0.85 } }, /misses recall/u],
+    [{ warmP95Ms: 251 }, /misses warm/u],
+    [{ rebuildP95Ms: 2_001 }, /misses rebuild/u],
+    [{ averageEvaluatedInferenceCostUsd: 0.020001 }, /lacks bounded cost/u],
+  ] as const) {
+    const passing = passingReleaseReport();
+    const report: RetrievalEvaluationReport = {
+      ...passing,
+      targets: [
+        completedReleaseTarget("lexical", overrides),
+        ...passing.targets.slice(1),
+      ],
+    };
+    assert.throws(() => verifyRetrievalRelease(report, evidence), message);
   }
 });
 

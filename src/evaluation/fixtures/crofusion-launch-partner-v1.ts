@@ -248,7 +248,9 @@ const sources = Object.freeze(
       }),
   ),
 );
-const sourcesById = new Map(sources.map((source) => [source.id, source]));
+const sourcesById = new Map<string, (typeof sources)[number]>(
+  sources.map((source) => [source.id, source]),
+);
 
 function queryVector(sourceIds: readonly string[]) {
   if (sourceIds.length === 0) return oneHotVector(unsupportedVectorIndex);
