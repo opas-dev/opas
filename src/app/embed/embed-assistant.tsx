@@ -155,6 +155,7 @@ export function EmbedAssistant({ parentOrigin }: EmbedAssistantProps) {
       </p>
       {!loading ? (
         <Search
+          citationNavigation="new-tab"
           key={state.context?.articleId ?? "all-published-content"}
           currentPage={state.context ?? undefined}
           handoffPageUrl={state.handoffPageUrl ?? undefined}

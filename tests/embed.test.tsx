@@ -476,7 +476,10 @@ test("loader sends only the bounded page URL and rejects forged child messages",
     `${embedOrigin}/embed?parentOrigin=${encodeURIComponent(parentOrigin)}`,
   );
   assert.equal(iframe.referrerPolicy, "no-referrer");
-  assert.equal(iframe.sandbox.value, "allow-forms allow-same-origin allow-scripts");
+  assert.equal(
+    iframe.sandbox.value,
+    "allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts",
+  );
   assert.equal(iframe.title, "OPAS help assistant");
   assert.equal(posted.length, 0);
 
@@ -543,6 +546,7 @@ test("renders an accessible isolated assistant without runtime MDX or host-page 
   assert.match(markup, /Published sources only/u);
   assert.match(css, /body:has\(\.embed-shell\)[\s\S]*min-width:\s*0/u);
   assert.match(css, /\.embed-shell[\s\S]*overflow-wrap:\s*anywhere/u);
+  assert.match(assistantSource, /citationNavigation="new-tab"/u);
   assert.doesNotMatch(`${pageSource}\n${assistantSource}`, /RuntimeMdx|dangerouslySetInnerHTML/u);
   assert.doesNotMatch(embedLoaderScript, /appendChild\([^)]*style|insertRule/u);
 });

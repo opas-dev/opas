@@ -58,10 +58,19 @@ const defaultSuggestedQuestions = [
 ] as const;
 
 type SearchProps = Readonly<{
+  citationNavigation?: "new-tab" | "same-page";
   currentPage?: CurrentPageContext;
   handoffPageUrl?: string;
   suggestedQuestions?: readonly string[];
 }>;
+
+export function citationLinkAttributes(
+  navigation: NonNullable<SearchProps["citationNavigation"]>,
+) {
+  return navigation === "new-tab"
+    ? Object.freeze({ rel: "noreferrer noopener", target: "_blank" as const })
+    : Object.freeze({});
+}
 
 type AssistantTurn = Omit<AnswerStreamSnapshot, "phase"> &
   Readonly<{
@@ -300,6 +309,7 @@ function describeSearch(state: SearchState, query: string) {
 }
 
 export function Search({
+  citationNavigation = "same-page",
   currentPage,
   handoffPageUrl,
   suggestedQuestions = defaultSuggestedQuestions,
@@ -764,7 +774,11 @@ export function Search({
                           />
                         ))}
                       </div>
-                      <a className="answer-citation" href={block.citation.canonicalUrl}>
+                      <a
+                        className="answer-citation"
+                        href={block.citation.canonicalUrl}
+                        {...citationLinkAttributes(citationNavigation)}
+                      >
                         <span aria-hidden="true">[{block.citation.id.slice(1)}]</span>{" "}
                         {block.citation.title}
                         {block.citation.headingPath.length > 0

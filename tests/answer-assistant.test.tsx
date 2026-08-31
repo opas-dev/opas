@@ -17,6 +17,7 @@ import {
 import {
   answerSnapshotDisposition,
   blockingAnswerRequest,
+  citationLinkAttributes,
   claimPageCloseOutcome,
   Search,
   sendAnswerOutcome,
@@ -174,6 +175,14 @@ test("requires canonical server-shaped citations and safe protocols", async () =
     (error: unknown) =>
       error instanceof AnswerStreamError && error.code === "invalid-response",
   );
+});
+
+test("opens embedded citations outside the isolated assistant frame", () => {
+  assert.deepEqual(citationLinkAttributes("same-page"), {});
+  assert.deepEqual(citationLinkAttributes("new-tab"), {
+    rel: "noreferrer noopener",
+    target: "_blank",
+  });
 });
 
 test("treats a disconnected stream as retryable and never commits pending text", async () => {

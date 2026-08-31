@@ -35,7 +35,13 @@ export const embedLoaderScript = String.raw`(() => {
   iframe.dataset.opasEmbed = "assistant";
   iframe.title = "OPAS help assistant";
   iframe.referrerPolicy = "no-referrer";
-  iframe.sandbox.add("allow-forms", "allow-same-origin", "allow-scripts");
+  iframe.sandbox.add(
+    "allow-forms",
+    "allow-popups",
+    "allow-popups-to-escape-sandbox",
+    "allow-same-origin",
+    "allow-scripts",
+  );
   iframe.src = embedOrigin + "/embed?parentOrigin=" + encodeURIComponent(parentOrigin);
   iframe.style.display = "block";
   iframe.style.width = "100%";

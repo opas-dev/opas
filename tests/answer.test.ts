@@ -246,6 +246,48 @@ test("streams safe answer blocks and maps opaque IDs to canonical retrieved meta
   assert.ok(Object.isFrozen(events[1]?.type === "citation" && events[1].citation));
 });
 
+test("frames adjacent complete JSON objects from Workers AI without weakening validation", async () => {
+  const output =
+    JSON.stringify({
+      markdown: 'Use `{account}` and say "done".',
+      type: "content",
+    }) + JSON.stringify({ id: "C1", type: "citation" });
+  const service = answerService([evidence()], () =>
+    providerEvents([output.slice(0, 47), output.slice(47)]),
+  );
+
+  assert.deepEqual(
+    await collect(
+      service.stream({
+        question: "How do I reset my password?",
+        workspaceId: "workspace-demo",
+      }),
+    ),
+    [
+      { markdown: 'Use `{account}` and say "done".', type: "content" },
+      {
+        citation: {
+          articleContentHash: hashA,
+          articleId: "article-password",
+          canonicalUrl: "https://help.example.test/account/reset-password",
+          contentHash: hashB,
+          headingPath: ["Account", "Password"],
+          id: "C1",
+          sourceId: "chunk-password-reset",
+          sourceLineRange: { end: 8, start: 5 },
+          title: "Reset your password",
+        },
+        type: "citation",
+      },
+      {
+        reason: "stop",
+        type: "finish",
+        usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+      },
+    ],
+  );
+});
+
 test("abstains before generation when retrieved evidence is weak", async () => {
   const fixture = admissionFixture();
   let providerCalls = 0;
