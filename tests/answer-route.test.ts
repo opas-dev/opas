@@ -28,9 +28,7 @@ const privateValue = "private-provider-key-and-prompt";
 const articleHash = "a".repeat(64);
 const chunkHash = "b".repeat(64);
 const conversationId = "123e4567-e89b-42d3-a456-426614174000";
-const safeProviderOutput =
-  '{"type":"content","markdown":"Open **Account settings**."}\n' +
-  '{"type":"citation","id":"C1"}\n';
+const safeProviderOutput = "ANSWER A\nOpen **Account settings**.";
 
 function sse(parts: readonly string[]) {
   const encoder = new TextEncoder();
@@ -557,13 +555,11 @@ test("rejects oversized bodies before JSON parsing and oversized semantic input 
   assert.equal(retrievalCalls, 0);
 });
 
-test("issues metadata before reducing malformed, unknown-citation, and XSS provider output", async (context) => {
+test("issues metadata before reducing malformed, unknown-source, and XSS provider output", async (context) => {
   for (const output of [
-    "not-json\n",
-    '{"type":"content","markdown":"Use settings."}\n' +
-      '{"type":"citation","id":"unknown"}\n',
-    '{"type":"content","markdown":"<img src=x onerror=alert(1)>"}\n' +
-      '{"type":"citation","id":"C1"}\n',
+    "not-protocol\n",
+    "ANSWER E\nUse settings.",
+    "ANSWER A\n<img src=x onerror=alert(1)>",
   ]) {
     await context.test(output.slice(0, 24), async () => {
       const response = await handleAnswerRequest(answerRequest(), {
@@ -578,16 +574,14 @@ test("issues metadata before reducing malformed, unknown-citation, and XSS provi
       ]);
       assert.doesNotMatch(
         JSON.stringify(streamed),
-        /onerror|unknown|not-json|private/u,
+        /onerror|settings|not-protocol|private/u,
       );
     });
   }
 });
 
-test("emits only a sanitized in-stream error after a previously validated cited block", async () => {
-  const unsafe =
-    '{"type":"content","markdown":"<script>alert(1)</script>"}\n' +
-    '{"type":"citation","id":"C1"}\n';
+test("emits only a sanitized in-stream error for trailing provider output", async () => {
+  const unsafe = "ANSWER A\n<script>alert(1)</script>";
   const response = await handleAnswerRequest(answerRequest(), {
     createRuntime: async () =>
       runtime(outputGeneration([safeProviderOutput, unsafe])),
@@ -598,8 +592,8 @@ test("emits only a sanitized in-stream error after a previously validated cited 
   assert.deepEqual(streamed.slice(-1), [
     { code: "invalid-answer", type: "error" },
   ]);
-  assert.equal(streamed[1]?.type, "content");
-  assert.equal(streamed[2]?.type, "citation");
+  assert.equal(streamed.length, 2);
+  assert.equal(streamed[0]?.type, "metadata");
   assert.doesNotMatch(JSON.stringify(streamed), /script|alert/u);
 });
 
@@ -652,11 +646,9 @@ test("propagates request cancellation and emits no private provider failure", as
   const decoder = new TextDecoder();
   let streamed = "";
 
-  while (!streamed.includes('"type":"citation"')) {
-    const result = await reader.read();
-    assert.equal(result.done, false);
-    streamed += decoder.decode(result.value, { stream: true });
-  }
+  const metadata = await reader.read();
+  assert.equal(metadata.done, false);
+  streamed += decoder.decode(metadata.value, { stream: true });
   const pending = reader.read();
   await providerWaiting;
   requestController.abort();

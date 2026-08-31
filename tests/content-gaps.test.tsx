@@ -375,10 +375,9 @@ const generation: GenerationAdapter = {
   },
   async *stream(): AsyncIterable<GenerationEvent> {
     yield {
-      text: '{"type":"content","markdown":"Deleted projects can be recovered for 30 days."}\n',
+      text: "ANSWER A\nDeleted projects can be recovered for 30 days.",
       type: "text",
     };
-    yield { text: '{"type":"citation","id":"C1"}\n', type: "text" };
     yield {
       reason: "stop",
       type: "finish",

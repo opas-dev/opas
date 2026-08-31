@@ -183,8 +183,7 @@ test("streams safe answer blocks and maps opaque IDs to canonical retrieved meta
     (request) => {
       generationRequests.push(request);
       return providerEvents([
-        '{"type":"content","markdown":"Open **Account settings**."}\n{"type":"cita',
-        'tion","id":"C1"}\n',
+        "ANSWER A\nOpen **Account settings**.",
       ]);
     },
     (request) => retrievalRequests.push(request),
@@ -217,12 +216,11 @@ test("streams safe answer blocks and maps opaque IDs to canonical retrieved meta
   const prompt = generationRequests[0]?.messages
     .map(({ content }) => content)
     .join("\n") ?? "";
-  assert.match(prompt, /"citationId":"C1"/u);
+  assert.match(prompt, /"sourceLetter":"A"/u);
   assert.match(prompt, /Reset password/u);
-  assert.match(prompt, /exactly one supplied citation/u);
-  assert.match(prompt, /"type":"abstention"/u);
-  assert.match(prompt, /"reason":"insufficient-evidence"/u);
-  assert.match(prompt, /Never put citation IDs/u);
+  assert.match(prompt, /exactly one supplied source letter/u);
+  assert.match(prompt, /ABSTAIN insufficient-evidence/u);
+  assert.match(prompt, /Never put a source letter/u);
   assert.doesNotMatch(prompt, /help\.example\.test/u);
   assert.doesNotMatch(prompt, /chunk-password-reset/u);
   assert.doesNotMatch(prompt, new RegExp(hashA, "u"));
@@ -257,9 +255,7 @@ test("returns a provider-usage-bearing abstention when evidence cannot answer", 
   const service = answerService(
     [evidence()],
     () =>
-      providerEvents([
-        '{"type":"abstention","reason":"insufficient-evidence"}\n',
-      ]),
+      providerEvents(["ABSTAIN insufficient-evidence"]),
     undefined,
     fixture.admission,
   );
@@ -288,11 +284,35 @@ test("returns a provider-usage-bearing abstention when evidence cannot answer", 
   ]);
 });
 
+test("treats an exact source-prefixed abstention as an abstention", async () => {
+  const service = answerService([evidence()], () =>
+    providerEvents(["ANSWER A\nABSTAIN conflicting-evidence"]),
+  );
+
+  assert.deepEqual(
+    await collect(
+      service.stream({
+        question: "Which password policy applies?",
+        workspaceId: "workspace-demo",
+      }),
+    ),
+    [
+      {
+        message:
+          "The published information is conflicting, so I can’t give a reliable answer.",
+        reason: "conflicting-evidence",
+        type: "abstention",
+        usage: { inputTokens: 42, outputTokens: 11, totalTokens: 53 },
+      },
+    ],
+  );
+});
+
 test("rejects malformed generated abstentions without exposing partial output", async (context) => {
   for (const output of [
-    '{"type":"abstention","reason":"unsafe-request"}\n',
-    '{"type":"abstention","reason":"insufficient-evidence"}\n{"type":"content","markdown":"Trailing output."}\n',
-    '{"type":"content","markdown":"Partial answer."}\n{"type":"abstention","reason":"insufficient-evidence"}\n',
+    "ABSTAIN unsafe-request",
+    "ABSTAIN insufficient-evidence\nTrailing output.",
+    "ANSWER A\nPartial answer.\nABSTAIN insufficient-evidence",
   ]) {
     await context.test(output.slice(0, 48), async () => {
       const emitted: AnswerEvent[] = [];
@@ -310,14 +330,10 @@ test("rejects malformed generated abstentions without exposing partial output", 
   }
 });
 
-test("frames adjacent complete JSON objects from Workers AI without weakening validation", async () => {
-  const output =
-    JSON.stringify({
-      markdown: 'Use `{account}` and say "done".',
-      type: "content",
-    }) + JSON.stringify({ id: "C1", type: "citation" });
+test("buffers split compact output from Workers AI without weakening validation", async () => {
+  const output = 'ANSWER A\nUse `{account}` and say "done".';
   const service = answerService([evidence()], () =>
-    providerEvents([output.slice(0, 47), output.slice(47)]),
+    providerEvents([output.slice(0, 17), output.slice(17)]),
   );
 
   assert.deepEqual(
@@ -441,10 +457,7 @@ test("delegates semantic conflict decisions to generation when the score-gap gua
     ],
     () => {
       providerCalls += 1;
-      return providerEvents([
-        '{"type":"content","markdown":"Use the current password policy."}\n' +
-          '{"type":"citation","id":"C1"}\n',
-      ]);
+      return providerEvents(["ANSWER A\nUse the current password policy."]);
     },
     undefined,
     undefined,
@@ -478,10 +491,7 @@ test("does not mistake multiple supporting chunks in one current article for a c
     ],
     () => {
       providerCalls += 1;
-      return providerEvents([
-        '{"type":"content","markdown":"Use Account settings."}\n',
-        '{"type":"citation","id":"C1"}\n',
-      ]);
+      return providerEvents(["ANSWER A\nUse Account settings."]);
     },
   );
 
@@ -496,10 +506,7 @@ test("does not mistake multiple supporting chunks in one current article for a c
 
 test("rejects unknown citation IDs instead of turning them into displayed sources", async () => {
   const service = answerService([evidence()], () =>
-    providerEvents([
-      '{"type":"content","markdown":"Use Account settings."}\n',
-      '{"type":"citation","id":"invented-source"}\n',
-    ]),
+    providerEvents(["ANSWER E\nUse Account settings."]),
   );
   const emitted: AnswerEvent[] = [];
 
@@ -529,10 +536,7 @@ for (const [name, unsafeMarkdown] of [
 ] as const) {
   test(`rejects ${name} in streamed model content`, async () => {
     const service = answerService([evidence()], () =>
-      providerEvents([
-        `${JSON.stringify({ markdown: unsafeMarkdown, type: "content" })}\n`,
-        '{"type":"citation","id":"C1"}\n',
-      ]),
+      providerEvents([`ANSWER A\n${unsafeMarkdown}`]),
     );
 
     await assert.rejects(
@@ -552,11 +556,11 @@ for (const [name, unsafeMarkdown] of [
   });
 }
 
-test("rejects malformed records, extra model-owned fields, and answers without citations", async (context) => {
+test("rejects malformed records, extra model-owned fields, and answers without sources", async (context) => {
   const cases = [
-    "not json\n",
-    '{"type":"citation","id":"C1","url":"https://evil.example.test"}\n',
-    '{"type":"content","markdown":"No citation follows."}\n',
+    "not protocol\n",
+    "ANSWER Z\nUnknown source.",
+    "ANSWER A",
   ];
   for (const output of cases) {
     await context.test(output.slice(0, 32), async () => {
@@ -579,11 +583,9 @@ test("rejects malformed records, extra model-owned fields, and answers without c
   }
 });
 
-test("does not expose uncited content when the provider finishes without a citation", async () => {
+test("does not expose content when the provider omits the source line", async () => {
   const service = answerService([evidence()], () =>
-    providerEvents([
-      '{"type":"content","markdown":"This must remain buffered."}\n',
-    ]),
+    providerEvents(["This must remain buffered."]),
   );
   const emitted: AnswerEvent[] = [];
 
@@ -763,10 +765,7 @@ test("reserves before provider inference and reconciles usage before finish", as
     () => {
       providerCalls += 1;
       assert.equal(fixture.reservations.length, 1);
-      return providerEvents([
-        '{"type":"content","markdown":"Open settings."}\n' +
-          '{"type":"citation","id":"C1"}\n',
-      ]);
+      return providerEvents(["ANSWER A\nOpen settings."]);
     },
     undefined,
     fixture.admission,
@@ -821,10 +820,7 @@ test("cross-provider fallback stays inside one reservation and one reconciliatio
   };
   const fallback = generator(() => {
     fallbackCalls += 1;
-    return providerEvents([
-      '{"type":"content","markdown":"Open settings."}\n' +
-        '{"type":"citation","id":"C1"}\n',
-    ]);
+    return providerEvents(["ANSWER A\nOpen settings."]);
   });
   const generation = createGenerationFallbackAdapter({ fallback, primary });
   const service = createAnswerService({
@@ -886,9 +882,7 @@ test("reconciles cancellation, timeout, invalid output, and provider failure onc
       [evidence()],
       async function* (request) {
         yield {
-          text:
-            '{"type":"content","markdown":"Open settings."}\n' +
-            '{"type":"citation","id":"C1"}\n',
+          text: "ANSWER A\nOpen settings.",
           type: "text",
         };
         if (request.signal?.aborted) {
@@ -912,10 +906,10 @@ test("reconciles cancellation, timeout, invalid output, and provider failure onc
         workspaceId: "workspace-demo",
       })
       [Symbol.asyncIterator]();
-    assert.equal((await iterator.next()).value?.type, "content");
-    assert.equal((await iterator.next()).value?.type, "citation");
+    const pending = iterator.next();
+    await Promise.resolve();
     controller.abort();
-    await assert.rejects(iterator.next(), /cancelled/u);
+    await assert.rejects(pending, /cancelled/u);
     assert.deepEqual(fixture.settlements, [
       { outcome: "cancelled", usage: undefined },
     ]);
@@ -969,7 +963,7 @@ test("reconciles cancellation, timeout, invalid output, and provider failure onc
     const fixture = admissionFixture();
     const service = answerService(
       [evidence()],
-      () => providerEvents(['{"type":"content","markdown":"Uncited."}\n']),
+      () => providerEvents(["Uncited."]),
       undefined,
       fixture.admission,
     );
@@ -996,9 +990,7 @@ test("reconciles cancellation, timeout, invalid output, and provider failure onc
       [evidence()],
       async function* () {
         yield {
-          text:
-            '{"type":"content","markdown":"Open settings."}\n' +
-            '{"type":"citation","id":"C1"}\n',
+          text: "ANSWER A\nOpen settings.",
           type: "text",
         };
         yield {

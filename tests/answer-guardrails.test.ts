@@ -51,9 +51,7 @@ function generationAdapter(onRequest?: (request: GenerationRequest) => void) {
       onRequest?.(request);
       return (async function* (): AsyncIterable<GenerationEvent> {
         yield {
-          text:
-            '{"type":"content","markdown":"Reset links expire after 30 minutes."}\n' +
-            '{"type":"citation","id":"C1"}\n',
+          text: "ANSWER A\nReset links expire after 30 minutes.",
           type: "text",
         };
         yield {

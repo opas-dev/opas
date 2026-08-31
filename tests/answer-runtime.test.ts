@@ -103,9 +103,7 @@ function generationAdapter(onRequest?: (request: GenerationRequest) => void) {
       onRequest?.(request);
       return (async function* (): AsyncIterable<GenerationEvent> {
         yield {
-          text:
-            '{"type":"content","markdown":"Open **Account settings**."}\n' +
-            '{"type":"citation","id":"C1"}\n',
+          text: "ANSWER A\nOpen **Account settings**.",
           type: "text",
         };
         yield {
