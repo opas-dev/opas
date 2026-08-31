@@ -49,6 +49,7 @@
     "db:migrate:d1:local": "wrangler d1 migrations apply opas-mvp --local",
     "db:seed:d1:local": "wrangler d1 execute opas-mvp --local --file scripts/seed-d1.sql",
     "evaluate:retrieval": "tsx scripts/evaluate-retrieval.ts",
+    "import:crofusion": "node --env-file=.env --import tsx scripts/import-crofusion-launch-partner.ts",
     "verify:retrieval-runtime": "tsx scripts/verify-retrieval-runtime.ts",
     "neon:prepare": "node --env-file=.env --import tsx scripts/prepare-neon.ts",
     "smoke": "bash scripts/smoke.sh"
