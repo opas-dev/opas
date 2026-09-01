@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  cloudflareSeedFile,
   cloudflareCommandEnvironment,
   prepareCloudflareTargetSnapshot,
   readCloudflareTarget,
@@ -96,7 +97,7 @@ async function main(args: string[]) {
           target.databaseName,
           "--remote",
           "--file",
-          resolve(snapshot.directory, "scripts/seed-d1.sql"),
+          resolve(snapshot.directory, cloudflareSeedFile(target)),
           "--yes",
           "--config",
           snapshot.target.configPath,

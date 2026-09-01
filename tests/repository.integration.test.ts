@@ -765,6 +765,14 @@ async function exerciseKnowledgeImport(harness: Harness) {
   assert.deepEqual(await harness.counts(), baseline);
 }
 
+async function deleteSeedCategoryArticles(harness: Harness, categoryId: string) {
+  for (const article of demoContent.articles.filter(
+    (candidate) => candidate.categoryId === categoryId,
+  )) {
+    await harness.repository.deleteArticle(demoIds.workspace, article.id);
+  }
+}
+
 async function exerciseSeedRerun(
   harness: Harness,
   seed: () => Promise<void>,
@@ -801,7 +809,7 @@ async function exerciseSeedRerun(
     config: theme.config,
   });
 
-  await harness.repository.deleteArticle(demoIds.workspace, demoIds.publishedArticle);
+  await deleteSeedCategoryArticles(harness, demoIds.gettingStartedCategory);
   assert.equal(
     await harness.repository.deleteCategory(
       demoIds.workspace,
@@ -862,7 +870,7 @@ async function exerciseSeedSlugConflicts(
   const replacementArticleId = "article_seed_slug_replacement";
   const foreignWorkspaceId = `workspace_seed_parent_${label.replaceAll(" ", "_")}`;
 
-  await harness.repository.deleteArticle(demoIds.workspace, demoIds.publishedArticle);
+  await deleteSeedCategoryArticles(harness, demoIds.gettingStartedCategory);
   assert.equal(
     await harness.repository.deleteCategory(
       demoIds.workspace,
@@ -925,7 +933,7 @@ async function exerciseSeedSlugConflicts(
   );
   await seed();
 
-  await harness.repository.deleteArticle(demoIds.workspace, demoIds.publishedArticle);
+  await deleteSeedCategoryArticles(harness, demoIds.gettingStartedCategory);
   assert.equal(
     await harness.repository.deleteCategory(
       demoIds.workspace,
@@ -1183,17 +1191,25 @@ async function exerciseRepository(harness: Harness) {
   await harness.seed();
   await harness.seed();
 
+  const publishedDemoArticles = demoContent.articles.filter(
+    (article) => article.status === "published",
+  );
+  const draftDemoArticle = demoContent.articles.find(
+    (article) => article.id === demoIds.draftArticle,
+  );
+  assert.ok(draftDemoArticle);
+
   assert.deepEqual(await harness.columns(), expectedColumns, `${harness.name} schema drifted`);
   assert.deepEqual(await harness.counts(), {
     answer_inference_leases: 0,
     article_feedback: 0,
     article_assets: 0,
     article_views: 0,
-    articles: 2,
+    articles: demoContent.articles.length,
     asset_manifest_items: 0,
     asset_manifests: 0,
     assets: 0,
-    categories: 2,
+    categories: demoContent.categories.length,
     chunk_embeddings: 0,
     embedding_generations: 0,
     embedding_jobs: 0,
@@ -1216,11 +1232,11 @@ async function exerciseRepository(harness: Harness) {
       article_feedback: 0,
       article_assets: 0,
       article_views: 0,
-      articles: 2,
+      articles: demoContent.articles.length,
       asset_manifest_items: 0,
       asset_manifests: 0,
       assets: 0,
-      categories: 2,
+      categories: demoContent.categories.length,
       chunk_embeddings: 0,
       embedding_generations: 0,
       embedding_jobs: 0,
@@ -1258,7 +1274,7 @@ async function exerciseRepository(harness: Harness) {
   assert.equal(
     await harness.repository.findPublishedArticle(
       demoIds.workspace,
-      demoContent.articles[1].slug,
+      draftDemoArticle.slug,
     ),
     null,
     `${harness.name} exposed a draft article`,
@@ -1269,8 +1285,15 @@ async function exerciseRepository(harness: Harness) {
   );
 
   const publishedArticles = await harness.repository.listPublishedArticles(demoIds.workspace);
-  assert.equal(publishedArticles.length, 1, `${harness.name} included drafts in public listings`);
-  assert.equal(publishedArticles[0].id, demoIds.publishedArticle);
+  assert.equal(
+    publishedArticles.length,
+    publishedDemoArticles.length,
+    `${harness.name} included drafts in public listings`,
+  );
+  assert.deepEqual(
+    publishedArticles.map((article) => article.id).sort(),
+    publishedDemoArticles.map((article) => article.id).sort(),
+  );
 
   const categories = await harness.repository.listCategories(demoIds.workspace);
   assert.deepEqual(
@@ -1300,6 +1323,8 @@ async function exerciseRepository(harness: Harness) {
       demoIds.gettingStartedCategory,
       contractCategory.id,
       demoIds.customizationCategory,
+      demoIds.answersCategory,
+      demoIds.deploymentCategory,
     ],
     `${harness.name} did not order equal-position categories by id`,
   );
@@ -1472,21 +1497,28 @@ async function exerciseRepository(harness: Harness) {
     await harness.repository.listEvidenceChunks(demoIds.workspace),
     chunksBeforeCategoryMismatch,
   );
+  const publishedArticleIds = (
+    await harness.repository.listPublishedArticles(demoIds.workspace)
+  ).map((article) => article.id);
+  assert.equal(publishedArticleIds[0], contractArticle.id);
   assert.deepEqual(
-    (await harness.repository.listPublishedArticles(demoIds.workspace)).map(
-      (article) => article.id,
-    ),
-    [contractArticle.id, demoIds.publishedArticle],
+    publishedArticleIds.slice(1).sort(),
+    publishedDemoArticles.map((article) => article.id).sort(),
   );
 
   const listedArticles = await harness.repository.listArticles(demoIds.workspace);
   assert.deepEqual(
-    listedArticles.map((article) => [article.title, article.status]),
+    listedArticles
+      .map((article) => [article.id, article.title, article.status])
+      .sort(([leftId], [rightId]) => leftId.localeCompare(rightId)),
     [
-      ["Published repository contract", "published"],
-      [demoContent.articles[0].title, "published"],
-      [demoContent.articles[1].title, "draft"],
-    ],
+      [contractArticle.id, "Published repository contract", "published"],
+      ...demoContent.articles.map((article) => [
+        article.id,
+        article.title,
+        article.status,
+      ]),
+    ].sort(([leftId], [rightId]) => leftId.localeCompare(rightId)),
   );
 
   await harness.repository.updateArticle(
@@ -2210,7 +2242,7 @@ async function exerciseRepository(harness: Harness) {
   );
 
   const analytics = await harness.repository.getAnalytics(demoIds.workspace);
-  assert.deepEqual(analytics.articles, [
+  assert.deepEqual(analytics.articles.slice(0, 4), [
     {
       articleId: demoIds.publishedArticle,
       title: "Runtime MDX in OPAS",
@@ -2243,15 +2275,23 @@ async function exerciseRepository(harness: Harness) {
       feedbackCount: 2,
       helpfulCount: 2,
     },
-    {
-      articleId: demoIds.draftArticle,
-      title: "Customize your help center",
-      status: "draft",
-      views: 0,
-      feedbackCount: 1,
-      helpfulCount: 0,
-    },
   ]);
+  assert.deepEqual(
+    analytics.articles
+      .slice(4)
+      .sort((left, right) => left.articleId.localeCompare(right.articleId)),
+    demoContent.articles
+      .filter((article) => article.id !== demoIds.publishedArticle)
+      .map((article) => ({
+        articleId: article.id,
+        title: article.title,
+        status: article.status,
+        views: 0,
+        feedbackCount: article.id === demoIds.draftArticle ? 1 : 0,
+        helpfulCount: 0,
+      }))
+      .sort((left, right) => left.articleId.localeCompare(right.articleId)),
+  );
   assert.deepEqual(analytics.searchMisses, [
     { query: "alpha query", count: 4 },
     { query: "beta query", count: 4 },

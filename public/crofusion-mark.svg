@@ -1,0 +1,17 @@
+<!-- ABOUTME: Renders the compact CROFusion brand mark in the dedicated demo header. -->
+<!-- ABOUTME: Reuses the established cerulean and salmon geometry without remote assets. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" role="img" aria-label="CROFusion">
+  <defs>
+    <radialGradient id="cro-blue" cx="94%" cy="6%" r="110%">
+      <stop stop-color="#6396ff"/>
+      <stop offset="1" stop-color="#275bc5"/>
+    </radialGradient>
+    <radialGradient id="cro-salmon" cx="12%" cy="88%" r="115%">
+      <stop stop-color="#fe6679"/>
+      <stop offset="1" stop-color="#b50c67"/>
+    </radialGradient>
+  </defs>
+  <path fill="url(#cro-blue)" d="M1 1h34a4 4 0 0 1 4 4v15H20z"/>
+  <path fill="url(#cro-salmon)" d="M20 20h19L20 39z"/>
+  <path fill="url(#cro-salmon)" d="M5 25h10v10L1 39z"/>
+</svg>

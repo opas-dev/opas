@@ -1,6 +1,27 @@
 # Deploy to Cloudflare Workers and D1
 
-Cloudflare Workers and D1 are the primary OPAS production deployment. The checked-in Wrangler config is pinned to the maintained `opas-mvp` deployment in the DevPlant account, with `demo.opas.dev` as its canonical Custom Domain and workers.dev explicitly retained as a fallback. Cloudflare creates the Custom Domain DNS record and certificate during deployment. A fork may replace the explicit account ID and use its own matching `opas-*` Worker, D1 database, and workers.dev hostname. The bootstrap rejects malformed account IDs, names outside `opas-*`, `opas-landing`, mismatched Worker/database names, and every custom route except the exact maintained `demo.opas.dev` target.
+Cloudflare Workers and D1 are the primary OPAS production deployment. The checked-in Wrangler configs pin two isolated DevPlant targets. `opas-mvp` and D1 `opas-mvp` serve the generic OPAS product Q&A at `demo.opas.dev`; `opas-demo-cro` and D1 `opas-demo-cro` serve the CROFusion-styled launch-partner demonstration at `demo-cro.opas.dev`. Both Workers retain workers.dev as a fallback. Cloudflare creates each Custom Domain DNS record and certificate during deployment. A fork may replace the explicit account ID and use its own matching `opas-*` Worker, D1 database, and workers.dev hostname. The bootstrap rejects malformed account IDs, names outside `opas-*`, `opas-landing`, mismatched Worker/database names, and every custom route except these two exact maintained targets.
+
+## Maintained demos
+
+The targets share application code but not runtime data, administrator state, analytics, or evidence indexes. `OPAS_PUBLIC_PROFILE` selects only the compiled public identity and layout; each deployment has its own D1 binding and canonical origin.
+
+| Target | Config | Worker / D1 | Public profile | Canonical URL |
+|---|---|---|---|---|
+| Generic product demo | `wrangler.jsonc` | `opas-mvp` | `opas` | `https://demo.opas.dev` |
+| CROFusion launch-partner demo | `wrangler.crofusion.jsonc` | `opas-demo-cro` | `crofusion` | `https://demo-cro.opas.dev` |
+
+Use the matching commands for the CROFusion target:
+
+```sh
+pnpm cf:build:crofusion
+pnpm cf:migrate:crofusion
+pnpm cf:seed:crofusion
+pnpm cf:deploy:crofusion
+pnpm smoke https://demo-cro.opas.dev
+```
+
+For a first CROFusion deployment, run `pnpm cf:bootstrap:crofusion`. Its target guard requires the exact Worker, D1 database, profile, seed, and Custom Domain shown above. Never point either config at the other target's database.
 
 ## First deployment
 

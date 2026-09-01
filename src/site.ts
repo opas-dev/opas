@@ -1,8 +1,57 @@
-// ABOUTME: Defines OPAS's public identity, deployment origin, and safe URL path helpers.
-// ABOUTME: Keeps canonical and agent-readable links identical on every deployment target.
-export const siteName = "OPAS Help Center";
-export const siteDescription = "A help center you can theme, deploy, and own.";
-export const sitePublisherName = "OPAS";
+// ABOUTME: Defines deployment-selected public identities, origins, and safe URL helpers.
+// ABOUTME: Keeps generic OPAS and CROFusion demos branded without sharing runtime state.
+type PublicSiteEnvironment = Readonly<
+  Partial<Record<"OPAS_PUBLIC_PROFILE", string | undefined>>
+>;
+
+const publicSiteIdentities = {
+  opas: {
+    id: "opas",
+    productName: "OPAS",
+    siteName: "OPAS Help Center",
+    siteDescription: "A help center you can theme, deploy, and own.",
+    publisherName: "OPAS",
+    headerNote: "Help that stays yours",
+    heroContext: "OPAS Help Center",
+    heroHeading: "What can OPAS help you answer?",
+    heroCopy:
+      "Ask about OPAS features, authoring, deployment, and grounded answers—or browse by topic.",
+  },
+  crofusion: {
+    id: "crofusion",
+    productName: "CROFusion",
+    siteName: "CROFusion Help Center",
+    siteDescription:
+      "Guidance for creating, publishing, and improving landing pages with CROFusion.",
+    publisherName: "CROFusion",
+    headerNote: "Create. Test. Convert.",
+    heroContext: "CROFusion Help Center",
+    heroHeading: "How can we help you convert?",
+    heroCopy:
+      "Ask about creating, publishing, and improving landing pages—or browse the CROFusion guides.",
+  },
+} as const;
+
+export type PublicSiteIdentity =
+  (typeof publicSiteIdentities)[keyof typeof publicSiteIdentities];
+
+export function publicSiteIdentity(
+  environment: PublicSiteEnvironment = {
+    OPAS_PUBLIC_PROFILE: process.env.OPAS_PUBLIC_PROFILE,
+  },
+): PublicSiteIdentity {
+  const profile = environment.OPAS_PUBLIC_PROFILE ?? "opas";
+
+  if (profile !== "opas" && profile !== "crofusion") {
+    throw new Error("OPAS_PUBLIC_PROFILE must be opas or crofusion");
+  }
+
+  return publicSiteIdentities[profile];
+}
+
+export const siteName = publicSiteIdentities.opas.siteName;
+export const siteDescription = publicSiteIdentities.opas.siteDescription;
+export const sitePublisherName = publicSiteIdentities.opas.publisherName;
 
 const localSiteOrigin = "http://localhost:3000";
 const publicSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

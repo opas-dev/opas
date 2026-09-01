@@ -1,5 +1,5 @@
-// ABOUTME: Creates and deploys one guarded OPAS Worker and matching D1 database.
-// ABOUTME: Rejects configs that could mutate protected or unrelated Cloudflare resources.
+// ABOUTME: Creates and deploys guarded OPAS Workers with matching D1 databases.
+// ABOUTME: Restricts generic and CROFusion demos to their exact DevPlant resources.
 import {
   chmodSync,
   existsSync,
@@ -37,8 +37,18 @@ import { runCloudflareProcess } from "./cloudflare-process";
 
 const protectedWorkerName = "opas-landing";
 const maintainedAccountId = "f8801c7e8853a113a25f8b52fd9ceec1";
-const maintainedCustomDomain = "demo.opas.dev";
-const maintainedWorkerName = "opas-mvp";
+const maintainedTargets = {
+  "opas-mvp": {
+    customDomain: "demo.opas.dev",
+    publicProfile: "opas",
+    seedFile: "scripts/seed-d1.sql",
+  },
+  "opas-demo-cro": {
+    customDomain: "demo-cro.opas.dev",
+    publicProfile: "crofusion",
+    seedFile: "scripts/seed-crofusion-d1.sql",
+  },
+} as const;
 const opasResourcePattern = /^opas-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const cloudflareAccountPattern = /^[a-f0-9]{32}$/;
 const cloudflareDatabaseIdPattern =
@@ -90,6 +100,7 @@ const allowedCloudflareVariableNames = new Set([
   "OPAS_HANDOFF_FROM_EMAIL",
   "OPAS_HANDOFF_PROVIDER",
   "OPAS_HANDOFF_RETENTION_DAYS",
+  "OPAS_PUBLIC_PROFILE",
   "OPAS_SITE_URL",
 ]);
 
@@ -186,17 +197,19 @@ function validateRequiredSecrets(config: JsonObject, vars: JsonObject) {
 }
 
 function validateRouting(config: JsonObject, accountId: string, workerName: string) {
+  const maintainedTarget =
+    accountId === maintainedAccountId
+      ? maintainedTargets[workerName as keyof typeof maintainedTargets]
+      : undefined;
+
   if ("route" in config) {
     throw new Error("Singular Worker routes are not permitted.");
   }
 
   if (!("routes" in config)) {
-    if (
-      accountId === maintainedAccountId &&
-      workerName === maintainedWorkerName
-    ) {
+    if (maintainedTarget) {
       throw new Error(
-        `The maintained ${maintainedWorkerName} Worker must keep ${maintainedCustomDomain}.`,
+        `The maintained ${workerName} Worker must keep ${maintainedTarget.customDomain}.`,
       );
     }
     if (config.workers_dev === false) {
@@ -210,12 +223,11 @@ function validateRouting(config: JsonObject, accountId: string, workerName: stri
   const route = Array.isArray(routes) && routes.length === 1 ? routes[0] : undefined;
   const routeKeys = isObject(route) ? Object.keys(route).sort() : [];
   const isMaintainedRoute =
-    accountId === maintainedAccountId &&
-    workerName === maintainedWorkerName &&
+    maintainedTarget !== undefined &&
     config.workers_dev === true &&
     config.preview_urls === false &&
     isObject(route) &&
-    route.pattern === maintainedCustomDomain &&
+    route.pattern === maintainedTarget?.customDomain &&
     route.custom_domain === true &&
     routeKeys.length === 2 &&
     routeKeys[0] === "custom_domain" &&
@@ -223,11 +235,26 @@ function validateRouting(config: JsonObject, accountId: string, workerName: stri
 
   if (!isMaintainedRoute) {
     throw new Error(
-      `Custom routing is limited to ${maintainedCustomDomain} on the maintained ${maintainedWorkerName} Worker, with workers.dev enabled and preview URLs disabled.`,
+      "Custom routing is limited to the maintained OPAS demo domains and matching Workers, with workers.dev enabled and preview URLs disabled.",
     );
   }
 
-  return maintainedCustomDomain;
+  return maintainedTarget.customDomain;
+}
+
+function validatePublicProfile(vars: JsonObject, workerName: string) {
+  const profile = vars.OPAS_PUBLIC_PROFILE ?? "opas";
+  if (profile !== "opas" && profile !== "crofusion") {
+    throw new Error("vars.OPAS_PUBLIC_PROFILE must be opas or crofusion.");
+  }
+
+  const maintainedTarget =
+    maintainedTargets[workerName as keyof typeof maintainedTargets];
+  if (maintainedTarget && profile !== maintainedTarget.publicProfile) {
+    throw new Error(
+      `vars.OPAS_PUBLIC_PROFILE must be ${maintainedTarget.publicProfile} for ${workerName}.`,
+    );
+  }
 }
 
 function validateSiteOrigin(
@@ -572,6 +599,7 @@ export function validateCloudflareConfig(
   validateAnalyticsConfiguration(config.vars);
   validateEmbedConfiguration(config.vars);
   validateHandoffConfiguration(config, config.vars);
+  validatePublicProfile(config.vars, workerName);
   const secretNames = validateRequiredSecrets(config, config.vars);
 
   const siteOrigin = validateSiteOrigin(
@@ -635,6 +663,13 @@ export function validateCloudflareConfig(
     sourcePrefix: "",
     workerName,
   };
+}
+
+export function cloudflareSeedFile(target: Pick<CloudflareTarget, "workerName">) {
+  return (
+    maintainedTargets[target.workerName as keyof typeof maintainedTargets]
+      ?.seedFile ?? "scripts/seed-d1.sql"
+  );
 }
 
 export function readCloudflareTarget(
@@ -999,7 +1034,7 @@ async function main() {
     process.env,
     target.config.vars as JsonObject,
   );
-  const seedPath = resolve(process.cwd(), "scripts/seed-d1.sql");
+  const seedPath = resolve(process.cwd(), cloudflareSeedFile(target));
   const migrationsPath = resolve(dirname(target.configPath), "drizzle/sqlite");
 
   if (!existsSync(seedPath) || !existsSync(migrationsPath)) {
@@ -1067,7 +1102,7 @@ async function main() {
           target.databaseName,
           "--remote",
           "--file",
-          resolve(dataSnapshot.directory, "scripts/seed-d1.sql"),
+          resolve(dataSnapshot.directory, cloudflareSeedFile(target)),
           "--yes",
           "--config",
           dataSnapshot.target.configPath,

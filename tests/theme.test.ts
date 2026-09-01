@@ -49,8 +49,14 @@ const structuralTokens = [
   "radius-xl",
 ] as const;
 
-test("all four preset themes satisfy the complete strict schema", () => {
-  assert.deepEqual(Object.keys(themePresets), ["opas", "graphite", "ocean", "grove"]);
+test("all preset themes satisfy the complete strict schema", () => {
+  assert.deepEqual(Object.keys(themePresets), [
+    "opas",
+    "graphite",
+    "ocean",
+    "grove",
+    "crofusion",
+  ]);
 
   for (const [name, preset] of Object.entries(themePresets)) {
     assert.deepEqual(themeSchema.parse(preset), preset, `${name} preset is invalid`);

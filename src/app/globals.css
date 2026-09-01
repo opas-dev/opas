@@ -1491,7 +1491,154 @@ body:has(.embed-shell) {
   margin-top: 1rem;
 }
 
+html[data-public-profile="crofusion"] {
+  --crofusion-display: "Poppins", "Avenir Next", Avenir, var(--opas-font-sans);
+}
+
+html[data-public-profile="crofusion"] .site-header,
+html[data-public-profile="crofusion"] .hero,
+html[data-public-profile="crofusion"] .launch-points,
+html[data-public-profile="crofusion"] .public-section,
+html[data-public-profile="crofusion"] .article-shell {
+  width: min(100% - 3rem, 78rem);
+}
+
+html[data-public-profile="crofusion"] .site-header {
+  min-height: 6rem;
+}
+
+html[data-public-profile="crofusion"] .wordmark {
+  gap: 0.75rem;
+  font-family: var(--crofusion-display);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+html[data-public-profile="crofusion"] .wordmark-logo {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0;
+}
+
+html[data-public-profile="crofusion"] .header-note {
+  color: var(--opas-primary);
+  font-weight: 650;
+}
+
+html[data-public-profile="crofusion"] .hero {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.8fr) minmax(24rem, 1.2fr);
+  column-gap: clamp(3rem, 8vw, 8rem);
+  align-items: center;
+  padding-block: clamp(5rem, 9vw, 7.5rem);
+}
+
+html[data-public-profile="crofusion"] .hero-context,
+html[data-public-profile="crofusion"] .hero h1,
+html[data-public-profile="crofusion"] .hero-copy {
+  grid-column: 1;
+}
+
+html[data-public-profile="crofusion"] .hero-context {
+  margin-bottom: 1.5rem;
+  font-weight: 650;
+}
+
+html[data-public-profile="crofusion"] .hero h1,
+html[data-public-profile="crofusion"] .category-heading h1,
+html[data-public-profile="crofusion"] .article-content h1,
+html[data-public-profile="crofusion"] .section-heading h2 {
+  font-family: var(--crofusion-display);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+
+html[data-public-profile="crofusion"] .hero h1 {
+  max-width: 11ch;
+  font-size: clamp(3rem, 5.8vw, 4.75rem);
+  line-height: 1.06;
+}
+
+html[data-public-profile="crofusion"] .hero-copy {
+  margin-top: 1.75rem;
+  font-size: 1.0625rem;
+}
+
+html[data-public-profile="crofusion"] .hero > .help-search {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  width: 100%;
+  max-width: none;
+  margin-top: 0;
+  padding: clamp(1.5rem, 3vw, 2.25rem);
+  border-radius: var(--opas-radius-lg);
+  background: var(--opas-surface);
+}
+
+html[data-public-profile="crofusion"] .search-field {
+  min-height: 4.25rem;
+  background: var(--opas-background);
+}
+
+html[data-public-profile="crofusion"] .answer-submit {
+  min-height: 3rem;
+  padding-inline: 1.25rem;
+}
+
+html[data-public-profile="crofusion"] .launch-points {
+  padding-block: 4rem 7rem;
+}
+
+html[data-public-profile="crofusion"] .launch-points li {
+  grid-template-columns: 4rem minmax(0, 1fr);
+  padding-block: 1.75rem;
+}
+
+html[data-public-profile="crofusion"] .launch-points li > span {
+  color: var(--opas-accent);
+  font-weight: 750;
+}
+
+html[data-public-profile="crofusion"] .launch-points h3,
+html[data-public-profile="crofusion"] .public-article-list a {
+  font-family: var(--crofusion-display);
+  font-weight: 600;
+}
+
+html[data-public-profile="crofusion"] .article-content,
+html[data-public-profile="crofusion"] .article-feedback,
+html[data-public-profile="crofusion"] .article-assistant {
+  max-width: 48rem;
+}
+
+@media (max-width: 55rem) {
+  html[data-public-profile="crofusion"] .hero {
+    display: block;
+  }
+
+  html[data-public-profile="crofusion"] .hero > .help-search {
+    margin-top: 3rem;
+  }
+}
+
 @media (max-width: 40rem) {
+  html[data-public-profile="crofusion"] .site-header,
+  html[data-public-profile="crofusion"] .hero,
+  html[data-public-profile="crofusion"] .launch-points,
+  html[data-public-profile="crofusion"] .public-section,
+  html[data-public-profile="crofusion"] .article-shell {
+    width: min(100% - 2rem, 78rem);
+  }
+
+  html[data-public-profile="crofusion"] .hero {
+    padding-block: 4rem;
+  }
+
+  html[data-public-profile="crofusion"] .hero > .help-search {
+    padding: 1rem;
+  }
+
   .header-note {
     display: none;
   }

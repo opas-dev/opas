@@ -4,10 +4,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import {
+  publicSiteIdentity,
   resolveSiteOrigin,
-  siteDescription,
-  siteName,
-  sitePublisherName,
 } from "@/site";
 import { getCurrentTheme } from "@/theme/current";
 import { themeStylesheet } from "@/theme/stylesheet";
@@ -17,15 +15,17 @@ import "./globals.css";
 export const runtime = "nodejs";
 
 export function generateMetadata(): Metadata {
+  const identity = publicSiteIdentity();
+
   return {
     metadataBase: new URL(resolveSiteOrigin()),
     title: {
-      default: siteName,
-      template: "%s · OPAS",
+      default: identity.siteName,
+      template: `%s · ${identity.productName}`,
     },
-    description: siteDescription,
-    applicationName: "OPAS",
-    publisher: sitePublisherName,
+    description: identity.siteDescription,
+    applicationName: identity.productName,
+    publisher: identity.publisherName,
   };
 }
 
@@ -35,9 +35,10 @@ type RootLayoutProps = Readonly<{
 
 export default async function RootLayout({ children }: RootLayoutProps) {
   const theme = await getCurrentTheme();
+  const identity = publicSiteIdentity();
 
   return (
-    <html lang="en">
+    <html data-public-profile={identity.id} lang="en">
       <head>
         <style id="opas-runtime-theme">{themeStylesheet(theme.config)}</style>
       </head>

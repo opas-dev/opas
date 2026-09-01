@@ -24,7 +24,11 @@ SELECT
     1767225600000,
     1767225600000
 WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_demo')
-UNION ALL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO categories (
+  id, workspace_id, slug, name, description, position, created_at, updated_at
+)
 SELECT
     'category_customization',
     'workspace_demo',
@@ -32,6 +36,36 @@ SELECT
     'Customization',
     'Make the help center match your product and voice.',
     1,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_demo')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO categories (
+  id, workspace_id, slug, name, description, position, created_at, updated_at
+)
+SELECT
+    'category_answers',
+    'workspace_demo',
+    'answers',
+    'Answers',
+    'How OPAS finds evidence, cites sources, and handles uncertainty.',
+    2,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_demo')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO categories (
+  id, workspace_id, slug, name, description, position, created_at, updated_at
+)
+SELECT
+    'category_deployment',
+    'workspace_demo',
+    'deployment',
+    'Deployment and agents',
+    'Run OPAS where you choose and publish content for people and agents.',
+    3,
     1767225600000,
     1767225600000
 WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace_demo')
@@ -47,6 +81,7 @@ INSERT INTO articles (
   status,
   is_faq,
   author_name,
+  position,
   published_at,
   created_at,
   updated_at
@@ -64,6 +99,7 @@ SELECT
     'published',
     0,
     'OPAS',
+    0,
     1767225600000,
     1767225600000,
     1767225600000
@@ -71,7 +107,12 @@ WHERE EXISTS (
   SELECT 1 FROM categories
   WHERE id = 'category_getting_started' AND workspace_id = 'workspace_demo'
 )
-UNION ALL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
 SELECT
     'article_customize_help_center',
     'workspace_demo',
@@ -83,12 +124,221 @@ SELECT
     'draft',
     0,
     'OPAS',
+    0,
     NULL,
     1767225600000,
     1767225600000
 WHERE EXISTS (
   SELECT 1 FROM categories
   WHERE id = 'category_customization' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
+SELECT
+    'article_what_is_opas',
+    'workspace_demo',
+    'category_getting_started',
+    'what-is-opas',
+    'What is OPAS?',
+    '# What is OPAS?' || char(10) || char(10) ||
+    'OPAS is an open-source help center for publishing support content and answering reader questions from that content.' || char(10) || char(10) ||
+    'Teams can write in a visual editor or Markdown, publish without rebuilding the application, apply a complete runtime theme, and keep control of their infrastructure and data.',
+    'published',
+    1,
+    'OPAS',
+    1,
+    1767225600000,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_getting_started' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
+SELECT
+    'article_content_ownership',
+    'workspace_demo',
+    'category_getting_started',
+    'who-owns-opas-content',
+    'Who owns the content in OPAS?',
+    '# Who owns the content in OPAS?' || char(10) || char(10) ||
+    'The team operating OPAS owns its help content, database, deployment, and theme. The core product is licensed under AGPL-3.0 and can be run on infrastructure the team controls.' || char(10) || char(10) ||
+    'Published articles remain available as normal web pages and portable Markdown rather than being locked inside a proprietary editor.',
+    'published',
+    1,
+    'OPAS',
+    2,
+    1767225600000,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_getting_started' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
+SELECT
+    'article_visual_authoring',
+    'workspace_demo',
+    'category_customization',
+    'can-i-edit-visually-and-in-markdown',
+    'Can I edit visually and in Markdown?',
+    '# Can I edit visually and in Markdown?' || char(10) || char(10) ||
+    'Yes. The article editor supports visual authoring and direct Markdown source editing, with live preview, draft and published states, image assets, and validation before content is saved.' || char(10) || char(10) ||
+    'Both modes write the same portable article source, so authors can use the workflow that fits the change.',
+    'published',
+    1,
+    'OPAS',
+    0,
+    1767225600000,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_customization' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
+SELECT
+    'article_runtime_themes',
+    'workspace_demo',
+    'category_customization',
+    'can-opas-match-my-brand',
+    'Can OPAS match my brand?',
+    '# Can OPAS match my brand?' || char(10) || char(10) ||
+    'Yes. OPAS stores a complete semantic theme in the deployment database, including light and dark colors, typography, radii, and a logo.' || char(10) || char(10) ||
+    'Theme changes take effect at request time without rebuilding the application. The CROFusion demo is the same OPAS product with a separate theme and content set.',
+    'published',
+    1,
+    'OPAS',
+    1,
+    1767225600000,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_customization' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
+SELECT
+    'article_grounded_answers',
+    'workspace_demo',
+    'category_answers',
+    'how-do-grounded-answers-work',
+    'How do source-grounded answers work?',
+    '# How do source-grounded answers work?' || char(10) || char(10) ||
+    'OPAS searches the published knowledge base, retrieves relevant evidence, and asks the configured model to answer only from those sources.' || char(10) || char(10) ||
+    'Every accepted answer links back to the supporting article. Conversation outcomes and feedback can be retained for quality review under the configured deployment privacy policy.',
+    'published',
+    1,
+    'OPAS',
+    0,
+    1767225600000,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_answers' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
+SELECT
+    'article_answer_uncertainty',
+    'workspace_demo',
+    'category_answers',
+    'what-if-opas-is-not-sure',
+    'What happens when OPAS is not sure?',
+    '# What happens when OPAS is not sure?' || char(10) || char(10) ||
+    'OPAS abstains when the published evidence is missing, conflicting, unsafe, or too weak to support an answer. It does not turn an unsupported guess into help-center policy.' || char(10) || char(10) ||
+    'The reader can continue with search or send a bounded support handoff, while the unanswered question becomes useful input for improving the knowledge base.',
+    'published',
+    1,
+    'OPAS',
+    1,
+    1767225600000,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_answers' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
+SELECT
+    'article_deployment_targets',
+    'workspace_demo',
+    'category_deployment',
+    'where-can-i-deploy-opas',
+    'Where can I deploy OPAS?',
+    '# Where can I deploy OPAS?' || char(10) || char(10) ||
+    'OPAS runs as a Docker deployment with PostgreSQL, on Vercel with Neon, or on Cloudflare Workers with D1.' || char(10) || char(10) ||
+    'The same repository contract and database-backed content model are verified across those targets, so a help center is not tied to one hosting vendor.',
+    'published',
+    1,
+    'OPAS',
+    0,
+    1767225600000,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_deployment' AND workspace_id = 'workspace_demo'
+)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO articles (
+  id, workspace_id, category_id, slug, title, mdx, status, is_faq,
+  author_name, position, published_at, created_at, updated_at
+)
+SELECT
+    'article_agent_access',
+    'workspace_demo',
+    'category_deployment',
+    'how-can-agents-read-opas',
+    'How can AI agents read OPAS?',
+    '# How can AI agents read OPAS?' || char(10) || char(10) ||
+    'Every deployment can publish compact and full `llms.txt` indexes, a Markdown version of each article, and a read-only MCP endpoint for search and article retrieval.' || char(10) || char(10) ||
+    'Those machine-readable surfaces come from the same published records readers see in the browser, so there is one source of truth.',
+    'published',
+    1,
+    'OPAS',
+    1,
+    1767225600000,
+    1767225600000,
+    1767225600000
+WHERE EXISTS (
+  SELECT 1 FROM categories
+  WHERE id = 'category_deployment' AND workspace_id = 'workspace_demo'
 )
 ON CONFLICT DO NOTHING;
 

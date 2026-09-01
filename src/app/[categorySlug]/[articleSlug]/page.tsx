@@ -17,7 +17,7 @@ import {
   serializeJsonLd,
 } from "@/content/publication";
 import { RuntimeMdx } from "@/content/runtime-mdx";
-import { absoluteSiteUrl } from "@/site";
+import { absoluteSiteUrl, publicSiteIdentity } from "@/site";
 
 export const runtime = "nodejs";
 
@@ -62,6 +62,7 @@ export default async function ArticlePage({
 
   const { article, category } = publication;
   const faqData = faqJsonLd(publication);
+  const identity = publicSiteIdentity();
 
   return (
     <main>
@@ -83,7 +84,7 @@ export default async function ArticlePage({
       <PublicHeader />
       <div className="article-shell">
         <nav className="article-nav" aria-label="Breadcrumb">
-          <Link href="/">OPAS</Link>
+          <Link href="/">{identity.productName}</Link>
           <span aria-hidden="true">/</span>
           <Link href={`/${category.slug}`}>{category.name}</Link>
           <span aria-hidden="true">/</span>

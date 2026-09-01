@@ -10,12 +10,13 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** Phase 13 — release readiness
+- **Current phase:** Phase 14 — maintained demo isolation
 - **v0.1:** 40 / 40 complete
 - **v0.2:** 26 / 26 complete
+- **Maintained demos:** 3 / 5 complete
 
 ## Blockers
-- None.
+- B8 (generic D1 cleanup confirmation) — the bounded removal of the 12 CROFusion evaluation articles and their now-isolated category from `opas-mvp` D1 requires the immediate destructive-action confirmation before the staged Cloudflare dashboard query can run. Time Travel bookmark `000000d9-000009cd-000050d9-0d0cf3ecdb24d2cf0ebc59e115cdec72` protects the pre-change state.
 
 Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. B2 (Neon) — `NEON_DATABASE_URL` in `.env`, connection verified (Postgres 18.6, eu-central-1), 2026-08-27. B3 (rollout authority) — Timo authorized the complete rollout on 2026-08-28 and clarified that Cloudflare, not Vercel, is production. B4 (launch-partner inputs) — Timo designated CROFusion as the first launch partner on 2026-08-31; the versioned public-facts inventory and 50-question fixture are committed without private source text, customer data, or invented customers, while the synthetic fixture remains an independent control. B5 (Cloudflare generation Gateway) — the named `opas-answers` Gateway served cited Workers AI answers; production dashboard inspection showed logging disabled and empty, caching disabled, 16 requests, 5.76k tokens, 0 errors, and 0 cached responses, 2026-08-31. B6 (real webhook acceptance) — guarded Cloudflare stage version `8f54f245-ac3f-4482-a7b5-4969053212de` delivered authenticated external webhook context, D1 suppressed both replays, and one handoff changed its real retained answer outcome to `escalated`; every disposable resource was deleted and production remained unchanged, 2026-08-31. B7 (credential-artifact containment) — every affected application and database credential was rotated, and old administrator credentials, sessions, and Neon connection forms were rejected; clean Cloudflare v19 is the only retained Worker version and has preview routing disabled; Vercel deployment `dpl_CeXgi61Rnx23T89wKpGotNmf56JP` is the sole retained deployment, its exact source manifest equals the completely downloaded and secret-scanned clean artifact, and both superseded deployments return 404 from metadata, file, and public APIs; available account activity showed no unexpected OPAS actor but cannot prove historical artifact-download absence, so rotation and retirement were required; the raw rotation state was destroyed, 2026-08-31.
 
@@ -62,6 +63,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-31 | Cloudflare handoff deployment selects exactly one fixed email or authenticated HTTPS webhook mode, and fetch delivery handles redirects manually while rejecting all non-2xx responses | Encrypted mutually exclusive configuration prevents destination drift; workerd failed before exposing a direct upstream 200 with `redirect: "error"`, while manual mode never follows the redirect and lets OPAS reject 3xx consistently |
 | 2026-08-31 | Public outcome writes use one fixed UTC-minute aggregate row per workspace in addition to the local abuse gate | One conditional UPSERT is atomic across horizontal instances, preserves the cookie-free requester boundary, avoids per-attempt identifiers and cleanup, and behaves identically on Postgres/Neon and SQLite/D1 |
 | 2026-08-31 | Guarded prebuilt Vercel deployments pass the exact `fra1` region explicitly at upload | The prebuilt upload otherwise used Vercel's default `iad1` function region despite the checked-in project config; explicit placement keeps the compatibility runtime beside the `eu-central-1` Neon branch |
+| 2026-09-01 | Maintain the generic OPAS and CROFusion demos as separate Workers and D1 databases selected by a fixed public profile | Shared application code keeps product behavior aligned, while isolated content, administrator state, analytics, evidence, theme, canonical URL, and deployment guards prevent partner material from leaking into the generic product demo |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -171,6 +173,14 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 13.4 Add read-only MCP search/read tools and `Copy page`, `View Markdown`, and `Open in ChatGPT/Claude` actions. **Verify:** the current Streamable HTTP protocol passes with a patched SDK and fresh stateless transport per request; tools expose only published scoped content and reject malformed origins and protocol versions.
 - [x] 13.5 Release v0.2 after complete portability and production checks. **Verify:** lint, typecheck, both-dialect tests, Next/OpenNext/Docker builds, Docker smoke, isolated Cloudflare/D1 stage, disposable Vercel compatibility project/Neon database, migration/rollback, eval gates, security/privacy headers, and post-confirmation production smoke all pass; the exact tag CI is green.
 
+## Phase 14 — Maintained demo isolation
+
+- [x] 14.1 Add fixed OPAS and CROFusion public profiles with complete responsive styling, identity, metadata, browser icon, and theme presets. **Verify:** profile and theme contracts pass; both desktop and mobile layouts render without overflow or browser diagnostics.
+- [x] 14.2 Add an exact guarded `opas-demo-cro` Worker/D1 target and a CROFusion-only missing-record seed. **Verify:** target guards reject cross-wired Worker, D1, profile, seed, and Custom Domain values; a fresh local D1 applies every migration and contains only the expected CROFusion seed records.
+- [x] 14.3 Deploy `opas-demo-cro` with its isolated D1 at `demo-cro.opas.dev`. **Verify:** the custom domain and workers.dev fallback render CROFusion-styled D1-backed MDX; production D1 contains 3 categories, 8 published FAQs, one valid CROFusion theme, and no generic OPAS articles.
+- [ ] 14.4 Reconcile `opas-mvp` to the generic OPAS product Q&A without replacing administrator edits. **Verify:** production D1 contains 4 generic categories, 9 published articles, 8 FAQs, one valid OPAS theme, and zero CROFusion or evaluation-canary records.
+- [ ] 14.5 Complete release evidence for both maintained demos. **Verify:** both canonical origins pass the portable FAQ smoke, search, grounded-answer, data-isolation, responsive browser, console, CSP, and runtime-MDX checks; deployment documentation is current; the exact commit is pushed with a clean tree.
+
 ## Definition of done (v0.2)
 
 - [x] A representative existing knowledge base imports supported content without manual reauthoring or silent loss; every flatten, rename, and unsupported item is reported.
@@ -185,6 +195,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
+
+- 2026-09-01 — 14.1–14.3 and generic Worker checkpoint — added complete fixed public profiles and CROFusion styling, separate guarded configs and seeds, and an isolated `opas-demo-cro` D1/Worker. CROFusion version `018cb64c-5d99-4c41-82fe-227fa7c5cc7d` renders 3 categories and 8 public FAQs at `demo-cro.opas.dev`; generic version `f13d2d06-bd6a-4249-a6f5-1fa1312cdad1` is healthy with the OPAS profile. All tests, both D1 dialect checks, OpenNext builds, local workerd MDX/CSP, and responsive browser checks passed. The generic D1 cleanup remains staged behind immediate destructive-action confirmation; its pre-change Time Travel bookmark is recorded above — evidence `/private/tmp/opas-demo-split-checkpoint-tests.log`, `/private/tmp/opas-crofusion-deploy.log`, `/private/tmp/opas-generic-deploy.log`, and `/private/tmp/opas-cro-workerd-preview.log` — this commit
 
 - 2026-09-01 — 13.5 and OPAS Answers v0.2 release — exact candidate `3a250b6275377116c72402fe04889a70694d5080` passed lint, typecheck, all 630 tests including both repository dialects, native Next, OpenNext/workerd, and guarded Vercel builds. A fresh isolated Docker/Postgres stack built, migrated, ran healthy as non-root, and passed every smoke route before its containers and volume were removed. Prior isolated Cloudflare/D1 and disposable Vercel/Neon acceptance covered migration/rollback, browser, security/privacy, and runtime portability; the saved production evaluation gates passed; both current Cloudflare production origins passed the post-rollout smoke. Annotated tag `v0.2.0` points to the exact candidate, tag CI run `33451756941` passed, and the [OPAS v0.2.0 release](https://github.com/opas-dev/opas/releases/tag/v0.2.0) is published — evidence `/private/tmp/opas-v020-release-full-test.log`, `/private/tmp/opas-v020-release-next-build.log`, `/private/tmp/opas-v020-release-cloudflare-build.log`, `/private/tmp/opas-v020-release-vercel-build.log`, `/private/tmp/opas-v020-release-docker-up.log`, `/private/tmp/opas-v020-release-docker-smoke.log`, `/private/tmp/opas-v020-release-docker-user.log`, `/private/tmp/opas-v020-release-production-smoke.log`, and `/private/tmp/opas-v020-release-tag-ci.log` — this commit
 

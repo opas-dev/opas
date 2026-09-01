@@ -9,9 +9,7 @@ import {
   publicArticleMarkdownPath,
   publicArticlePath,
   publicCategoryPath,
-  siteDescription,
-  siteName,
-  sitePublisherName,
+  publicSiteIdentity,
 } from "@/site";
 
 type ArticleRecord = Article | PublishedArticle;
@@ -205,9 +203,10 @@ export function joinPublishedArticles({
 }
 
 export function homeMetadata(configuredSiteUrl?: string) {
+  const identity = publicSiteIdentity();
   return {
-    title: siteName,
-    description: siteDescription,
+    title: identity.siteName,
+    description: identity.siteDescription,
     alternates: { canonical: absoluteSiteUrl("/", configuredSiteUrl) },
   };
 }
@@ -219,9 +218,10 @@ export function categoryMetadata(category: Category, configuredSiteUrl?: string)
     return null;
   }
 
+  const identity = publicSiteIdentity();
   return {
     title: category.name,
-    description: category.description ?? siteDescription,
+    description: category.description ?? identity.siteDescription,
     alternates: { canonical: absoluteSiteUrl(path, configuredSiteUrl) },
   };
 }
@@ -238,6 +238,7 @@ export function articleMetadata(publication: PublicArticle, configuredSiteUrl?: 
 
 export function articleJsonLd(publication: PublicArticle, configuredSiteUrl?: string) {
   const { article } = publication;
+  const identity = publicSiteIdentity();
 
   return {
     "@context": "https://schema.org",
@@ -251,7 +252,7 @@ export function articleJsonLd(publication: PublicArticle, configuredSiteUrl?: st
     },
     publisher: {
       "@type": "Organization",
-      name: sitePublisherName,
+      name: identity.publisherName,
     },
     mainEntityOfPage: absoluteSiteUrl(publication.path, configuredSiteUrl),
   };
@@ -286,6 +287,7 @@ export function llmsText(
   publications: readonly PublicArticle[],
   configuredSiteUrl?: string,
 ) {
+  const identity = publicSiteIdentity();
   const sections = new Map<string, { category: Category; articles: PublicArticle[] }>();
 
   for (const publication of sortedPublications(publications)) {
@@ -301,7 +303,7 @@ export function llmsText(
     }
   }
 
-  const lines = [`# ${siteName}`, "", `> ${siteDescription}`];
+  const lines = [`# ${identity.siteName}`, "", `> ${identity.siteDescription}`];
 
   for (const { category, articles } of sections.values()) {
     lines.push("", `## ${markdownText(category.name)}`, "");

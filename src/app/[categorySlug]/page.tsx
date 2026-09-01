@@ -7,6 +7,7 @@ import { notFound } from "next/navigation";
 import { PublicHeader } from "@/app/public-header";
 import { loadPublicPageContent } from "@/app/publication-data";
 import { categoryMetadata } from "@/content/publication";
+import { publicSiteIdentity } from "@/site";
 
 export const runtime = "nodejs";
 
@@ -36,13 +37,14 @@ export default async function CategoryPage({ params }: PageProps<"/[categorySlug
   const categoryArticles = publications.filter(
     (publication) => publication.category.id === category.id,
   );
+  const identity = publicSiteIdentity();
 
   return (
     <main>
       <PublicHeader />
       <div className="public-section">
         <nav className="article-nav" aria-label="Breadcrumb">
-          <Link href="/">OPAS</Link>
+          <Link href="/">{identity.productName}</Link>
           <span aria-hidden="true">/</span>
           <span aria-current="page">{category.name}</span>
         </nav>

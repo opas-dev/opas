@@ -7,6 +7,7 @@ import { PublicHeader } from "@/app/public-header";
 import { loadPublicPageContent } from "@/app/publication-data";
 import { Search } from "@/app/search";
 import { homeMetadata } from "@/content/publication";
+import { publicSiteIdentity } from "@/site";
 
 export const runtime = "nodejs";
 
@@ -16,20 +17,22 @@ export function generateMetadata(): Metadata {
 
 export default async function HomePage() {
   const { categories, publications } = await loadPublicPageContent();
+  const identity = publicSiteIdentity();
 
   return (
     <main>
       <PublicHeader />
 
       <section className="hero" aria-labelledby="hero-heading">
-        <p className="hero-context">OPAS Help Center</p>
-        <h1 id="hero-heading">How can we help?</h1>
-        <p className="hero-copy">
-          Search every published answer, or browse the help center by category.
-        </p>
+        <p className="hero-context">{identity.heroContext}</p>
+        <h1 id="hero-heading">{identity.heroHeading}</h1>
+        <p className="hero-copy">{identity.heroCopy}</p>
         <Search
           suggestedQuestions={publications.slice(0, 3).map(
-            ({ article }) => `What should I know about “${article.title}”?`,
+            ({ article }) =>
+              article.title.endsWith("?")
+                ? article.title
+                : `What should I know about “${article.title}”?`,
           )}
         />
       </section>

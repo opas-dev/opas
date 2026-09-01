@@ -4,13 +4,20 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { getCurrentTheme } from "@/theme/current";
+import { publicSiteIdentity } from "@/site";
 
 export async function PublicHeader() {
   const theme = await getCurrentTheme();
+  const identity = publicSiteIdentity();
 
   return (
     <header className="site-header">
-      <Link className="wordmark" href="/" aria-label="OPAS help center home">
+      <Link
+        aria-label={`${identity.siteName} home`}
+        className="wordmark"
+        data-profile={identity.id}
+        href="/"
+      >
         {theme.config.logoUrl ? (
           <Image
             alt=""
@@ -22,12 +29,12 @@ export async function PublicHeader() {
           />
         ) : (
           <span className="wordmark-mark" aria-hidden="true">
-            O
+            {identity.productName.slice(0, 1)}
           </span>
         )}
-        OPAS
+        {identity.productName}
       </Link>
-      <span className="header-note">Help that stays yours</span>
+      <span className="header-note">{identity.headerNote}</span>
     </header>
   );
 }

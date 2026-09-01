@@ -1,15 +1,15 @@
-// ABOUTME: Defines the scoped Cloudflare Worker, custom domain, and D1 binding for OPAS.
-// ABOUTME: Keeps workers.dev available while limiting production routing to demo.opas.dev.
+// ABOUTME: Defines the isolated CROFusion-branded OPAS demo Worker and D1 database.
+// ABOUTME: Routes only demo-cro.opas.dev and leaves CROFusion production resources untouched.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "opas-mvp",
+  "name": "opas-demo-cro",
   "main": "custom-worker.ts",
   "account_id": "f8801c7e8853a113a25f8b52fd9ceec1",
   "workers_dev": true,
   "preview_urls": false,
   "routes": [
     {
-      "pattern": "demo.opas.dev",
+      "pattern": "demo-cro.opas.dev",
       "custom_domain": true
     }
   ],
@@ -42,7 +42,7 @@
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
-      "service": "opas-mvp"
+      "service": "opas-demo-cro"
     }
   ],
   "vars": {
@@ -59,19 +59,19 @@
     "OPAS_GENERATION_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
     "OPAS_GENERATION_RETENTION_DISCLOSURE": "Answer analytics retain configured redacted conversation records for up to 30 days; explicit support handoffs retain contact and bounded context separately. Cloudflare AI Gateway logging is disabled and response caching is bypassed.",
     "OPAS_ANALYTICS_REDACTION_PATTERNS": "[]",
-    "OPAS_EMBED_PARENT_ORIGINS": "https://opas.dev,https://www.opas.dev",
+    "OPAS_EMBED_PARENT_ORIGINS": "https://crofusion.com,https://crofusion.net",
     "OPAS_HANDOFF_DAILY_LIMIT": "100",
     "OPAS_HANDOFF_FROM_EMAIL": "hello@opas.dev",
     "OPAS_HANDOFF_PROVIDER": "cloudflare-email",
     "OPAS_HANDOFF_RETENTION_DAYS": "30",
-    "OPAS_PUBLIC_PROFILE": "opas",
-    "OPAS_SITE_URL": "https://demo.opas.dev"
+    "OPAS_PUBLIC_PROFILE": "crofusion",
+    "OPAS_SITE_URL": "https://demo-cro.opas.dev"
   },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "opas-mvp",
-      "database_id": "2863fdbf-cea3-4b29-a975-ef4640a47d59",
+      "database_name": "opas-demo-cro",
+      "database_id": "4ae0a2a0-c0f8-4623-86cd-ef787375092b",
       "preview_database_id": "DB",
       "migrations_dir": "drizzle/sqlite"
     }

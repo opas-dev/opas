@@ -13,6 +13,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  cloudflareSeedFile,
   cloudflareCommandEnvironment,
   prepareCloudflareTargetSnapshot,
   readCloudflareTarget,
@@ -126,6 +127,7 @@ function validConfig() {
       OPAS_HANDOFF_FROM_EMAIL: "hello@opas.dev",
       OPAS_HANDOFF_PROVIDER: "cloudflare-email",
       OPAS_HANDOFF_RETENTION_DAYS: "30",
+      OPAS_PUBLIC_PROFILE: "opas",
       OPAS_SITE_URL: "https://demo.opas.dev",
     },
     d1_databases: [
@@ -240,6 +242,30 @@ test("accepts the maintained custom domain with workers.dev fallback", () => {
   assert.equal(target.workerName, "opas-mvp");
   assert.equal(target.databaseName, "opas-mvp");
   assert.equal(target.siteOrigin, "https://demo.opas.dev");
+  assert.equal(cloudflareSeedFile(target), "scripts/seed-d1.sql");
+});
+
+test("accepts the isolated CROFusion demo target and its branded seed", () => {
+  const config = validConfig();
+  config.name = "opas-demo-cro";
+  config.routes[0].pattern = "demo-cro.opas.dev";
+  config.services[0].service = "opas-demo-cro";
+  config.vars.OPAS_PUBLIC_PROFILE = "crofusion";
+  config.vars.OPAS_SITE_URL = "https://demo-cro.opas.dev";
+  config.d1_databases[0].database_name = "opas-demo-cro";
+
+  const target = validateCloudflareConfig(config);
+
+  assert.equal(target.workerName, "opas-demo-cro");
+  assert.equal(target.databaseName, "opas-demo-cro");
+  assert.equal(target.siteOrigin, "https://demo-cro.opas.dev");
+  assert.equal(cloudflareSeedFile(target), "scripts/seed-crofusion-d1.sql");
+});
+
+test("keeps deployment seeds below the D1 compound-select ceiling", () => {
+  for (const seed of ["scripts/seed-d1.sql", "scripts/seed-crofusion-d1.sql"]) {
+    assert.doesNotMatch(readFileSync(seed, "utf8"), /\bUNION\s+ALL\b/iu);
+  }
 });
 
 test("retains the scoped workers.dev-only bootstrap path", () => {
@@ -651,6 +677,21 @@ test("rejects protected and unrelated custom routes", () => {
   assert.throws(() =>
     validateCloudflareConfig(Object.assign(validConfig(), { route: "demo.opas.dev/*" })),
   );
+});
+
+test("keeps each maintained demo domain paired with its Worker and public profile", () => {
+  const wrongWorker = validConfig();
+  wrongWorker.routes[0].pattern = "demo-cro.opas.dev";
+
+  const wrongProfile = validConfig();
+  wrongProfile.vars.OPAS_PUBLIC_PROFILE = "crofusion";
+
+  const unknownProfile = validConfig();
+  unknownProfile.vars.OPAS_PUBLIC_PROFILE = "customer";
+
+  for (const config of [wrongWorker, wrongProfile, unknownProfile]) {
+    assert.throws(() => validateCloudflareConfig(config));
+  }
 });
 
 test("limits the maintained custom domain to its exact account and Worker", () => {
