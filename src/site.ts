@@ -13,9 +13,9 @@ const publicSiteIdentities = {
     publisherName: "OPAS",
     headerNote: "Help that stays yours",
     heroContext: "OPAS Help Center",
-    heroHeading: "What can OPAS help you answer?",
+    heroHeading: "How can we help?",
     heroCopy:
-      "Ask about OPAS features, authoring, deployment, and grounded answers—or browse by topic.",
+      "Search practical guides or ask for a cited answer about OPAS features, authoring, and deployment.",
   },
   crofusion: {
     id: "crofusion",
@@ -28,7 +28,7 @@ const publicSiteIdentities = {
     heroContext: "CROFusion Help Center",
     heroHeading: "How can we help you convert?",
     heroCopy:
-      "Ask about creating, publishing, and improving landing pages—or browse the CROFusion guides.",
+      "Search practical guides or ask for a cited answer about creating, publishing, and improving landing pages.",
   },
 } as const;
 

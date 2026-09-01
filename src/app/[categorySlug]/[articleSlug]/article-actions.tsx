@@ -105,12 +105,17 @@ export function ArticleActions({
       <a href={targets.markdown} target="_blank" rel="noreferrer noopener">
         View Markdown
       </a>
-      <a href={targets.chatGpt} target="_blank" rel="noreferrer noopener">
-        Open in ChatGPT
-      </a>
-      <a href={targets.claude} target="_blank" rel="noreferrer noopener">
-        Open in Claude
-      </a>
+      <details className="article-action-menu">
+        <summary>Use with AI</summary>
+        <div>
+          <a href={targets.chatGpt} target="_blank" rel="noreferrer noopener">
+            Open in ChatGPT
+          </a>
+          <a href={targets.claude} target="_blank" rel="noreferrer noopener">
+            Open in Claude
+          </a>
+        </div>
+      </details>
       <span className="article-actions-status" role="status" aria-live="polite">
         {copyState === "copied" ? "Page Markdown copied." : null}
         {copyState === "failed" ? "Copy failed. Use View Markdown instead." : null}

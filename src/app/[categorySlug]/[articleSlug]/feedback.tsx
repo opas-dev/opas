@@ -107,58 +107,62 @@ export function ArticleFeedback({ articleId }: ArticleFeedbackProps) {
               </label>
             </div>
 
-            <label className="article-feedback-comment" htmlFor="article-feedback-comment">
-              <span>
-                Anything else? <span className="article-feedback-optional">Optional</span>
-              </span>
-              <textarea
-                aria-describedby="article-feedback-comment-limit"
-                id="article-feedback-comment"
-                name="comment"
-                rows={3}
-                value={comment}
-                onChange={(event) => {
-                  setComment(
-                    Array.from(event.target.value)
-                      .slice(0, maximumFeedbackCommentLength)
-                      .join(""),
-                  );
-                  if (submissionState === "error") {
-                    setSubmissionState("idle");
-                  }
-                }}
-                placeholder="What could make this answer clearer?"
-              />
-              <span
-                aria-live={remainingCharacters <= 20 ? "polite" : "off"}
-                className="article-feedback-comment-limit"
-                data-limit={remainingCharacters === 0 ? "true" : undefined}
-                id="article-feedback-comment-limit"
-              >
-                {remainingCharacters === 0
-                  ? "Character limit reached."
-                  : `${remainingCharacters.toLocaleString("en-US")} characters remaining.`}
-              </span>
-            </label>
+            {helpfulness ? (
+              <div className="article-feedback-detail">
+                <label className="article-feedback-comment" htmlFor="article-feedback-comment">
+                  <span>
+                    Add a note <span className="article-feedback-optional">Optional</span>
+                  </span>
+                  <textarea
+                    aria-describedby="article-feedback-comment-limit"
+                    id="article-feedback-comment"
+                    name="comment"
+                    rows={3}
+                    value={comment}
+                    onChange={(event) => {
+                      setComment(
+                        Array.from(event.target.value)
+                          .slice(0, maximumFeedbackCommentLength)
+                          .join(""),
+                      );
+                      if (submissionState === "error") {
+                        setSubmissionState("idle");
+                      }
+                    }}
+                    placeholder="What could make this guide clearer?"
+                  />
+                  <span
+                    aria-live={remainingCharacters <= 20 ? "polite" : "off"}
+                    className="article-feedback-comment-limit"
+                    data-limit={remainingCharacters === 0 ? "true" : undefined}
+                    id="article-feedback-comment-limit"
+                  >
+                    {remainingCharacters === 0
+                      ? "Character limit reached."
+                      : `${remainingCharacters.toLocaleString("en-US")} characters remaining.`}
+                  </span>
+                </label>
 
-            <div className="article-feedback-actions">
-              <button
-                type="submit"
-                disabled={!helpfulness || submissionState === "submitting"}
-                data-pending={submissionState === "submitting" ? "true" : undefined}
-              >
-                {submissionState === "submitting" ? "Sending…" : "Send feedback"}
-              </button>
-              <p className="article-feedback-status" aria-live="polite">
-                {submissionState === "error" ? (
-                  <span role="alert">{errorMessage}</span>
-                ) : helpfulness ? (
-                  "Ready to send."
-                ) : (
-                  "Choose yes or no to continue."
-                )}
-              </p>
-            </div>
+                <div className="article-feedback-actions">
+                  <button
+                    type="submit"
+                    disabled={submissionState === "submitting"}
+                    data-pending={submissionState === "submitting" ? "true" : undefined}
+                  >
+                    {submissionState === "submitting" ? "Sending…" : "Send feedback"}
+                  </button>
+                  <p className="article-feedback-status" aria-live="polite">
+                    {submissionState === "error" ? (
+                      <span role="alert">{errorMessage}</span>
+                    ) : (
+                      "No personal details are required."
+                    )}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="article-feedback-prompt">Choose yes or no to share feedback.</p>
+            )}
           </fieldset>
         </form>
       )}

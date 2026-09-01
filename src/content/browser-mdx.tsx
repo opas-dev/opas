@@ -36,9 +36,12 @@ function AuthenticatedLink({ href, ...props }: ComponentProps<"a">) {
 
 export function BrowserMdx({ authenticatedAssets = false, compiled }: BrowserMdxProps) {
   const [content, setContent] = useState<ReactNode>(
-    <p className="mdx-runtime-status" role="status">
-      Rendering this answer…
-    </p>,
+    <div className="article-runtime-skeleton" role="status" aria-label="Loading article">
+      <span />
+      <span />
+      <span />
+      <span />
+    </div>,
   );
 
   useEffect(() => {

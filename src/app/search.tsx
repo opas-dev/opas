@@ -302,7 +302,7 @@ function describeSearch(state: SearchState, query: string) {
   }
 
   if (query.length === 0) {
-    return "Search across all published answers.";
+    return "Results appear as you type. Select Ask for a cited answer.";
   }
 
   return "Enter at least 2 characters to search.";
@@ -597,7 +597,7 @@ export function Search({
               requestAnswer(query);
             }}
           >
-            <label htmlFor="help-search">What can we help you find?</label>
+            <label htmlFor="help-search">Search guides or ask a question</label>
             <div className="search-field">
               <svg
                 className="search-icon"

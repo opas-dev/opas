@@ -65,7 +65,7 @@ export default async function ArticlePage({
   const identity = publicSiteIdentity();
 
   return (
-    <main>
+    <>
       <script
         id="opas-article-jsonld"
         type="application/ld+json"
@@ -82,7 +82,7 @@ export default async function ArticlePage({
       ) : null}
       <ArticleViewBeacon articleId={article.id} />
       <PublicHeader />
-      <div className="article-shell">
+      <main className="article-shell" id="main-content">
         <nav className="article-nav" aria-label="Breadcrumb">
           <Link href="/">{identity.productName}</Link>
           <span aria-hidden="true">/</span>
@@ -104,23 +104,25 @@ export default async function ArticlePage({
             </time>
           </footer>
         </article>
-        <section className="article-assistant" aria-labelledby="article-assistant-heading">
-          <h2 id="article-assistant-heading">Need another answer?</h2>
-          <p>Search the full help center or ask a cited follow-up from this page.</p>
-          <Search
-            currentPage={{
-              articleId: article.id,
-              path: publication.path,
-              title: article.title,
-            }}
-            suggestedQuestions={[
-              `Summarize “${article.title}”.`,
-              `What are the next steps in “${article.title}”?`,
-            ]}
-          />
-        </section>
-        <ArticleFeedback key={article.id} articleId={article.id} />
-      </div>
-    </main>
+        <div className="article-aftercare">
+          <section className="article-assistant" aria-labelledby="article-assistant-heading">
+            <h2 id="article-assistant-heading">Need another answer?</h2>
+            <p>Search the full help center or ask a cited follow-up from this page.</p>
+            <Search
+              currentPage={{
+                articleId: article.id,
+                path: publication.path,
+                title: article.title,
+              }}
+              suggestedQuestions={[
+                `Summarize “${article.title}”.`,
+                `What are the next steps in “${article.title}”?`,
+              ]}
+            />
+          </section>
+          <ArticleFeedback key={article.id} articleId={article.id} />
+        </div>
+      </main>
+    </>
   );
 }

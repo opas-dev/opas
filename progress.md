@@ -10,10 +10,11 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** Phase 14 — maintained demo isolation
+- **Current phase:** Phase 15 — public UX redesign
 - **v0.1:** 40 / 40 complete
 - **v0.2:** 26 / 26 complete
 - **Maintained demos:** 5 / 5 complete
+- **UX redesign:** 6 / 6 complete
 
 ## Blockers
 - None.
@@ -64,6 +65,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-31 | Public outcome writes use one fixed UTC-minute aggregate row per workspace in addition to the local abuse gate | One conditional UPSERT is atomic across horizontal instances, preserves the cookie-free requester boundary, avoids per-attempt identifiers and cleanup, and behaves identically on Postgres/Neon and SQLite/D1 |
 | 2026-08-31 | Guarded prebuilt Vercel deployments pass the exact `fra1` region explicitly at upload | The prebuilt upload otherwise used Vercel's default `iad1` function region despite the checked-in project config; explicit placement keeps the compatibility runtime beside the `eu-central-1` Neon branch |
 | 2026-09-01 | Maintain the generic OPAS and CROFusion demos as separate Workers and D1 databases selected by a fixed public profile | Shared application code keeps product behavior aligned, while isolated content, administrator state, analytics, evidence, theme, canonical URL, and deployment guards prevent partner material from leaking into the generic product demo |
+| 2026-09-02 | Use one restrained “answer workspace” system across the landing page and public help center while keeping runtime brand profiles authoritative | Clear search-versus-answer behavior, quiet reading surfaces, one action color, and consistent information hierarchy reduce cognitive load without erasing customer identity |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -181,6 +183,15 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 14.4 Reconcile `opas-mvp` to the generic OPAS product Q&A without replacing administrator edits. **Verify:** production D1 contains 4 generic categories, 9 published articles, 8 FAQs, one valid OPAS theme, and zero CROFusion or evaluation-canary records.
 - [x] 14.5 Complete release evidence for both maintained demos. **Verify:** both canonical origins pass the portable FAQ smoke, search, grounded-answer, data-isolation, responsive browser, console, CSP, and runtime-MDX checks; deployment documentation is current; the exact commit is pushed with a clean tree.
 
+## Phase 15 — Public UX redesign
+
+- [x] 15.1 Audit the landing page and every public help-center route against the current product, user journeys, design system, accessibility, and responsive behavior. **Verify:** baseline desktop and mobile screenshots exist; the audit records stale copy, unclear actions, hierarchy problems, overflow, and accessibility risks before implementation.
+- [x] 15.2 Redesign public navigation, home, category, and not-found screens around a modern minimal answer-finding journey while preserving OPAS and CROFusion profile separation. **Verify:** each route has one clear primary task, semantic landmarks and headings, keyboard-visible focus, and no horizontal overflow at desktop and narrow mobile widths.
+- [x] 15.3 Redesign article reading, page utilities, assistant, feedback, loading, error, and embed states without changing their safety or data contracts. **Verify:** focused component tests pass; browser checks cover runtime MDX, progressive feedback, the AI-action menu, search/answer states, and mobile reading.
+- [x] 15.4 Redesign the opas.dev landing page around the current visual authoring, cited-answer, content-gap, runtime-theming, and deployment story while retaining the Cloudflare Email contact path. **Verify:** static content assertions, the Worker/contact suite, Cloudflare dry-run, native form validation, and desktop/mobile browser checks pass.
+- [x] 15.5 Complete the visual and accessibility matrix across both products and public profiles. **Verify:** final screenshots cover desktop and mobile routes and key states; semantic structure, focus order, contrast, reduced motion, browser diagnostics, and zero-overflow checks pass.
+- [x] 15.6 Prepare a clean release candidate without changing production. **Verify:** complete help-center lint, typecheck, tests, Next and OpenNext builds pass; both repositories are committed and pushed; a bounded Cloudflare production rollout and rollback plan is ready for Timo's separate confirmation.
+
 ## Definition of done (v0.2)
 
 - [x] A representative existing knowledge base imports supported content without manual reauthoring or silent loss; every flatten, rename, and unsupported item is reported.
@@ -195,6 +206,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
+
+- 2026-09-02 — 15.1–15.6 public UX redesign — rebuilt the public help center and opas.dev landing page around one restrained answer-finding system, added explicit search-versus-answer guidance, progressive article utilities and feedback, a branded recovery route, responsive OPAS/CROFusion presentation, current product proof, and an accessible Cloudflare Email contact journey. Baseline and final desktop/mobile screenshots cover home, category, article, actions, feedback, answer error, embed, not-found, mobile navigation, and contact states; focus order, semantic landmarks, reduced motion, key light/dark contrast, zero horizontal overflow, and fresh-tab browser diagnostics passed. Help-center lint, typecheck, the complete test suite, Next build, and isolated OpenNext build passed; landing tests passed 16/16 and Wrangler dry-run retained the Email, Rate Limit, and asset bindings. Landing commit `9440719` is pushed in PR #1; production remained unchanged pending the separately confirmed bounded Cloudflare rollout — evidence `/private/tmp/opas-redesign-full-test-r2.log`, `/private/tmp/opas-redesign-next-build-final.log`, `/private/tmp/opas-redesign-cloudflare-build-final.log`, `/private/tmp/opas-redesign-landing-test-final.log`, `/private/tmp/opas-redesign-landing-dry-run-final.log`, and `/private/tmp/opas-redesign-final` — this commit
 
 - 2026-09-01 — 14.4–14.5 maintained demo release — after confirmed execution, the bounded generic D1 cleanup left 4 categories, 10 total articles, 9 published articles, 8 FAQs, zero CROFusion/canary records, and one valid OPAS Default theme. Generic and CROFusion canonical origins each passed the complete profile-aware FAQ smoke; their compact indexes and searches showed no partner-article crossover; live Workers AI answers cited only `demo.opas.dev/getting-started/what-is-opas` and `demo-cro.opas.dev/getting-started/is-crofusion-browser-based` respectively. Both rendered database-backed MDX under the documented CSP, and 1,440 px plus 390 px browser checks showed the exact identity, categories, theme, logo, hero, and zero horizontal overflow. The only browser diagnostic is Cloudflare's zone-injected Browser Insights beacon being intentionally rejected by the same-origin CSP, as recorded in `docs/notes.md` — evidence `/private/tmp/opas-generic-production-smoke.log`, `/private/tmp/opas-crofusion-production-smoke.log`, `/private/tmp/opas-generic-answer.ndjson`, `/private/tmp/opas-crofusion-answer.ndjson`, `/private/tmp/opas-generic-llms.txt`, and `/private/tmp/opas-crofusion-llms.txt` — this commit
 
