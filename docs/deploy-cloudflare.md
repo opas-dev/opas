@@ -18,7 +18,10 @@ pnpm cf:build:crofusion
 pnpm cf:migrate:crofusion
 pnpm cf:seed:crofusion
 pnpm cf:deploy:crofusion
-pnpm smoke https://demo-cro.opas.dev
+OPAS_SMOKE_SITE_NAME='CROFusion Help Center' \
+  OPAS_SMOKE_PUBLISHER_NAME='CROFusion' \
+  OPAS_SMOKE_FAQ_PATH=/getting-started/is-crofusion-browser-based \
+  pnpm smoke https://demo-cro.opas.dev
 ```
 
 For a first CROFusion deployment, run `pnpm cf:bootstrap:crofusion`. Its target guard requires the exact Worker, D1 database, profile, seed, and Custom Domain shown above. Never point either config at the other target's database.

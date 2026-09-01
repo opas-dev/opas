@@ -7,6 +7,7 @@ set -uo pipefail
 smoke_usage() {
   printf 'Usage: %s <http-or-https-base-url>\n' "${0##*/}" >&2
   printf 'Set OPAS_SMOKE_FAQ_PATH=/category/article to require valid FAQPage JSON-LD.\n' >&2
+  printf 'Set OPAS_SMOKE_SITE_NAME and OPAS_SMOKE_PUBLISHER_NAME for a branded deployment.\n' >&2
 }
 
 if [[ $# -ne 1 ]]; then
@@ -85,6 +86,17 @@ if [[ -n "$smoke_faq_path" ]] && ! smoke_faq_path=$(node -e '
 ' "$smoke_faq_path"); then
   printf 'ERROR: OPAS_SMOKE_FAQ_PATH must be a safe two-level article path.\n' >&2
   smoke_usage
+  exit 64
+fi
+
+smoke_site_name=${OPAS_SMOKE_SITE_NAME:-OPAS Help Center}
+smoke_publisher_name=${OPAS_SMOKE_PUBLISHER_NAME:-OPAS}
+if [[ -z "$smoke_site_name" || "$smoke_site_name" == *$'\n'* || "$smoke_site_name" == *$'\r'* ]]; then
+  printf 'ERROR: OPAS_SMOKE_SITE_NAME must be one non-empty line.\n' >&2
+  exit 64
+fi
+if [[ -z "$smoke_publisher_name" || "$smoke_publisher_name" == *$'\n'* || "$smoke_publisher_name" == *$'\r'* ]]; then
+  printf 'ERROR: OPAS_SMOKE_PUBLISHER_NAME must be one non-empty line.\n' >&2
   exit 64
 fi
 
@@ -282,6 +294,7 @@ smoke_extract_article_contract() {
     "$smoke_query_path" \
     "$smoke_faq_requirement" \
     "$smoke_search_requirement" \
+    "$smoke_publisher_name" \
     2>"$smoke_parser_error" <<'NODE'
 const fs = require("node:fs");
 
@@ -293,6 +306,7 @@ const markdownHeadlinePath = process.argv[6];
 const queryPath = process.argv[7];
 const faqRequirement = process.argv[8];
 const searchRequirement = process.argv[9];
+const expectedPublisher = process.argv[10];
 const html = fs.readFileSync(htmlPath, "utf8");
 
 if (!["optional", "required"].includes(faqRequirement)) {
@@ -386,9 +400,9 @@ if (
 }
 if (
   article.publisher?.["@type"] !== "Organization" ||
-  article.publisher?.name !== "OPAS"
+  article.publisher?.name !== expectedPublisher
 ) {
-  console.error("Article JSON-LD publisher must be the OPAS Organization.");
+  console.error(`Article JSON-LD publisher must be the ${expectedPublisher} Organization.`);
   process.exit(1);
 }
 
@@ -530,7 +544,7 @@ fi
 smoke_pass "database-aware health endpoint"
 
 smoke_expect_get "home page" "/" "200"
-smoke_require_body "home page" "OPAS Help Center"
+smoke_require_body "home page" "$smoke_site_name"
 smoke_require_header "global discovery" '</llms.txt>; rel="llms-txt"'
 smoke_require_header "global discovery" '</llms-full.txt>; rel="llms-full-txt"'
 smoke_require_header "global discovery" "X-Llms-Txt: /llms.txt"
@@ -583,7 +597,7 @@ smoke_validate_search_result "$smoke_article_path" "$smoke_article_headline"
 smoke_pass "published article search result"
 
 smoke_expect_get "llms.txt" "/llms.txt" "200"
-smoke_require_body "llms.txt" "# OPAS Help Center"
+smoke_require_body "llms.txt" "# $smoke_site_name"
 smoke_require_body \
   "llms.txt" \
   "${smoke_canonical_origin}${smoke_article_path}.md"
