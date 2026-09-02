@@ -12,7 +12,7 @@ OPAS Answers is an open-source help center and source-grounded answer system: th
 - Anonymous helpfulness feedback and 30-day aggregate analytics avoid cookies and persisted requester metadata.
 - The same application supports Docker with Postgres, Vercel with Neon, and Cloudflare Workers with D1.
 
-OPAS v0.1 remains the latest verified release. This `0.2.0` development line is OPAS Answers; its remaining deployment and design-partner verification gates are tracked in [progress.md](progress.md). The original product and architecture brief is in [docs/brief.md](docs/brief.md), and the source-backed v0.2 product plan is in [docs/competitive-roadmap.md](docs/competitive-roadmap.md).
+OPAS Answers v0.2.0 is the latest verified release. The completed release evidence is tracked in [progress.md](progress.md), the source-backed product direction is in [docs/competitive-roadmap.md](docs/competitive-roadmap.md), and the proposed next release is the [Team Authoring v0.3 implementation plan](docs/team-authoring-plan.md). The original product and architecture brief remains in [docs/brief.md](docs/brief.md).
 
 ## Live targets
 
@@ -20,6 +20,7 @@ OPAS v0.1 remains the latest verified release. This `0.2.0` development line is 
 | --- | --- | --- | --- |
 | Docker | Postgres | Self-hosted | `http://localhost:3000` after local startup |
 | Cloudflare Workers | D1 | Primary production | [demo.opas.dev](https://demo.opas.dev) ([workers.dev fallback](https://opas-mvp.timo-bejan.workers.dev)) |
+| Cloudflare Workers | Isolated D1 | Maintained CROFusion pilot demo | [demo-cro.opas.dev](https://demo-cro.opas.dev) |
 | Vercel | Neon Postgres | Live compatibility | [opas-mvp-timo-bejans-projects.vercel.app](https://opas-mvp-timo-bejans-projects.vercel.app) |
 
 ## Prerequisites

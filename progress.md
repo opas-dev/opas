@@ -15,6 +15,7 @@
 - **v0.2:** 26 / 26 complete
 - **Maintained demos:** 5 / 5 complete
 - **UX redesign:** 6 / 6 complete
+- **Next proposed release:** [OPAS Team Authoring v0.3](docs/team-authoring-plan.md); implementation is not activated
 
 ## Blockers
 - None.
@@ -206,6 +207,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
+
+- 2026-09-03 — Team Authoring v0.3 planning — traced the current mutable article, asset, evidence, preview, authentication, import, seed, and deployment paths and specified the next release as a dependency-ordered plan for separate working/published revisions, optimistic concurrency, append-only rollback, recoverable archive, revision-held assets, named fixed-role members, exact-revision review, revocable fragment-exchanged signed previews, a durable cutover fence, cross-target acceptance, and an expand-only production rollout. Independent architecture, security/product, and acceptance reviews found no unresolved implementation blockers; Markdown links, whitespace checks, and the complete `pnpm test` suite passed. The plan is documented but not activated, so no product, database, secret, or production state changed — [docs/team-authoring-plan.md](docs/team-authoring-plan.md) — this commit
 
 - 2026-09-02 — 15.1–15.6 public UX redesign — rebuilt the public help center and opas.dev landing page around one restrained answer-finding system, added explicit search-versus-answer guidance, progressive article utilities and feedback, a branded recovery route, responsive OPAS/CROFusion presentation, current product proof, and an accessible Cloudflare Email contact journey. Baseline and final desktop/mobile screenshots cover home, category, article, actions, feedback, answer error, embed, not-found, mobile navigation, and contact states; focus order, semantic landmarks, reduced motion, key light/dark contrast, zero horizontal overflow, and fresh-tab browser diagnostics passed. Help-center lint, typecheck, the complete test suite, Next build, and isolated OpenNext build passed; landing tests passed 16/16 and Wrangler dry-run retained the Email, Rate Limit, and asset bindings. Landing commit `9440719` is pushed in PR #1; production remained unchanged pending the separately confirmed bounded Cloudflare rollout — evidence `/private/tmp/opas-redesign-full-test-r2.log`, `/private/tmp/opas-redesign-next-build-final.log`, `/private/tmp/opas-redesign-cloudflare-build-final.log`, `/private/tmp/opas-redesign-landing-test-final.log`, `/private/tmp/opas-redesign-landing-dry-run-final.log`, and `/private/tmp/opas-redesign-final` — this commit
 

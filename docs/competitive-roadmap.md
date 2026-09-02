@@ -4,7 +4,7 @@
 
 **Amended:** 2026-08-30
 
-**Status:** recommended next release
+**Status:** v0.2 shipped; follow-on releases are demand-gated
 
 **Goal:** convert current interest into design-partner usage with a trustworthy answer-and-improvement loop
 
@@ -203,7 +203,7 @@ The MCP implementation must reread the current specification when work starts. T
 
 After v0.2 proves adoption and answer quality:
 
-1. Article revisions, rollback, signed previews, multiple admins, and editor/reviewer roles.
+1. Article revisions, rollback, signed previews, multiple admins, and editor/reviewer roles, specified in the [OPAS Team Authoring v0.3 implementation plan](team-authoring-plan.md).
 2. One-way GitHub import/sync, followed by bidirectional sync only after conflict semantics are proven.
 3. Signed private widgets and audience/version/product-scoped retrieval.
 4. The one connector requested by multiple design partners, then a small connector SDK.
