@@ -37,6 +37,25 @@ export const workspaces = pgTable("workspaces", {
   ...timestampColumns,
 });
 
+export const workspaceAuthoringControls = pgTable(
+  "workspace_authoring_controls",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    writesPaused: boolean("writes_paused").notNull().default(false),
+    generation: integer("generation").notNull().default(0),
+    changedByMemberId: text("changed_by_member_id"),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "workspace_authoring_controls_generation_check",
+      sql`${table.generation} >= 0`,
+    ),
+  ],
+);
+
 export const categories = pgTable(
   "categories",
   {

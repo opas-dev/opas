@@ -1,8 +1,15 @@
 // ABOUTME: Writes the deterministic OPAS demo content to a Postgres-compatible database.
 // ABOUTME: Restores missing seed records without replacing administrator edits on restart.
 import { getPostgresDatabase } from "@/db/postgres/client";
+import { AuthoringPausedError } from "@/db/authoring-controls";
 import { demoContent, demoSeededAt } from "@/db/demo";
-import { articles, categories, themes, workspaces } from "@/db/schema/postgres";
+import {
+  articles,
+  categories,
+  themes,
+  workspaceAuthoringControls,
+  workspaces,
+} from "@/db/schema/postgres";
 import { and, eq, inArray } from "drizzle-orm";
 
 export async function seedPostgres(database = getPostgresDatabase()) {
@@ -16,6 +23,15 @@ export async function seedPostgres(database = getPostgresDatabase()) {
       updatedAt: seededAt,
     })
     .onConflictDoNothing();
+
+  const [authoringControl] = await database
+    .select({ writesPaused: workspaceAuthoringControls.writesPaused })
+    .from(workspaceAuthoringControls)
+    .where(eq(workspaceAuthoringControls.workspaceId, demoContent.workspace.id))
+    .limit(1);
+  if (!authoringControl || authoringControl.writesPaused) {
+    throw new AuthoringPausedError();
+  }
 
   const [workspace] = await database
     .select({ id: workspaces.id })

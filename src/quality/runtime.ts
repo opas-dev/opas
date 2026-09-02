@@ -14,6 +14,7 @@ import type {
   Repository,
   SavedQuestionSet,
 } from "@/db/repository";
+import { AuthoringPausedError, normalizeAuthoringError } from "@/db/authoring-controls";
 import {
   estimateConversationCostMicrodollars,
   normalizeConversationAnalyticsId,
@@ -948,8 +949,10 @@ export async function runSavedQuestionSet(
       }),
     );
     return Object.freeze({ id, results });
-  } catch {
+  } catch (error) {
     controller.abort();
+    const failure = normalizeAuthoringError(error);
+    if (failure instanceof AuthoringPausedError) throw failure;
     if (runStarted) {
       try {
         await dependencies.repository.finishEvaluationRun({
@@ -962,7 +965,11 @@ export async function runSavedQuestionSet(
           status: "failed",
           workspaceId,
         });
-      } catch {
+      } catch (completionError) {
+        const completionFailure = normalizeAuthoringError(completionError);
+        if (completionFailure instanceof AuthoringPausedError) {
+          throw completionFailure;
+        }
         // The public administrator response remains redacted when persistence also fails.
       }
     }

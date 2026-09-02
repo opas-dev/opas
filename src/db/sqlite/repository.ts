@@ -12,6 +12,7 @@ import {
   prepareAssetSelection,
 } from "@/db/assets";
 import { validateArticleEvidence } from "@/db/evidence";
+import { withAuthoringErrorBoundary } from "@/db/authoring-controls";
 import type {
   ArticleAssetSelection,
   ArticleSubmission,
@@ -399,7 +400,7 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
   // Both drivers expose the same execute methods, but Drizzle drops them from its union type.
   const executableDatabase = database as DrizzleD1Database<typeof schema>;
 
-  return {
+  return withAuthoringErrorBoundary<Repository>({
     ...createSqliteAnswerInferenceRepository(database),
     ...createSqliteEvidenceRepository(database),
     async checkHealth() {
@@ -1006,5 +1007,5 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
         .onConflictDoNothing({ target: searchMisses.id })
         .execute();
     },
-  };
+  });
 }

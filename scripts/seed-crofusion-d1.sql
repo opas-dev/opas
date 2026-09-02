@@ -1,8 +1,11 @@
 -- ABOUTME: Seeds the isolated CROFusion OPAS demo with public-safe product guidance.
--- ABOUTME: Applies CROFusion identity without copying private source or evaluation canaries.
+-- ABOUTME: Applies identity without private source or evaluation canaries and requires authoring control.
 INSERT INTO workspaces (id, slug, name, created_at, updated_at)
 VALUES ('workspace_demo', 'demo', 'CROFusion Help Center', 1788152400000, 1788152400000)
 ON CONFLICT DO NOTHING;
+
+INSERT INTO workspace_authoring_assertions (workspace_id)
+VALUES ('workspace_demo');
 
 INSERT INTO categories (
   id,

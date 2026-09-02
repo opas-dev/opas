@@ -1,8 +1,15 @@
 // ABOUTME: Writes the deterministic OPAS demo content to a D1-compatible database.
 // ABOUTME: Restores missing seed records without replacing administrator edits on restart.
 import { demoContent, demoSeededAt } from "@/db/demo";
+import { AuthoringPausedError } from "@/db/authoring-controls";
 import { getD1Database } from "@/db/sqlite/client";
-import { articles, categories, themes, workspaces } from "@/db/schema/sqlite";
+import {
+  articles,
+  categories,
+  themes,
+  workspaceAuthoringControls,
+  workspaces,
+} from "@/db/schema/sqlite";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { and, eq, inArray } from "drizzle-orm";
@@ -23,6 +30,16 @@ export async function seedD1(database: SqliteDatabase = getD1Database()) {
     })
     .onConflictDoNothing()
     .execute();
+
+  const [authoringControl] = await database
+    .select()
+    .from(workspaceAuthoringControls)
+    .where(eq(workspaceAuthoringControls.workspaceId, demoContent.workspace.id))
+    .limit(1)
+    .execute();
+  if (!authoringControl || authoringControl.writesPaused) {
+    throw new AuthoringPausedError();
+  }
 
   const [workspace] = await database
     .select()

@@ -35,6 +35,10 @@ import { resolveSiteOrigin } from "../src/site";
 import { embedParentOrigins } from "../src/embed/config";
 import { artifactContentForms, encodedSecretForms } from "./artifact-secrets";
 import {
+  assertMaintenanceArtifactBoundary,
+  prepareMaintenanceProject,
+} from "./maintenance-artifact";
+import {
   registerArtifactCleanup,
   runCloudflareProcess as runVercelProcess,
 } from "./cloudflare-process";
@@ -120,11 +124,13 @@ export type VercelBuildConfiguration = {
 type BuildOptions = {
   acceptance?: boolean;
   environment?: Environment;
+  maintenance?: boolean;
   workspace?: string;
 };
 
 type VercelTargetOptions = {
   acceptance?: boolean;
+  maintenance?: boolean;
 };
 
 type VercelTarget = {
@@ -406,7 +412,7 @@ export function vercelBuildConfiguration(
   requestedOrigin: string,
   workspace = process.cwd(),
   environment: Environment = process.env,
-  options: { acceptanceProject?: string } = {},
+  options: { acceptanceProject?: string; maintenance?: boolean } = {},
 ): VercelBuildConfiguration {
   const siteOrigin = resolveSiteOrigin(requestedOrigin);
   const requiredOrigin = requiredVercelOrigin(options.acceptanceProject);
@@ -415,7 +421,9 @@ export function vercelBuildConfiguration(
   }
   const local = readEnvironmentFile(join(workspace, ".env"));
   const combined = { ...local, ...definedEnvironment(environment) };
-  const admin = requireAdminConfiguration(combined);
+  const admin = options.maintenance
+    ? undefined
+    : requireAdminConfiguration(combined);
   const neon = requireNeonConnectionStrings(combined);
   const neonIdentityHash = sha256(neon.pooled);
   const sanitized: Environment = {};
@@ -439,13 +447,17 @@ export function vercelBuildConfiguration(
     combined.OPAS_EMBED_PARENT_ORIGINS,
   ).join(",");
   sanitized.NEON_DATABASE_URL = neon.pooled;
-  sanitized.ADMIN_EMAIL = admin.email;
-  sanitized.ADMIN_PASSWORD = admin.password;
-  sanitized.ADMIN_SESSION_SECRET = admin.sessionSecret;
+  if (admin) {
+    sanitized.ADMIN_EMAIL = admin.email;
+    sanitized.ADMIN_PASSWORD = admin.password;
+    sanitized.ADMIN_SESSION_SECRET = admin.sessionSecret;
+  }
 
   const secretValues = new Set(collectSecretValues(local, environment));
-  for (const value of secretParts(admin.email)) {
-    secretValues.add(value);
+  if (admin) {
+    for (const value of secretParts(admin.email)) {
+      secretValues.add(value);
+    }
   }
 
   return {
@@ -496,6 +508,9 @@ export function prepareVercelProject(
       filter: (source) => shouldCopyProjectPath(target.workspace, source),
       recursive: true,
     });
+    if (options.maintenance) {
+      prepareMaintenanceProject(project);
+    }
     mkdirSync(join(project, ".vercel"), { recursive: true });
     copyFileSync(target.link, join(project, ".vercel", "project.json"));
     readVercelProjectLink(join(project, ".vercel", "project.json"), options);
@@ -1331,6 +1346,9 @@ export function copyVerifiedVercelOutput(
 ) {
   const target = validateVercelTarget(workspace, options);
   assertVercelArtifactIsSecretFree(source, secretValues);
+  if (options.maintenance) {
+    assertMaintenanceArtifactBoundary(source);
+  }
 
   const stagingDirectory = mkdtempSync(
     join(target.vercelDirectory, ".verified-output-"),
@@ -1341,6 +1359,9 @@ export function copyVerifiedVercelOutput(
   try {
     copyPortableArtifact(source, stagedOutput);
     assertVercelArtifactIsSecretFree(stagedOutput, secretValues);
+    if (options.maintenance) {
+      assertMaintenanceArtifactBoundary(stagedOutput);
+    }
     validateVercelTarget(target.workspace, options);
     rmSync(destination, { force: true, recursive: true });
     renameSync(stagedOutput, destination);
@@ -1439,6 +1460,9 @@ function prepareVercelDeployment(
   const source = join(target.vercelDirectory, "output");
   assertVercelArtifactIdentity(source, neonIdentityHash);
   assertVercelArtifactIsSecretFree(source, secretValues);
+  if (options.maintenance) {
+    assertMaintenanceArtifactBoundary(source);
+  }
 
   const directory = mkdtempSync(join(tmpdir(), "opas-vercel-deploy-"));
   chmodSync(directory, 0o700);
@@ -1461,6 +1485,9 @@ function prepareVercelDeployment(
       join(project, ".vercel", "output"),
       neonIdentityHash,
     );
+    if (options.maintenance) {
+      assertMaintenanceArtifactBoundary(join(project, ".vercel", "output"));
+    }
     freezeArtifact(join(project, ".vercel", "output"));
   } catch (error) {
     unregisterCleanup();
@@ -1482,7 +1509,10 @@ export async function buildVercelArtifact(
   requestedOrigin: string,
   options: BuildOptions = {},
 ) {
-  const targetOptions = { acceptance: options.acceptance };
+  const targetOptions = {
+    acceptance: options.acceptance,
+    maintenance: options.maintenance,
+  };
   const target = validateVercelTarget(
     options.workspace ?? process.cwd(),
     targetOptions,
@@ -1496,6 +1526,7 @@ export async function buildVercelArtifact(
     options.environment ?? process.env,
     {
       acceptanceProject: options.acceptance ? target.projectName : undefined,
+      maintenance: options.maintenance,
     },
   );
   const storeDirectory = pnpmStoreDirectory(target.workspace, "Vercel");
@@ -1560,7 +1591,10 @@ export async function deployVercelArtifact(
   requestedOrigin: string,
   options: BuildOptions = {},
 ) {
-  const targetOptions = { acceptance: options.acceptance };
+  const targetOptions = {
+    acceptance: options.acceptance,
+    maintenance: options.maintenance,
+  };
   const target = validateVercelTarget(
     options.workspace ?? process.cwd(),
     targetOptions,
@@ -1571,6 +1605,7 @@ export async function deployVercelArtifact(
     options.environment ?? process.env,
     {
       acceptanceProject: options.acceptance ? target.projectName : undefined,
+      maintenance: options.maintenance,
     },
   );
   const prepared = prepareVercelDeployment(
@@ -1608,7 +1643,8 @@ export async function deployVercelArtifact(
 
 async function main(args: string[]) {
   const deploy = args[0] === "deploy";
-  const commandArguments = deploy ? args.slice(1) : args;
+  const maintenance = !deploy && args[0] === "maintenance";
+  const commandArguments = deploy || maintenance ? args.slice(1) : args;
   const acceptance = commandArguments[0] === "--acceptance";
   const targetArguments = acceptance
     ? commandArguments.slice(1)
@@ -1620,7 +1656,7 @@ async function main(args: string[]) {
     );
   }
   const action = deploy ? deployVercelArtifact : buildVercelArtifact;
-  await action(targetArguments[0], { acceptance });
+  await action(targetArguments[0], { acceptance, maintenance });
 }
 
 const invokedModule = process.argv[1]

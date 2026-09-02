@@ -10,6 +10,10 @@ import {
   type ThemeEditorValues,
   type ThemeFieldErrors,
 } from "@/app/admin/theme/validation";
+import {
+  getAuthoringPausedFailure,
+  type AuthoringPausedFailure,
+} from "@/authoring/failures";
 import { requireAdmin } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
@@ -23,6 +27,7 @@ export type ThemeActionState = {
   activePreset: ThemePresetId | null;
   values: ThemeEditorValues;
   fieldErrors?: ThemeFieldErrors;
+  code?: AuthoringPausedFailure["code"];
 };
 
 export async function updateThemeAction(
@@ -41,6 +46,7 @@ export async function updateThemeAction(
       revision,
       values: request.values ?? previousState.values,
       fieldErrors: request.fieldErrors,
+      code: undefined,
     };
   }
 
@@ -69,6 +75,17 @@ export async function updateThemeAction(
       config,
     });
   } catch (error) {
+    const paused = getAuthoringPausedFailure(error);
+    if (paused) {
+      return {
+        ...previousState,
+        ...paused,
+        status: "error",
+        revision,
+        values,
+        fieldErrors: undefined,
+      };
+    }
     const code =
       typeof error === "object" &&
       error !== null &&
@@ -88,6 +105,7 @@ export async function updateThemeAction(
       revision,
       values,
       fieldErrors: undefined,
+      code: undefined,
     };
   }
 

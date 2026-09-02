@@ -12,6 +12,7 @@ import {
   prepareAssetSelection,
 } from "@/db/assets";
 import { validateArticleEvidence } from "@/db/evidence";
+import { withAuthoringErrorBoundary } from "@/db/authoring-controls";
 import type {
   ArticleAssetSelection,
   ArticleSubmission,
@@ -392,7 +393,7 @@ function knowledgeImportStatements(
 }
 
 export function createPostgresRepository(database: PostgresDatabase): Repository {
-  return {
+  return withAuthoringErrorBoundary<Repository>({
     ...createPostgresAnswerInferenceRepository(database),
     ...createPostgresEvidenceRepository(database),
     async checkHealth() {
@@ -978,5 +979,5 @@ export function createPostgresRepository(database: PostgresDatabase): Repository
         target: searchMisses.id,
       });
     },
-  };
+  });
 }

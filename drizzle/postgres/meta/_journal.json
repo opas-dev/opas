@@ -71,6 +71,13 @@
       "when": 1788145008527,
       "tag": "0009_public_outcome_admission",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788391516700,
+      "tag": "0010_workspace_authoring_controls",
+      "breakpoints": true
     }
   ]
 }

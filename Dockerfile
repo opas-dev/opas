@@ -17,6 +17,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 RUN pnpm build:prepare:postgres
 
+FROM dependencies AS maintenance-builder
+COPY . .
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm maintenance:prepare .
+RUN pnpm build
+RUN pnpm maintenance:scan .next/standalone && pnpm maintenance:scan .next/static
+
 FROM node:22.23.2-alpine AS runner
 WORKDIR /app
 ENV HOSTNAME=0.0.0.0
@@ -36,3 +43,20 @@ USER nextjs
 EXPOSE 3000
 
 CMD ["sh", "-c", "node prepare-postgres.cjs && node server.js"]
+
+FROM node:22.23.2-alpine AS maintenance
+WORKDIR /app
+ENV HOSTNAME=0.0.0.0
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+
+COPY --from=maintenance-builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=maintenance-builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+EXPOSE 3000
+
+CMD ["node", "server.js"]

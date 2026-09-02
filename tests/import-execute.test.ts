@@ -8,6 +8,7 @@ import type {
   AssetManifest,
   KnowledgeImport,
 } from "@/db/repository";
+import { AuthoringPausedError } from "@/db/authoring-controls";
 import {
   executeKnowledgeImport,
   ImportExecutionError,
@@ -160,6 +161,47 @@ test("discards the manifest after either staging or atomic activation fails", as
       "asset_manifest_00000000-0000-4000-8000-000000000000",
     ]);
   }
+});
+
+test("preserves a paused stage failure without letting cleanup mask it", async () => {
+  const target = repository();
+  let cleanupCalls = 0;
+  target.adapter.stageAsset = async () => {
+    throw new AuthoringPausedError();
+  };
+  target.adapter.discardAssetManifest = async () => {
+    cleanupCalls += 1;
+    throw new Error("cleanup failed");
+  };
+
+  await assert.rejects(
+    executeKnowledgeImport({
+      repository: target.adapter,
+      workspaceId: "workspace_demo",
+      plan: plan(),
+      now,
+    }),
+    (error: unknown) =>
+      error instanceof AuthoringPausedError && error.code === "AUTHORING_PAUSED",
+  );
+  assert.equal(cleanupCalls, 0);
+
+  const cleanupTarget = repository({ failStage: true });
+  cleanupTarget.adapter.discardAssetManifest = async () => {
+    cleanupCalls += 1;
+    throw new AuthoringPausedError();
+  };
+  await assert.rejects(
+    executeKnowledgeImport({
+      repository: cleanupTarget.adapter,
+      workspaceId: "workspace_demo",
+      plan: plan(),
+      now,
+    }),
+    (error: unknown) =>
+      error instanceof AuthoringPausedError && error.code === "AUTHORING_PAUSED",
+  );
+  assert.equal(cleanupCalls, 1);
 });
 
 test("refuses a blocked plan before creating a manifest", async () => {

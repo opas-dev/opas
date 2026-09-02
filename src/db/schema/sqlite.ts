@@ -41,6 +41,31 @@ export const workspaces = sqliteTable("workspaces", {
   ...timestampColumns,
 });
 
+export const workspaceAuthoringControls = sqliteTable(
+  "workspace_authoring_controls",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    writesPaused: integer("writes_paused", { mode: "boolean" }).notNull().default(false),
+    generation: integer("generation").notNull().default(0),
+    changedByMemberId: text("changed_by_member_id"),
+    changedAt: integer("changed_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    check(
+      "workspace_authoring_controls_writes_paused_check",
+      sql`${table.writesPaused} in (0, 1)`,
+    ),
+    check(
+      "workspace_authoring_controls_generation_check",
+      sql`${table.generation} >= 0`,
+    ),
+  ],
+);
+
 export const categories = sqliteTable(
   "categories",
   {

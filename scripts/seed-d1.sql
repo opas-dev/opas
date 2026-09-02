@@ -1,8 +1,11 @@
 -- ABOUTME: Seeds Cloudflare D1 with the deterministic OPAS demo workspace, content, and theme.
--- ABOUTME: Restores missing seed records without replacing administrator edits on redeploy.
+-- ABOUTME: Restores missing records without replacing administrator edits and requires workspace-created control.
 INSERT INTO workspaces (id, slug, name, created_at, updated_at)
 VALUES ('workspace_demo', 'demo', 'OPAS Demo', 1767225600000, 1767225600000)
 ON CONFLICT DO NOTHING;
+
+INSERT INTO workspace_authoring_assertions (workspace_id)
+VALUES ('workspace_demo');
 
 INSERT INTO categories (
   id,

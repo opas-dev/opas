@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { scheduleEmbeddingRecovery } from "@/ai/embedding-scheduling";
+import { authoringPausedResponse } from "@/authoring/failures";
 import { requireAdmin } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
@@ -99,6 +100,8 @@ export async function POST(request: Request) {
   try {
     await executeKnowledgeImport({ repository, workspaceId: demoIds.workspace, plan });
   } catch (error) {
+    const paused = authoringPausedResponse(error);
+    if (paused) return paused;
     console.error("Knowledge import activation failed.", errorDetails(error));
     return requestError(
       "The workspace changed or the import could not be activated. Review it again.",

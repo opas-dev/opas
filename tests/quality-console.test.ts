@@ -9,6 +9,7 @@ import type {
   EvidenceChunkRecord,
   SavedQuestionSet,
 } from "@/db/repository";
+import { AuthoringPausedError } from "@/db/authoring-controls";
 import type { ConversationAnalyticsRecord } from "@/outcomes/records";
 import type { ConversationAnalyticsStore } from "@/outcomes/store";
 import type { EvidenceRetrievalResult } from "@/search/evidence";
@@ -1058,6 +1059,39 @@ test("runs saved sets through production answer generation with current provenan
     }),
     (error: unknown) =>
       error instanceof QualityConsoleError && error.code === "not-found",
+  );
+});
+
+test("preserves paused evaluation writes instead of redacting them as unavailable", async () => {
+  let completionCalls = 0;
+  await assert.rejects(
+    runSavedQuestionSet(workspaceId, "question_set_one", {
+      createAnswerRuntime: async () => answerRuntime(),
+      repository: qualityRepository({
+        async startEvaluationRun() {
+          throw new AuthoringPausedError();
+        },
+        async finishEvaluationRun() {
+          completionCalls += 1;
+        },
+      }),
+    }),
+    (error: unknown) =>
+      error instanceof AuthoringPausedError && error.code === "AUTHORING_PAUSED",
+  );
+  assert.equal(completionCalls, 0);
+
+  await assert.rejects(
+    runSavedQuestionSet(workspaceId, "question_set_one", {
+      createAnswerRuntime: async () => answerRuntime(),
+      repository: qualityRepository({
+        async finishEvaluationRun() {
+          throw new AuthoringPausedError();
+        },
+      }),
+    }),
+    (error: unknown) =>
+      error instanceof AuthoringPausedError && error.code === "AUTHORING_PAUSED",
   );
 });
 

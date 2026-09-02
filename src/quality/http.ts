@@ -4,6 +4,7 @@ import {
   qualityCsvAttachmentHeaders,
   type QualityEvaluationResults,
 } from "@/quality/console";
+import { getAuthoringPausedFailure } from "@/authoring/failures";
 import type {
   QualityPlaygroundResult,
   QualityRetainedReplayResult,
@@ -203,6 +204,8 @@ async function authorizedMutation(
 }
 
 function safeFailure(error: unknown) {
+  const paused = getAuthoringPausedFailure(error);
+  if (paused) return json(paused, 503);
   if (error instanceof QualityRequestError) {
     return json(
       { error: error.status === 405 ? "method-not-allowed" : "invalid-request" },

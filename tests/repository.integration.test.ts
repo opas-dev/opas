@@ -197,6 +197,13 @@ const expectedColumns = {
     "active_embedding_generation_id",
     "updated_at",
   ],
+  workspace_authoring_controls: [
+    "workspace_id",
+    "writes_paused",
+    "generation",
+    "changed_by_member_id",
+    "changed_at",
+  ],
   workspace_inference_states: ["workspace_id", "updated_at"],
   workspaces: ["id", "slug", "name", "created_at", "updated_at"],
 } as const;
@@ -232,6 +239,46 @@ type Harness = {
 };
 
 const tableNames = Object.keys(expectedColumns) as TableName[];
+const protectedAuthoringTables = [
+  "categories",
+  "articles",
+  "themes",
+  "asset_manifests",
+  "asset_manifest_items",
+  "assets",
+  "article_assets",
+  "workspace_index_states",
+  "evidence_chunks",
+  "embedding_generations",
+  "chunk_embeddings",
+  "embedding_jobs",
+  "saved_question_sets",
+  "evaluation_runs",
+] as const;
+const postgresPreFenceMigrations = [
+  "0000_silly_johnny_blaze.sql",
+  "0001_mysterious_bishop.sql",
+  "0002_charming_dragon_lord.sql",
+  "0003_harsh_goliath.sql",
+  "0004_reflective_paladin.sql",
+  "0005_harsh_tusk.sql",
+  "0006_useful_celestials.sql",
+  "0007_wise_onslaught.sql",
+  "0008_brainy_crusher_hogan.sql",
+  "0009_public_outcome_admission.sql",
+] as const;
+const sqlitePreFenceMigrations = [
+  "0000_cool_gertrude_yorkes.sql",
+  "0001_opposite_centennial.sql",
+  "0002_tan_ezekiel.sql",
+  "0003_melted_bloodscream.sql",
+  "0004_lumpy_boomerang.sql",
+  "0005_medical_sleepwalker.sql",
+  "0006_large_bloodscream.sql",
+  "0007_nostalgic_hulk.sql",
+  "0008_lush_kid_colt.sql",
+  "0009_public_outcome_admission.sql",
+] as const;
 const dayInMilliseconds = 86_400_000;
 let evidenceJobSequence = 0;
 
@@ -300,6 +347,14 @@ async function applyPostgresMigration(pool: Pool, filename: string) {
       await pool.query(statement);
     }
   }
+}
+
+function applySqliteMigration(client: Database.Database, filename: string) {
+  const migration = readFileSync(
+    path.join(process.cwd(), "drizzle/sqlite", filename),
+    "utf8",
+  );
+  client.transaction(() => client.exec(migration))();
 }
 
 async function recordSearchSamples(
@@ -1219,6 +1274,7 @@ async function exerciseRepository(harness: Harness) {
     search_misses: 0,
     support_handoffs: 0,
     themes: 1,
+    workspace_authoring_controls: 1,
     workspace_index_states: 0,
     workspace_inference_states: 0,
     workspaces: 1,
@@ -1246,6 +1302,7 @@ async function exerciseRepository(harness: Harness) {
       search_misses: 0,
       support_handoffs: 0,
       themes: 1,
+      workspace_authoring_controls: 1,
       workspace_index_states: 0,
       workspace_inference_states: 0,
       workspaces: 1,
@@ -3149,5 +3206,678 @@ test("Postgres preserves populated v0.1 data through article evidence migration"
   } finally {
     await pool.end();
     await container.stop();
+  }
+});
+
+test("Postgres authoring fence backfills, locks, and fails closed", { timeout: 120_000 }, async () => {
+  const container = await new PostgreSqlContainer("postgres:18.6-alpine").start();
+  const pool = new Pool({ connectionString: container.getConnectionUri() });
+  const workspaceId = "workspace_authoring_fence_postgres";
+
+  try {
+    for (const migration of postgresPreFenceMigrations) {
+      await applyPostgresMigration(pool, migration);
+    }
+    await pool.query(
+      "insert into workspaces (id, slug, name) values ($1, $2, $3)",
+      [workspaceId, "authoring-fence-postgres", "Authoring fence"],
+    );
+    await pool.query(
+      "insert into categories (id, workspace_id, slug, name) values ($1, $2, $3, $4)",
+      ["category_authoring_fence_existing", workspaceId, "existing", "Existing"],
+    );
+
+    await applyPostgresMigration(pool, "0010_workspace_authoring_controls.sql");
+
+    assert.deepEqual(
+      (
+        await pool.query(
+          `select workspace_id, writes_paused, generation, changed_by_member_id
+           from workspace_authoring_controls
+           where workspace_id = $1`,
+          [workspaceId],
+        )
+      ).rows,
+      [
+        {
+          workspace_id: workspaceId,
+          writes_paused: false,
+          generation: 0,
+          changed_by_member_id: null,
+        },
+      ],
+    );
+
+    const guardTriggers = (
+      await pool.query<{ table_name: string; trigger_name: string }>(
+        `select tables.relname as table_name, triggers.tgname as trigger_name
+         from pg_trigger triggers
+         inner join pg_class tables on tables.oid = triggers.tgrelid
+         inner join pg_namespace namespaces on namespaces.oid = tables.relnamespace
+         where namespaces.nspname = 'public'
+           and not triggers.tgisinternal
+           and triggers.tgname like '%authoring_control%trigger'
+         order by tables.relname, triggers.tgname`,
+      )
+    ).rows;
+    assert.deepEqual(
+      guardTriggers,
+      [
+        ...protectedAuthoringTables.map((table) => ({
+          table_name: table,
+          trigger_name: `${table}_authoring_control_trigger`,
+        })),
+        {
+          table_name: "workspaces",
+          trigger_name: "workspaces_authoring_control_delete_trigger",
+        },
+        {
+          table_name: "workspaces",
+          trigger_name: "workspaces_authoring_control_insert_trigger",
+        },
+      ].sort((left, right) =>
+        `${left.table_name}:${left.trigger_name}`.localeCompare(
+          `${right.table_name}:${right.trigger_name}`,
+        ),
+      ),
+    );
+    const assertionFunction = await pool.query<{ definition: string }>(
+      `select pg_get_functiondef(
+         'opas_assert_authoring_open(text)'::regprocedure
+       ) as definition`,
+    );
+    assert.match(assertionFunction.rows[0].definition, /FOR SHARE/u);
+    assert.match(assertionFunction.rows[0].definition, /AUTHORING_PAUSED/u);
+    await pool.query("select opas_assert_authoring_open($1)", [workspaceId]);
+
+    const freshWorkspaceId = "workspace_authoring_fence_fresh_postgres";
+    await pool.query(
+      "insert into workspaces (id, slug, name) values ($1, $2, $3)",
+      [freshWorkspaceId, "authoring-fence-fresh-postgres", "Fresh fence"],
+    );
+    assert.deepEqual(
+      (
+        await pool.query(
+          `select writes_paused, generation
+           from workspace_authoring_controls
+           where workspace_id = $1`,
+          [freshWorkspaceId],
+        )
+      ).rows,
+      [{ writes_paused: false, generation: 0 }],
+    );
+
+    await pool.query(
+      "delete from workspace_authoring_controls where workspace_id = $1",
+      [workspaceId],
+    );
+    await assert.rejects(
+      pool.query("select opas_assert_authoring_open($1)", [workspaceId]),
+      /AUTHORING_PAUSED/u,
+    );
+    await assert.rejects(
+      pool.query(
+        "insert into categories (id, workspace_id, slug, name) values ($1, $2, $3, $4)",
+        ["category_authoring_fence_missing", workspaceId, "missing", "Missing"],
+      ),
+      /AUTHORING_PAUSED/u,
+    );
+    await assert.rejects(
+      pool.query("delete from workspaces where id = $1", [workspaceId]),
+      /AUTHORING_PAUSED/u,
+    );
+    await pool.query(
+      "insert into search_misses (id, workspace_id, query) values ($1, $2, $3)",
+      ["search_authoring_fence_missing", workspaceId, "allowed while missing"],
+    );
+
+    await pool.query(
+      `insert into workspace_authoring_controls
+         (workspace_id, writes_paused, generation, changed_by_member_id)
+       values ($1, false, 0, null)`,
+      [workspaceId],
+    );
+    await pool.query("select opas_assert_authoring_open($1)", [workspaceId]);
+    await pool.query(
+      "insert into categories (id, workspace_id, slug, name) values ($1, $2, $3, $4)",
+      ["category_authoring_fence_open", workspaceId, "open", "Open"],
+    );
+
+    const writer = await pool.connect();
+    const pauser = await pool.connect();
+    let pauseUpdate: Promise<unknown> | undefined;
+    try {
+      await writer.query("begin");
+      await writer.query(
+        "insert into categories (id, workspace_id, slug, name) values ($1, $2, $3, $4)",
+        ["category_authoring_fence_drain", workspaceId, "drain", "Drain"],
+      );
+      await pauser.query("begin");
+      const pauserPid = (
+        await pauser.query<{ pid: number }>("select pg_backend_pid() as pid")
+      ).rows[0].pid;
+      pauseUpdate = pauser.query(
+        `update workspace_authoring_controls
+         set writes_paused = true, generation = generation + 1
+         where workspace_id = $1`,
+        [workspaceId],
+      );
+
+      let pauseWaitedForLock = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const activity = await pool.query<{ wait_event_type: string | null }>(
+          "select wait_event_type from pg_stat_activity where pid = $1",
+          [pauserPid],
+        );
+        if (activity.rows[0]?.wait_event_type === "Lock") {
+          pauseWaitedForLock = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      await writer.query("commit");
+      await pauseUpdate;
+      await pauser.query("commit");
+      assert.equal(pauseWaitedForLock, true, "pause did not wait for the guarded writer");
+    } catch (error) {
+      await writer.query("rollback").catch(() => undefined);
+      await pauseUpdate?.catch(() => undefined);
+      await pauser.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      writer.release();
+      pauser.release();
+    }
+
+    await assert.rejects(
+      pool.query("select opas_assert_authoring_open($1)", [workspaceId]),
+      /AUTHORING_PAUSED/u,
+    );
+    await assert.rejects(
+      pool.query(
+        "insert into categories (id, workspace_id, slug, name) values ($1, $2, $3, $4)",
+        ["category_authoring_fence_paused", workspaceId, "paused", "Paused"],
+      ),
+      /AUTHORING_PAUSED/u,
+    );
+    await assert.rejects(
+      pool.query("update categories set name = $1 where id = $2", [
+        "Paused update",
+        "category_authoring_fence_open",
+      ]),
+      /AUTHORING_PAUSED/u,
+    );
+    await assert.rejects(
+      pool.query("delete from categories where id = $1", [
+        "category_authoring_fence_open",
+      ]),
+      /AUTHORING_PAUSED/u,
+    );
+
+    await pool.query(
+      "insert into search_misses (id, workspace_id, query) values ($1, $2, $3)",
+      ["search_authoring_fence_paused", workspaceId, "allowed while paused"],
+    );
+    await pool.query(
+      "update search_misses set query = $1 where id = $2",
+      ["still allowed while paused", "search_authoring_fence_paused"],
+    );
+    await pool.query(
+      "delete from search_misses where id = $1",
+      ["search_authoring_fence_paused"],
+    );
+
+    const rollbackClient = await pool.connect();
+    try {
+      await rollbackClient.query("begin");
+      await rollbackClient.query(
+        "insert into search_misses (id, workspace_id, query) values ($1, $2, $3)",
+        ["search_authoring_fence_rollback", workspaceId, "must roll back"],
+      );
+      await assert.rejects(
+        rollbackClient.query("update categories set name = $1 where id = $2", [
+          "Must not persist",
+          "category_authoring_fence_open",
+        ]),
+        /AUTHORING_PAUSED/u,
+      );
+      await rollbackClient.query("rollback");
+    } finally {
+      rollbackClient.release();
+    }
+    assert.equal(
+      Number(
+        (
+          await pool.query(
+            "select count(*) from search_misses where id = $1",
+            ["search_authoring_fence_rollback"],
+          )
+        ).rows[0].count,
+      ),
+      0,
+    );
+    assert.equal(
+      (
+        await pool.query<{ name: string }>(
+          "select name from categories where id = $1",
+          ["category_authoring_fence_open"],
+        )
+      ).rows[0].name,
+      "Open",
+    );
+
+    const database = createPostgresDatabase(pool, { schema: postgresSchema });
+    await seedPostgres(database);
+    await pool.query(
+      "update workspace_authoring_controls set writes_paused = true where workspace_id = $1",
+      [demoIds.workspace],
+    );
+    const seededArticleCount = Number(
+      (
+        await pool.query(
+          "select count(*) from articles where workspace_id = $1",
+          [demoIds.workspace],
+        )
+      ).rows[0].count,
+    );
+    await assert.rejects(seedPostgres(database), /AUTHORING_PAUSED/u);
+    assert.equal(
+      Number(
+        (
+          await pool.query(
+            "select count(*) from articles where workspace_id = $1",
+            [demoIds.workspace],
+          )
+        ).rows[0].count,
+      ),
+      seededArticleCount,
+    );
+    await pool.query(
+      "delete from workspace_authoring_controls where workspace_id = $1",
+      [demoIds.workspace],
+    );
+    await assert.rejects(seedPostgres(database), /AUTHORING_PAUSED/u);
+
+    await pool.query(
+      `update workspace_authoring_controls
+       set writes_paused = false, generation = generation + 1
+       where workspace_id = $1`,
+      [workspaceId],
+    );
+    await pool.query("select opas_assert_authoring_open($1)", [workspaceId]);
+    await pool.query("update categories set name = $1 where id = $2", [
+      "Resumed",
+      "category_authoring_fence_open",
+    ]);
+    await pool.query("delete from categories where id = $1", [
+      "category_authoring_fence_open",
+    ]);
+    await pool.query("delete from workspaces where id = $1", [freshWorkspaceId]);
+    await pool.query("delete from workspaces where id = $1", [workspaceId]);
+    assert.equal(
+      Number(
+        (
+          await pool.query(
+            "select count(*) from workspace_authoring_controls where workspace_id = any($1::text[])",
+            [[freshWorkspaceId, workspaceId]],
+          )
+        ).rows[0].count,
+      ),
+      0,
+    );
+  } finally {
+    await pool.end();
+    await container.stop();
+  }
+});
+
+test("SQLite authoring fence backfills, asserts, and rolls back", async () => {
+  const client = new Database(":memory:");
+  client.pragma("foreign_keys = ON");
+  const workspaceId = "workspace_authoring_fence_sqlite";
+
+  try {
+    for (const migration of sqlitePreFenceMigrations) {
+      applySqliteMigration(client, migration);
+    }
+    client
+      .prepare("insert into workspaces (id, slug, name) values (?, ?, ?)")
+      .run(workspaceId, "authoring-fence-sqlite", "Authoring fence");
+    client
+      .prepare("insert into categories (id, workspace_id, slug, name) values (?, ?, ?, ?)")
+      .run("category_authoring_fence_existing", workspaceId, "existing", "Existing");
+
+    applySqliteMigration(client, "0010_workspace_authoring_controls.sql");
+
+    assert.deepEqual(
+      client
+        .prepare(
+          `select workspace_id, writes_paused, generation, changed_by_member_id
+           from workspace_authoring_controls
+           where workspace_id = ?`,
+        )
+        .all(workspaceId),
+      [
+        {
+          workspace_id: workspaceId,
+          writes_paused: 0,
+          generation: 0,
+          changed_by_member_id: null,
+        },
+      ],
+    );
+
+    const guardTriggers = client
+      .prepare(
+        `select tbl_name as table_name, name as trigger_name, sql
+         from sqlite_master
+         where type = 'trigger' and name like '%authoring_control%trigger'
+         order by tbl_name, name`,
+      )
+      .all() as Array<{ table_name: string; trigger_name: string; sql: string }>;
+    assert.deepEqual(
+      guardTriggers.map(({ table_name, trigger_name }) => ({ table_name, trigger_name })),
+      [
+        ...protectedAuthoringTables.flatMap((table) =>
+          ["delete", "insert", "update"].map((operation) => ({
+            table_name: table,
+            trigger_name: `${table}_authoring_control_${operation}_trigger`,
+          })),
+        ),
+        {
+          table_name: "workspaces",
+          trigger_name: "workspaces_authoring_control_delete_trigger",
+        },
+        {
+          table_name: "workspaces",
+          trigger_name: "workspaces_authoring_control_insert_trigger",
+        },
+      ].sort((left, right) =>
+        `${left.table_name}:${left.trigger_name}`.localeCompare(
+          `${right.table_name}:${right.trigger_name}`,
+        ),
+      ),
+    );
+    for (const trigger of guardTriggers.filter(
+      ({ trigger_name }) =>
+        trigger_name !== "workspaces_authoring_control_insert_trigger",
+    )) {
+      assert.match(trigger.sql, /AUTHORING_PAUSED/u);
+    }
+    assert.equal(
+      (
+        client
+          .prepare(
+            `select count(*) as count
+             from sqlite_master
+             where type = 'trigger' and tbl_name = 'search_misses'`,
+          )
+          .get() as { count: number }
+      ).count,
+      0,
+    );
+    assert.deepEqual(
+      client
+        .prepare(
+          `select type, name
+           from sqlite_master
+           where name in (
+             'workspace_authoring_assertions',
+             'workspace_authoring_assertions_insert_trigger'
+           )
+           order by type`,
+        )
+        .all(),
+      [
+        { type: "trigger", name: "workspace_authoring_assertions_insert_trigger" },
+        { type: "view", name: "workspace_authoring_assertions" },
+      ],
+    );
+    client
+      .prepare("insert into workspace_authoring_assertions (workspace_id) values (?)")
+      .run(workspaceId);
+    assert.equal(
+      (
+        client
+          .prepare("select count(*) as count from workspace_authoring_assertions")
+          .get() as { count: number }
+      ).count,
+      0,
+    );
+
+    const freshWorkspaceId = "workspace_authoring_fence_fresh_sqlite";
+    client
+      .prepare("insert into workspaces (id, slug, name) values (?, ?, ?)")
+      .run(freshWorkspaceId, "authoring-fence-fresh-sqlite", "Fresh fence");
+    assert.deepEqual(
+      client
+        .prepare(
+          `select writes_paused, generation
+           from workspace_authoring_controls
+           where workspace_id = ?`,
+        )
+        .all(freshWorkspaceId),
+      [{ writes_paused: 0, generation: 0 }],
+    );
+
+    client
+      .prepare("delete from workspace_authoring_controls where workspace_id = ?")
+      .run(workspaceId);
+    assert.throws(
+      () =>
+        client
+          .prepare("insert into workspace_authoring_assertions (workspace_id) values (?)")
+          .run(workspaceId),
+      /AUTHORING_PAUSED/u,
+    );
+    assert.throws(
+      () =>
+        client
+          .prepare("insert into categories (id, workspace_id, slug, name) values (?, ?, ?, ?)")
+          .run("category_authoring_fence_missing", workspaceId, "missing", "Missing"),
+      /AUTHORING_PAUSED/u,
+    );
+    assert.throws(
+      () => client.prepare("delete from workspaces where id = ?").run(workspaceId),
+      /AUTHORING_PAUSED/u,
+    );
+    client
+      .prepare("insert into search_misses (id, workspace_id, query) values (?, ?, ?)")
+      .run("search_authoring_fence_missing", workspaceId, "allowed while missing");
+
+    client
+      .prepare(
+        `insert into workspace_authoring_controls
+           (workspace_id, writes_paused, generation, changed_by_member_id)
+         values (?, 0, 0, null)`,
+      )
+      .run(workspaceId);
+    client
+      .prepare("insert into workspace_authoring_assertions (workspace_id) values (?)")
+      .run(workspaceId);
+    client
+      .prepare("insert into categories (id, workspace_id, slug, name) values (?, ?, ?, ?)")
+      .run("category_authoring_fence_open", workspaceId, "open", "Open");
+
+    client
+      .prepare(
+        `update workspace_authoring_controls
+         set writes_paused = 1, generation = generation + 1
+         where workspace_id = ?`,
+      )
+      .run(workspaceId);
+    assert.throws(
+      () =>
+        client
+          .prepare("insert into workspace_authoring_assertions (workspace_id) values (?)")
+          .run(workspaceId),
+      /AUTHORING_PAUSED/u,
+    );
+    assert.throws(
+      () =>
+        client
+          .prepare("insert into categories (id, workspace_id, slug, name) values (?, ?, ?, ?)")
+          .run("category_authoring_fence_paused", workspaceId, "paused", "Paused"),
+      /AUTHORING_PAUSED/u,
+    );
+    assert.throws(
+      () =>
+        client
+          .prepare("update categories set name = ? where id = ?")
+          .run("Paused update", "category_authoring_fence_open"),
+      /AUTHORING_PAUSED/u,
+    );
+    assert.throws(
+      () =>
+        client
+          .prepare("delete from categories where id = ?")
+          .run("category_authoring_fence_open"),
+      /AUTHORING_PAUSED/u,
+    );
+
+    client
+      .prepare("insert into search_misses (id, workspace_id, query) values (?, ?, ?)")
+      .run("search_authoring_fence_paused", workspaceId, "allowed while paused");
+    client
+      .prepare("update search_misses set query = ? where id = ?")
+      .run("still allowed while paused", "search_authoring_fence_paused");
+    client
+      .prepare("delete from search_misses where id = ?")
+      .run("search_authoring_fence_paused");
+
+    assert.throws(
+      () =>
+        client.transaction(() => {
+          client
+            .prepare("insert into search_misses (id, workspace_id, query) values (?, ?, ?)")
+            .run("search_authoring_fence_rollback", workspaceId, "must roll back");
+          client
+            .prepare("update categories set name = ? where id = ?")
+            .run("Must not persist", "category_authoring_fence_open");
+        })(),
+      /AUTHORING_PAUSED/u,
+    );
+    assert.equal(
+      (
+        client
+          .prepare("select count(*) as count from search_misses where id = ?")
+          .get("search_authoring_fence_rollback") as { count: number }
+      ).count,
+      0,
+    );
+    assert.equal(
+      (
+        client
+          .prepare("select name from categories where id = ?")
+          .get("category_authoring_fence_open") as { name: string }
+      ).name,
+      "Open",
+    );
+
+    const database = createSqliteDatabase(client, { schema: sqliteSchema });
+    await seedD1(database);
+    client
+      .prepare("update workspace_authoring_controls set writes_paused = 1 where workspace_id = ?")
+      .run(demoIds.workspace);
+    const seededArticleCount = (
+      client
+        .prepare("select count(*) as count from articles where workspace_id = ?")
+        .get(demoIds.workspace) as { count: number }
+    ).count;
+    await assert.rejects(seedD1(database), /AUTHORING_PAUSED/u);
+    assert.equal(
+      (
+        client
+          .prepare("select count(*) as count from articles where workspace_id = ?")
+          .get(demoIds.workspace) as { count: number }
+      ).count,
+      seededArticleCount,
+    );
+    client
+      .prepare("delete from workspace_authoring_controls where workspace_id = ?")
+      .run(demoIds.workspace);
+    await assert.rejects(seedD1(database), /AUTHORING_PAUSED/u);
+
+    for (const seedFile of ["seed-d1.sql", "seed-crofusion-d1.sql"]) {
+      client
+        .prepare(
+          `insert into workspace_authoring_controls
+             (workspace_id, writes_paused, generation, changed_by_member_id)
+           values (?, 0, 0, null)
+           on conflict (workspace_id) do update set writes_paused = 0`,
+        )
+        .run(demoIds.workspace);
+      client.prepare("delete from workspaces where id = ?").run(demoIds.workspace);
+      client.exec(readFileSync(path.join(process.cwd(), "scripts", seedFile), "utf8"));
+      client
+        .prepare("update workspace_authoring_controls set writes_paused = 1 where workspace_id = ?")
+        .run(demoIds.workspace);
+      const contentCount = (
+        client
+          .prepare(
+            `select
+               (select count(*) from categories where workspace_id = ?) +
+               (select count(*) from articles where workspace_id = ?) +
+               (select count(*) from themes where workspace_id = ?) as count`,
+          )
+          .get(demoIds.workspace, demoIds.workspace, demoIds.workspace) as {
+          count: number;
+        }
+      ).count;
+      assert.throws(
+        () => client.exec(readFileSync(path.join(process.cwd(), "scripts", seedFile), "utf8")),
+        /AUTHORING_PAUSED/u,
+      );
+      assert.equal(
+        (
+          client
+            .prepare(
+              `select
+                 (select count(*) from categories where workspace_id = ?) +
+                 (select count(*) from articles where workspace_id = ?) +
+                 (select count(*) from themes where workspace_id = ?) as count`,
+            )
+            .get(demoIds.workspace, demoIds.workspace, demoIds.workspace) as {
+            count: number;
+          }
+        ).count,
+        contentCount,
+      );
+    }
+
+    client
+      .prepare(
+        `update workspace_authoring_controls
+         set writes_paused = 0, generation = generation + 1
+         where workspace_id = ?`,
+      )
+      .run(workspaceId);
+    client
+      .prepare("insert into workspace_authoring_assertions (workspace_id) values (?)")
+      .run(workspaceId);
+    client
+      .prepare("update categories set name = ? where id = ?")
+      .run("Resumed", "category_authoring_fence_open");
+    client
+      .prepare("delete from categories where id = ?")
+      .run("category_authoring_fence_open");
+    client.prepare("delete from workspaces where id = ?").run(freshWorkspaceId);
+    client.prepare("delete from workspaces where id = ?").run(workspaceId);
+    assert.equal(
+      (
+        client
+          .prepare(
+            `select count(*) as count
+             from workspace_authoring_controls
+             where workspace_id in (?, ?)`,
+          )
+          .get(freshWorkspaceId, workspaceId) as { count: number }
+      ).count,
+      0,
+    );
+    assert.deepEqual(client.pragma("foreign_key_check"), []);
+  } finally {
+    client.close();
   }
 });

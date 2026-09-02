@@ -20,6 +20,11 @@ import { isDeepStrictEqual, parseEnv } from "node:util";
 
 import { artifactContentForms, encodedSecretForms } from "./artifact-secrets";
 import {
+  assertMaintenanceArtifactBoundary,
+  maintenanceCloudflareConfig,
+  prepareMaintenanceProject,
+} from "./maintenance-artifact";
+import {
   registerArtifactCleanup,
   runCloudflareProcess,
 } from "./cloudflare-process";
@@ -123,6 +128,7 @@ type RunOptions = {
     siteOrigin: string;
     workerName: string;
   }>;
+  maintenance?: boolean;
   workspace?: string;
 };
 
@@ -1303,6 +1309,7 @@ async function buildInPreparedProject(
   args: string[],
   buildEnvironment: Record<string, string | undefined>,
   scanEnvironment: Record<string, string | undefined>,
+  maintenance = false,
 ) {
   await run(
     "pnpm",
@@ -1333,6 +1340,9 @@ async function buildInPreparedProject(
     [],
     project,
   );
+  if (maintenance) {
+    assertMaintenanceArtifactBoundary(join(project, ".open-next"), project);
+  }
 }
 
 function clearWorkspaceBuildArtifacts(workspace: string) {
@@ -1353,12 +1363,19 @@ export async function prepareCloudflareBuild(
   const buildArguments = parsedArguments.build;
   const prepared = prepareCloudflareProject(workspace);
   try {
-    await validatePreparedCloudflareConfig(
+    const preparedTarget = await validatePreparedCloudflareConfig(
       workspace,
       prepared.directory,
       parsedArguments.configPath,
       options.expectedTarget,
     );
+    if (options.maintenance) {
+      prepareMaintenanceProject(prepared.directory);
+      writeFileSync(
+        preparedTarget.configPath,
+        `// ABOUTME: Defines the read-only maintenance Worker for ${preparedTarget.workerName}.\n// ABOUTME: Omits administrator, scheduler, and outbound integration bindings.\n${JSON.stringify(maintenanceCloudflareConfig(preparedTarget.config), null, 2)}\n`,
+      );
+    }
     await installDependencies(prepared.directory, environment);
     const openNextConfig = remapWorkspacePath(
       workspace,
@@ -1372,6 +1389,7 @@ export async function prepareCloudflareBuild(
       buildArguments,
       environment,
       scanEnvironment,
+      options.maintenance,
     );
     return prepared;
   } catch (error) {

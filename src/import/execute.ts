@@ -1,6 +1,7 @@
 // ABOUTME: Stages one approved knowledge plan and activates all of its records atomically.
-// ABOUTME: Maps planner output to repository records while cleaning every failed manifest.
+// ABOUTME: Preserves the authoring fence while cleaning other failed asset manifests.
 import { prepareArticleEvidence } from "@/content/article-evidence";
+import { AuthoringPausedError, normalizeAuthoringError } from "@/db/authoring-controls";
 import type { KnowledgeImportArticle, Repository } from "@/db/repository";
 import type { KnowledgeImportPlan } from "@/import/planner";
 
@@ -109,12 +110,16 @@ export async function executeKnowledgeImport({
       articles,
     });
   } catch (error) {
+    const failure = normalizeAuthoringError(error);
+    if (failure instanceof AuthoringPausedError) throw failure;
     try {
       await repository.discardAssetManifest(workspaceId, manifest.id);
     } catch (cleanupError) {
-      throw new AggregateError(
-        [error, cleanupError],
-        "The knowledge import and staged asset cleanup both failed.",
+      throw normalizeAuthoringError(
+        new AggregateError(
+          [error, cleanupError],
+          "The knowledge import and staged asset cleanup both failed.",
+        ),
       );
     }
     throw error;

@@ -6,6 +6,7 @@ import {
   readAssetDiscardRequest,
   readAssetStageRequest,
 } from "@/assets/requests";
+import { authoringPausedResponse } from "@/authoring/failures";
 import { requireAdmin } from "@/auth/admin";
 import { AssetValidationError } from "@/db/assets";
 import { getRepository } from "@/db";
@@ -65,10 +66,15 @@ export async function POST(request: Request) {
       { status: 201, headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
+    const paused = authoringPausedResponse(error);
+    if (paused) return paused;
+
     if (createdManifestId) {
       try {
         await repository.discardAssetManifest(demoIds.workspace, createdManifestId);
       } catch (cleanupError) {
+        const cleanupPaused = authoringPausedResponse(cleanupError);
+        if (cleanupPaused) return cleanupPaused;
         console.error("Failed image staging cleanup.", {
           upload: errorDetails(error),
           cleanup: errorDetails(cleanupError),
@@ -113,6 +119,8 @@ export async function DELETE(request: Request) {
     await (await getRepository()).discardAssetManifest(demoIds.workspace, manifestId);
     return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const paused = authoringPausedResponse(error);
+    if (paused) return paused;
     console.error("Asset manifest discard failed.", errorDetails(error));
     return Response.json({ message: "The staged images could not be discarded." }, { status: 500 });
   }

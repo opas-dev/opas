@@ -16,6 +16,10 @@ import {
   failedArticleAssetManifestStatus,
   type ArticleAssetManifestStatus,
 } from "@/app/admin/content/article-asset-state";
+import {
+  getAuthoringPausedFailure,
+  type AuthoringPausedFailure,
+} from "@/authoring/failures";
 import { requireAdmin } from "@/auth/admin";
 import { referencedArticleAssetHashes } from "@/content/article-assets";
 import { prepareArticleEvidence } from "@/content/article-evidence";
@@ -32,6 +36,7 @@ export type ContentActionState = {
   revision: number;
   fieldErrors?: ContentFieldErrors;
   assetManifestStatus?: ArticleAssetManifestStatus;
+  code?: AuthoringPausedFailure["code"];
 };
 
 function databaseErrorDetails(error: unknown) {
@@ -70,6 +75,20 @@ function successState(previousState: ContentActionState, message: string): Conte
     message,
     revision: previousState.revision + 1,
   };
+}
+
+function pausedErrorState(
+  previousState: ContentActionState,
+  error: unknown,
+): ContentActionState | null {
+  const failure = getAuthoringPausedFailure(error);
+  return failure
+    ? {
+        ...failure,
+        status: "error",
+        revision: previousState.revision + 1,
+      }
+    : null;
 }
 
 function revalidateContent() {
@@ -120,6 +139,8 @@ export async function saveCategoryAction(
       }
     }
   } catch (error) {
+    const paused = pausedErrorState(previousState, error);
+    if (paused) return paused;
     console.error("Category persistence failed.", databaseErrorDetails(error));
     return errorState(
       previousState,
@@ -175,6 +196,8 @@ export async function deleteCategoryAction(
       );
     }
   } catch (error) {
+    const paused = pausedErrorState(previousState, error);
+    if (paused) return paused;
     console.error("Category deletion failed.", databaseErrorDetails(error));
     return errorState(previousState, "The category could not be deleted. Try again.");
   }
@@ -254,6 +277,8 @@ export async function saveArticleAction(
       await repository.updateArticle(article, assetSelection, evidence);
     }
   } catch (error) {
+    const paused = pausedErrorState(previousState, error);
+    if (paused) return paused;
     console.error("Article persistence failed.", databaseErrorDetails(error));
     const assetManifestStatus = failedArticleAssetManifestStatus(
       request.data.assetManifestId,
@@ -312,6 +337,8 @@ export async function deleteArticleAction(
   try {
     await repository.deleteArticle(demoIds.workspace, article.id);
   } catch (error) {
+    const paused = pausedErrorState(previousState, error);
+    if (paused) return paused;
     console.error("Article deletion failed.", databaseErrorDetails(error));
     return errorState(previousState, "The article could not be deleted. Try again.");
   }

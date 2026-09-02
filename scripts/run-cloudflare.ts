@@ -34,6 +34,11 @@ async function main(args: string[]) {
       "Usage: run-cloudflare.ts <build|deploy|preview|migrate|seed> [arguments]",
     );
   }
+  const maintenance = commandArgs[0] === "--maintenance";
+  if (maintenance && command !== "build") {
+    throw new Error("Maintenance mode is available only for isolated Cloudflare builds.");
+  }
+  const targetArgs = maintenance ? commandArgs.slice(1) : commandArgs;
   const mode =
     command === "migrate" || command === "seed"
       ? "data"
@@ -42,7 +47,7 @@ async function main(args: string[]) {
         : command === "deploy"
           ? "deploy"
           : "preview";
-  const parsed = cloudflareCommandArguments(commandArgs, mode);
+  const parsed = cloudflareCommandArguments(targetArgs, mode);
   const target = readCloudflareTarget(parsed.configPath);
   cloudflareCommandEnvironment(target.accountId);
   const environment = {
@@ -51,15 +56,16 @@ async function main(args: string[]) {
   };
 
   if (command === "build") {
-    await buildCloudflareArtifact(commandArgs, {
+    await buildCloudflareArtifact(targetArgs, {
       environment,
       expectedTarget: target,
+      maintenance,
     });
     return;
   }
   if (command === "deploy" || command === "preview") {
     if (command === "deploy") await verifyCloudflareDatabaseTarget(target);
-    await buildAndRunCloudflareCommand(command, commandArgs, {
+    await buildAndRunCloudflareCommand(command, targetArgs, {
       environment,
       expectedTarget: target,
     });
