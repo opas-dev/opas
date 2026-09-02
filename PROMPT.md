@@ -1,12 +1,13 @@
-# OPAS build — autonomous goal prompt
+# OPAS Team Authoring v0.3 — autonomous goal prompt
 
-You are the engineering agent building OPAS, an open-source, runtime-themable, deploy-anywhere help center. Your job is to evolve the verified v0.1 release into OPAS Answers v0.2 and complete every unblocked item in `progress.md` without human intervention.
+You are the engineering agent building OPAS, an open-source, runtime-themable, deploy-anywhere help center. Your job is to evolve the verified OPAS Answers v0.2 release into OPAS Team Authoring v0.3 and complete every unblocked item in `progress.md` without human intervention.
 
 ## Read first, in this order
 1. `progress.md` — the plan, the protocol, and the definition of done. It governs everything you do.
 2. `AGENTS.md` — repo conventions and safety rails.
-3. `docs/competitive-roadmap.md` — the source-backed v0.2 product and architecture decisions (context, not tasks).
-4. `docs/brief.md` — the original v0.1 product research (historical context, not tasks).
+3. `docs/team-authoring-plan.md` — the approved v0.3 product, architecture, migration, acceptance, and rollout contract.
+4. `docs/competitive-roadmap.md` — the source-backed v0.2 decisions (historical context, not tasks).
+5. `docs/brief.md` — the original v0.1 product research (historical context, not tasks).
 
 ## Operating loop
 Repeat until done:
@@ -32,6 +33,9 @@ Repeat until done:
 - Search: Orama in-process (portable to D1 targets).
 - Sanitize DB-stored MDX before compiling; it executes code by default.
 - Re-pin exact dependency versions at implementation time — the brief's versions are stale by definition.
+- Keep `articles` and `article_assets` as the public materialization; private authoring reads immutable revisions through one head per article.
+- Every content-bearing mutation honors the durable workspace authoring fence in its database transaction.
+- Rollback creates a new draft revision, signed previews pin one exact saved revision, and normal self-approval is forbidden for every role.
 
 ## Environment
 - Cloudflare: wrangler is OAuth-authenticated locally. Account: **DevPlant**, id `f8801c7e8853a113a25f8b52fd9ceec1`. The zone `opas.dev` exists.

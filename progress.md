@@ -1,6 +1,6 @@
 # OPAS — Plan & Progress
 
-**Mission:** evolve the verified OPAS v0.1 help center into OPAS Answers v0.2 — a portable, source-grounded answer and knowledge-improvement system — per [docs/competitive-roadmap.md](docs/competitive-roadmap.md).
+**Mission:** evolve the verified OPAS v0.2 help center into OPAS Team Authoring v0.3 — a portable, revision-safe content workflow for real teams — per [docs/team-authoring-plan.md](docs/team-authoring-plan.md).
 
 ## Protocol
 1. Work phases top to bottom; within a phase, reorder freely when it helps.
@@ -10,12 +10,13 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** Phase 15 — public UX redesign
+- **Current phase:** Phase 16 — team-safe authoring
 - **v0.1:** 40 / 40 complete
 - **v0.2:** 26 / 26 complete
 - **Maintained demos:** 5 / 5 complete
 - **UX redesign:** 6 / 6 complete
-- **Next proposed release:** [OPAS Team Authoring v0.3](docs/team-authoring-plan.md); implementation is not activated
+- **Team authoring:** 1 / 11 complete
+- **Active release:** [OPAS Team Authoring v0.3](docs/team-authoring-plan.md)
 
 ## Blockers
 - None.
@@ -67,6 +68,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 | 2026-08-31 | Guarded prebuilt Vercel deployments pass the exact `fra1` region explicitly at upload | The prebuilt upload otherwise used Vercel's default `iad1` function region despite the checked-in project config; explicit placement keeps the compatibility runtime beside the `eu-central-1` Neon branch |
 | 2026-09-01 | Maintain the generic OPAS and CROFusion demos as separate Workers and D1 databases selected by a fixed public profile | Shared application code keeps product behavior aligned, while isolated content, administrator state, analytics, evidence, theme, canonical URL, and deployment guards prevent partner material from leaking into the generic product demo |
 | 2026-09-02 | Use one restrained “answer workspace” system across the landing page and public help center while keeping runtime brand profiles authoritative | Clear search-versus-answer behavior, quiet reading surfaces, one action color, and consistent information hierarchy reduce cognitive load without erasing customer identity |
+| 2026-09-03 | Activate the approved Team Authoring v0.3 plan as Phase 16 | Revisions, rollback, signed previews, and named authorization are the highest-value safeguards missing for real content owners |
 
 ## Phase 0 — Three-target runtime spike (de-risk first)
 - [x] 0.1 Scaffold Next.js (latest 16.x) App Router + TypeScript + Tailwind v4 + pnpm; pin `export const runtime = 'nodejs'` on all dynamic routes. **Verify:** `pnpm build` clean; `pnpm dev` serves.
@@ -193,6 +195,20 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 15.5 Complete the visual and accessibility matrix across both products and public profiles. **Verify:** final screenshots cover desktop and mobile routes and key states; semantic structure, focus order, contrast, reduced motion, browser diagnostics, and zero-overflow checks pass.
 - [x] 15.6 Prepare a clean release candidate without changing production. **Verify:** complete help-center lint, typecheck, tests, Next and OpenNext builds pass; both repositories are committed and pushed; a bounded Cloudflare production rollout and rollback plan is ready for Timo's separate confirmation.
 
+## Phase 16 — Team-safe authoring
+
+- [x] 16.1 Freeze the working/published state machine, capability matrix, immutable revision format and hash, event vocabulary, preview claims, migration fixtures, and `team-authoring-standard` acceptance fixture. **Verify:** focused contract tests prove private edits cannot affect public output, publishing selects an exact revision, rollback appends, stale writers lose, preview grants stay revision-pinned, self-approval fails, and every mutation maps to one server-enforced capability.
+- [ ] 16.2 Add `workspace_authoring_controls`, cross-dialect database guards, a pause/inspect/resume operator command, a fence-aware v0.2 cutover release, and a separately retained admin-disabled maintenance rollback artifact. **Verify:** a committed pause blocks every content-bearing mutation across fresh processes with `AUTHORING_PAUSED` and no related state delta while public reads and permitted non-content writes remain available; every target's maintenance artifact hard-disables admin/login and cannot call an authoring repository method even with historical credentials.
+- [ ] 16.3 Add matching cross-dialect members, login windows, sessions, invitations, revisions, revision assets, review events, preview grants, slug claims, and article heads, then run the deterministic idempotent backfill behind the fence. **Verify:** fresh and populated Postgres, SQLite, and native local D1 migrations pass parity, no-drift, projection equality, interruption/resume, repeat-run, constraint, audit, and foreign-key checks; missing or unpaused controls abort before any Phase 16 delta.
+- [ ] 16.4 Replace the environment administrator login with one-time bootstrap, named membership, fragment-exchanged invitations/resets, PBKDF2 credentials, revocable sessions, centralized capabilities, and durable privacy-preserving admission. **Verify:** the complete role/request matrix, race and revocation cases, shared rate limits, bearer hygiene, one-time flows, and operator bootstrap/recovery pass on Postgres, Neon, local D1, and isolated remote D1.
+- [ ] 16.5 Make new articles, saves, restores, and imports create immutable snapshots with exact revision assets, optimistic concurrency, and atomically maintained slug claims. **Verify:** 12 simultaneous same-revision saves yield exactly one success and 11 typed conflicts on both dialects; no-op/failure isolation, second save, retained historical assets, and every create/rename/restore/publish slug race pass.
+- [ ] 16.6 Implement revision-pinned submit, withdraw, request-changes, approve, emergency-publish, publish, and unpublish transitions; publication alone changes the public materialization, assets, and evidence. **Verify:** edit/review/publication/member/category races cannot publish an unreviewed or stale revision; ten private saves preserve every public response hash; publication changes all public surfaces atomically and queues evidence once; published-marked and conflicting imports remain wholly private and atomic.
+- [ ] 16.7 Add bounded history/detail, safe source comparison, restore-as-draft, Archive, and archive restoration while retaining revision assets. **Verify:** restoring N creates N+1 without mutating history; missing dependencies, unsafe history, conflicts, stale requests, and double clicks are no-write results; archive removes every public surface and restore returns a private draft with intact history and images.
+- [ ] 16.8 Add preview-secret configuration, grant rotation/revocation, fragment exchange, scoped cookie, exact-revision renderer, revision-scoped asset delivery, and preview management. **Verify:** cryptographic, claim, deployment, lifecycle, race, cookie, bearer-leak, header, discovery-isolation, asset, and remote-image privacy tests pass in unit and live HTTP coverage.
+- [ ] 16.9 Complete content filters, dual working/published status, review/conflict/history/diff/preview controls, Team management, responsive states, and accessible task copy. **Verify:** browser checks at 1,440, 768, 390, and 320 pixels cover keyboard/focus/screen-reader/non-color/reduced-motion/theme/conflict/preview/history/empty/loading/error states with zero overflow and no new browser diagnostics.
+- [ ] 16.10 Split migration, deployment, bootstrap, seed, and evidence commands; integrate the fence and revision model across imports, assets, cleanup, seeds, Docker ingress, Cloudflare, Vercel, artifacts, environment templates, smoke tests, and runbooks. **Verify:** bootstrap-gated atomic seeds and retries, paused migration/deploy commands, the 100-article D1 import budget, secret containment, every guarded mutation, lint, typecheck, tests, and all four builds pass.
+- [ ] 16.11 Run the frozen three-target install/upgrade/rollback/concurrency/browser/security/accessibility acceptance and prepare the separately confirmed production rollout. **Verify:** Docker/Postgres, isolated Cloudflare/D1, and disposable Vercel/Neon pass the complete release matrix; after separate production confirmation, record both D1 bookmarks and Worker versions, deploy generic then CROFusion, smoke canonical and workers.dev URLs, and publish the exact green v0.3 tag.
+
 ## Definition of done (v0.2)
 
 - [x] A representative existing knowledge base imports supported content without manual reauthoring or silent loss; every flatten, rename, and unsupported item is reported.
@@ -205,8 +221,22 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] Docker/Postgres, Cloudflare/D1 production, and Vercel/Neon compatibility retain one tested product contract.
 - [x] Non-goals honored — NOT built: ticketing/inbox, live-agent chat, autonomous actions, broad connectors, arbitrary custom-block authoring, real-time collaborative editing, multi-language, multi-tenancy, private knowledge, or a plugin marketplace.
 
+## Definition of done (v0.3)
+
+- [ ] Private saves and review never change a currently published article or any public discovery, search, MCP, RAG, analytics, or asset surface.
+- [ ] Every meaningful save is an immutable attributed revision; stale writers cannot overwrite it and rollback creates another revision.
+- [ ] Named administrators, editors, and reviewers are authorized by a database-backed capability and revocable-session boundary on every protected operation.
+- [ ] Review and publication decisions identify the exact actor and revision, reject self-approval, and change every public projection atomically.
+- [ ] Signed previews render one exact saved revision and only its retained assets, expire and revoke reliably, and leak no bearer into requests, storage, output, or logs.
+- [ ] Archive and restore preserve all history and images while archived material remains absent from every public surface.
+- [ ] Existing installations migrate without changing public bytes, IDs, timestamps, assets, evidence, or URLs; interruption and repeat execution are safe.
+- [ ] Docker/Postgres, Cloudflare/D1, and Vercel/Neon pass one frozen team-authoring contract, including concurrency, security, accessibility, and maintenance rollback.
+- [ ] Non-goals honored — NOT built: real-time co-editing, GitHub sync, arbitrary roles, compliance exports, category/theme history, scheduled publishing, multilingual variants, enterprise identity, private readers/RAG, automatic email delivery, physical purge, or multi-tenancy.
+
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
+
+- 2026-09-03 — 16.1 Team Authoring contracts and fixture — activated the v0.3 mission and froze the complete review state machine, immutable canonical revision serializer/hash and deterministic migration identity, exact-revision preview claims, fixed roles and exhaustive mutation-capability map, normal self-approval rejection, and the digest-bound `team-authoring-standard` fixture with published/draft migration goldens, retained media, a near-limit draft, archive recovery, and 100-article import. `pnpm test:authoring` passed 18/18, targeted ESLint and `pnpm typecheck` passed, the complete regression suite passed from the same implementation checkpoint, and an independent architecture review found no remaining contract blocker — evidence `/private/tmp/opas-phase16-1-full.log` — this commit
 
 - 2026-09-03 — Team Authoring v0.3 planning — traced the current mutable article, asset, evidence, preview, authentication, import, seed, and deployment paths and specified the next release as a dependency-ordered plan for separate working/published revisions, optimistic concurrency, append-only rollback, recoverable archive, revision-held assets, named fixed-role members, exact-revision review, revocable fragment-exchanged signed previews, a durable cutover fence, cross-target acceptance, and an expand-only production rollout. Independent architecture, security/product, and acceptance reviews found no unresolved implementation blockers; Markdown links, whitespace checks, and the complete `pnpm test` suite passed. The plan is documented but not activated, so no product, database, secret, or production state changed — [docs/team-authoring-plan.md](docs/team-authoring-plan.md) — this commit
 

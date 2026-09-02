@@ -1,6 +1,6 @@
 # OPAS Team Authoring v0.3 — implementation plan
 
-**Status:** proposed; implementation is not active
+**Status:** active as `progress.md` Phase 16
 
 **Decision date:** 2026-09-03
 
@@ -658,8 +658,7 @@ the `articles` materialization and must not gain a fallback to working revisions
 
 ## Dependency-ordered implementation
 
-The numbered items below are ready to become `progress.md` Phase 16 when implementation
-is explicitly activated. They are not active checkboxes yet.
+The numbered items below are tracked as active `progress.md` Phase 16 work.
 
 ### 16.1 Freeze contracts and fixtures
 
