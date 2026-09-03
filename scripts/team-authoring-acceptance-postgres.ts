@@ -25,6 +25,10 @@ import {
   teamAuthoringAcceptanceManifestId,
 } from "@/evaluation/team-authoring-acceptance";
 import { teamAuthoringStandard } from "@/evaluation/fixtures/team-authoring-standard";
+import {
+  teamAuthoringBackfillProjectionHash,
+  teamAuthoringBackfillVersion,
+} from "@/db/team-authoring-backfill";
 
 type QueryRow = Record<string, unknown>;
 type Query = (text: string, values?: readonly unknown[]) => Promise<QueryRow[]>;
@@ -59,7 +63,11 @@ function acceptanceActors(): TeamAuthoringAcceptanceActors {
   return byRole as TeamAuthoringAcceptanceActors;
 }
 
-function foundationStatements(actors: TeamAuthoringAcceptanceActors, now: Date): Statement[] {
+function foundationStatements(
+  actors: TeamAuthoringAcceptanceActors,
+  now: Date,
+  migrationProjectionHash: string,
+): Statement[] {
   const expiry = new Date(now.getTime() + 7 * 60 * 60 * 1_000);
   const manifestExpiry = new Date(now.getTime() + 60 * 60 * 1_000);
   const [administrator, editor, reviewer] = teamAuthoringStandard.members;
@@ -179,6 +187,17 @@ function foundationStatements(actors: TeamAuthoringAcceptanceActors, now: Date):
              values ($1, 0, $2)`,
       values: [teamAuthoringStandard.workspaceId, now],
     },
+    {
+      text: `insert into workspace_authoring_migrations (
+               workspace_id, version, article_count, projection_hash, completed_at
+             ) values ($1, $2, 0, $3, $4)`,
+      values: [
+        teamAuthoringStandard.workspaceId,
+        teamAuthoringBackfillVersion,
+        migrationProjectionHash,
+        now,
+      ],
+    },
   ];
 }
 
@@ -288,7 +307,12 @@ function createBoundary(
         [teamAuthoringStandard.workspaceId],
       );
       if (existing.length !== 0) throw new Error("ACCEPTANCE_FIXTURE_ALREADY_PRESENT");
-      await transact(foundationStatements(actors, new Date()));
+      const now = new Date();
+      const migrationProjectionHash = await teamAuthoringBackfillProjectionHash(
+        teamAuthoringStandard.workspaceId,
+        [],
+      );
+      await transact(foundationStatements(actors, now, migrationProjectionHash));
     },
     async readPublicProjection(articleId) {
       const articles = await query(

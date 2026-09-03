@@ -17,6 +17,10 @@ import {
   type TeamAuthoringPublicProjection,
 } from "../../../src/evaluation/team-authoring-acceptance";
 import { teamAuthoringStandard } from "../../../src/evaluation/fixtures/team-authoring-standard";
+import {
+  teamAuthoringBackfillProjectionHash,
+  teamAuthoringBackfillVersion,
+} from "../../../src/db/team-authoring-backfill";
 
 type Environment = Readonly<{ DB: D1Database }>;
 type RunRequest = Readonly<{
@@ -55,6 +59,7 @@ function foundationStatements(
   environment: Environment,
   acceptanceActors: TeamAuthoringAcceptanceActors,
   now: number,
+  migrationProjectionHash: string,
 ) {
   const expiry = now + 7 * 60 * 60 * 1_000;
   const manifestExpiry = now + 60 * 60 * 1_000;
@@ -197,6 +202,16 @@ function foundationStatements(
       `insert into workspace_index_states (workspace_id, generation, updated_at)
        values (?, 0, ?)`,
     ).bind(teamAuthoringStandard.workspaceId, now),
+    environment.DB.prepare(
+      `insert into workspace_authoring_migrations (
+         workspace_id, version, article_count, projection_hash, completed_at
+       ) values (?, ?, 0, ?, ?)`,
+    ).bind(
+      teamAuthoringStandard.workspaceId,
+      teamAuthoringBackfillVersion,
+      migrationProjectionHash,
+      now,
+    ),
   ];
 }
 
@@ -303,8 +318,18 @@ function boundary(environment: Environment, origin: string): TeamAuthoringAccept
         .bind(teamAuthoringStandard.workspaceId)
         .first();
       if (existing) throw new Error("ACCEPTANCE_FIXTURE_ALREADY_PRESENT");
+      const now = Date.now();
+      const migrationProjectionHash = await teamAuthoringBackfillProjectionHash(
+        teamAuthoringStandard.workspaceId,
+        [],
+      );
       await environment.DB.batch(
-        foundationStatements(environment, acceptanceActors, Date.now()),
+        foundationStatements(
+          environment,
+          acceptanceActors,
+          now,
+          migrationProjectionHash,
+        ),
       );
     },
     async readPublicProjection(articleId) {

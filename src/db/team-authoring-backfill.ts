@@ -95,6 +95,24 @@ async function sha256(value: string) {
   ).join("");
 }
 
+export function teamAuthoringBackfillProjectionHash(
+  workspaceId: string,
+  baselines: readonly TeamAuthoringBaseline[],
+) {
+  return sha256(
+    JSON.stringify([
+      "opas.team-authoring-backfill.v1",
+      workspaceId,
+      baselines.map((row) => [
+        row.article.articleId,
+        row.revisionId,
+        row.revisionHash,
+        row.serialization,
+      ]),
+    ]),
+  );
+}
+
 function snapshot(article: TeamAuthoringBackfillArticle): ArticleRevisionSnapshot {
   return {
     workspaceId: article.workspaceId,
@@ -143,18 +161,7 @@ async function completionRows(
     [...byWorkspace].map(async ([workspaceId, rows]) => ({
       articleCount: rows.length,
       completedAt,
-      projectionHash: await sha256(
-        JSON.stringify([
-          "opas.team-authoring-backfill.v1",
-          workspaceId,
-          rows.map((row) => [
-            row.article.articleId,
-            row.revisionId,
-            row.revisionHash,
-            row.serialization,
-          ]),
-        ]),
-      ),
+      projectionHash: await teamAuthoringBackfillProjectionHash(workspaceId, rows),
       version: teamAuthoringBackfillVersion,
       workspaceId,
     }) satisfies TeamAuthoringBackfillCompletion),
