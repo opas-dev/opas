@@ -1,5 +1,5 @@
-// ABOUTME: Verifies immutable draft-save batches inside Wrangler's native local D1 runtime.
-// ABOUTME: Proves D1 serializes stale-head and competing-slug writes to one winner.
+// ABOUTME: Verifies immutable draft and publication batches in Wrangler's native local D1 runtime.
+// ABOUTME: Proves D1 serializes stale heads, reviews, slugs, and evidence to one winner.
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -22,6 +22,12 @@ type DraftOutcome = Readonly<{
   revisionNumber?: number;
 }>;
 
+type WorkflowOutcome = Readonly<{
+  status: "transitioned" | "conflict" | "rejected";
+  action?: string;
+  code?: string;
+}>;
+
 type ExerciseResult = Readonly<{
   initial: DraftOutcome;
   race: readonly DraftOutcome[];
@@ -32,6 +38,135 @@ type ExerciseResult = Readonly<{
   slugRace: readonly DraftOutcome[];
   revisionCount: number;
   head: { working_revision_number: number; working_slug: string };
+  workflow: {
+    pausedWorkflowCode: string | null;
+    categoryDelete: WorkflowOutcome;
+    categorySubmit: WorkflowOutcome;
+    submitted: WorkflowOutcome;
+    editAfterSubmit: DraftOutcome;
+    doubleSubmit: WorkflowOutcome;
+    withdrawn: WorkflowOutcome;
+    reviewRace: readonly WorkflowOutcome[];
+    editedAfterApproval: DraftOutcome;
+    stalePublish: WorkflowOutcome;
+    selfApproval: WorkflowOutcome;
+    categoryPublish: WorkflowOutcome;
+    categorySlug: WorkflowOutcome;
+    disabledPublish: WorkflowOutcome;
+    disabledHead: unknown;
+    publishRace: readonly WorkflowOutcome[];
+    publishedState: {
+      status: string;
+      slug: string;
+      title: string;
+      content_hash: string | null;
+      review_state: string;
+      working_revision_id: string;
+      published_revision_id: string;
+      generation: number;
+    };
+    publishedEvidenceCount: number;
+    publishedJobs: readonly { status: string; index_generation: number }[];
+    publishedEventCount: number;
+    unpublished: WorkflowOutcome;
+    beforeFailedPublication: unknown;
+    failedPublicationError: string | null;
+    afterFailedPublication: unknown;
+    emergencyPublished: WorkflowOutcome;
+    finalState: {
+      status: string;
+      review_state: string;
+      generation: number;
+      evidence_count: number;
+      job_count: number;
+      pending_job_count: number;
+    };
+    markedImport: DraftOutcome;
+    markedImportState: {
+      status: string;
+      content_hash: string | null;
+      review_state: string;
+      published_revision_id: string | null;
+      evidence_count: number;
+    };
+    combinedCreate: DraftOutcome;
+    combinedSubmission: WorkflowOutcome;
+    combinedBeforeRollback: unknown;
+    combinedRollbackError: string | null;
+    combinedAfterRollback: unknown;
+    combinedPublished: WorkflowOutcome & { approvalEventId?: string };
+    combinedEvents: readonly { action: string }[];
+  };
+}>;
+
+type RecoveryResult = Readonly<{
+  archiveRace: readonly WorkflowOutcome[];
+  archiveRestoreRace: readonly WorkflowOutcome[];
+  archivedState: {
+    archived_at: number | null;
+    content_hash: string | null;
+    evidence_count: number;
+    revision_count: number;
+    revoked_grants: number;
+    status: string;
+  };
+  cappedDetail: {
+    events: readonly { action: string }[];
+    eventsTruncated: boolean;
+  } | null;
+  detail: {
+    article: { title: string };
+    changeKind: string;
+    events: readonly { action: string }[];
+    restoredFromRevisionId: string | null;
+    revisionNumber: number;
+  } | null;
+  disabledDetail: unknown;
+  disabledHistory: unknown;
+  doubleRestore: readonly WorkflowOutcome[];
+  firstHistory: {
+    items: readonly { revisionNumber: number }[];
+    nextBeforeRevisionNumber: number | null;
+  } | null;
+  inReviewRestore: WorkflowOutcome;
+  missingAssetRestore: WorkflowOutcome;
+  missingCategoryRestore: WorkflowOutcome;
+  negativeRevisionCounts: readonly {
+    article_id: string;
+    revision_count: number;
+  }[];
+  published: WorkflowOutcome;
+  priorRevisionsUnchanged: boolean;
+  recoveredHead: {
+    archivedAt: string | null;
+    publicStatus: string;
+    reviewState: string;
+    revisionNumber: number;
+  } | null;
+  revokedDetail: unknown;
+  revokedHistory: unknown;
+  restoreWhileArchived: WorkflowOutcome;
+  restoreSlugRace: readonly WorkflowOutcome[];
+  restored: WorkflowOutcome;
+  roleChangedDetail: unknown;
+  roleChangedHistory: unknown;
+  secondHistory: {
+    items: readonly { revisionNumber: number }[];
+    nextBeforeRevisionNumber: number | null;
+  } | null;
+  slugClaimsAfterArchive: readonly {
+    article_row_claim: number;
+    normalized_slug: string;
+    working_claim: number;
+  }[];
+  slugClaimsBeforeArchive: readonly {
+    article_row_claim: number;
+    normalized_slug: string;
+    working_claim: number;
+  }[];
+  slugConflictRestore: WorkflowOutcome;
+  corruptRestore: WorkflowOutcome;
+  unsafeRestore: WorkflowOutcome;
 }>;
 
 async function availablePort() {
@@ -127,7 +262,7 @@ async function stopWorker(child: ChildProcessWithoutNullStreams) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-test("native D1 draft batches admit one head and slug winner", { timeout: 120_000 }, async () => {
+test("native D1 draft and publication batches admit one exact winner", { timeout: 120_000 }, async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "opas-article-drafts-d1-"));
   const persistDirectory = path.join(directory, "state");
   let worker: Awaited<ReturnType<typeof startWorker>> | undefined;
@@ -157,6 +292,264 @@ test("native D1 draft batches admit one head and slug winner", { timeout: 120_00
     });
     assert.equal(body.slugRace.filter((result) => result.status === "saved").length, 1);
     assert.equal(body.slugRace.filter((result) => result.code === "SLUG_CONFLICT").length, 1);
+
+    const { workflow } = body;
+    assert.equal(workflow.pausedWorkflowCode, "AUTHORING_PAUSED");
+    assert.deepEqual(workflow.categorySubmit, {
+      status: "rejected",
+      code: "CATEGORY_CHANGED",
+    });
+    assert.deepEqual(workflow.categoryDelete, {
+      status: "rejected",
+      code: "CATEGORY_REFERENCED",
+    });
+    assert.equal(workflow.submitted.status, "transitioned");
+    assert.equal(workflow.submitted.action, "submitted");
+    assert.deepEqual(workflow.editAfterSubmit, {
+      status: "rejected",
+      code: "INVALID_REVIEW_STATE",
+    });
+    assert.equal(workflow.doubleSubmit.status, "conflict");
+    assert.equal(workflow.doubleSubmit.code, "INVALID_REVIEW_STATE");
+    assert.equal(workflow.withdrawn.status, "transitioned");
+    assert.equal(workflow.withdrawn.action, "withdrawn");
+    assert.equal(
+      workflow.reviewRace.filter((result) => result.status === "transitioned").length,
+      1,
+    );
+    assert.equal(
+      workflow.reviewRace.filter((result) => result.status === "conflict").length,
+      1,
+    );
+    assert.equal(workflow.editedAfterApproval.status, "saved");
+    assert.equal(workflow.stalePublish.status, "conflict");
+    assert.equal(workflow.stalePublish.code, "STALE_REVISION");
+    assert.deepEqual(workflow.selfApproval, {
+      status: "rejected",
+      code: "SELF_APPROVAL_FORBIDDEN",
+    });
+    assert.deepEqual(workflow.categoryPublish, {
+      status: "conflict",
+      code: "INVALID_REVIEW_STATE",
+      currentRevisionNumber: 5,
+      currentReviewState: "changes_requested",
+    });
+    assert.deepEqual(workflow.categorySlug, {
+      status: "rejected",
+      code: "LIVE_CATEGORY_SLUG",
+    });
+    assert.deepEqual(workflow.disabledPublish, {
+      status: "rejected",
+      code: "ACTOR_FORBIDDEN",
+    });
+    assert.equal(workflow.disabledHead, null);
+    assert.equal(
+      workflow.publishRace.filter((result) => result.status === "transitioned").length,
+      1,
+    );
+    assert.equal(
+      workflow.publishRace.filter((result) => result.status === "conflict").length,
+      1,
+    );
+    assert.equal(
+      workflow.publishRace.find((result) => result.status === "conflict")?.code,
+      "INVALID_REVIEW_STATE",
+    );
+    assert.equal(workflow.publishedState.status, "published");
+    assert.equal(workflow.publishedState.slug, "d1-final");
+    assert.equal(workflow.publishedState.title, "D1 publish candidate");
+    assert.ok(workflow.publishedState.content_hash);
+    assert.equal(workflow.publishedState.review_state, "published");
+    assert.equal(
+      workflow.publishedState.working_revision_id,
+      workflow.publishedState.published_revision_id,
+    );
+    assert.equal(workflow.publishedState.generation, 1);
+    assert.ok(workflow.publishedEvidenceCount >= 1);
+    assert.deepEqual(workflow.publishedJobs, [
+      { status: "pending", index_generation: 1 },
+    ]);
+    assert.equal(workflow.publishedEventCount, 1);
+    assert.equal(workflow.unpublished.status, "transitioned");
+    assert.equal(workflow.unpublished.action, "unpublished");
+    assert.ok(workflow.failedPublicationError);
+    assert.deepEqual(
+      workflow.afterFailedPublication,
+      workflow.beforeFailedPublication,
+    );
+    assert.equal(workflow.emergencyPublished.status, "transitioned");
+    assert.equal(workflow.emergencyPublished.action, "emergency_published");
+    assert.equal(workflow.finalState.status, "published");
+    assert.equal(workflow.finalState.review_state, "published");
+    assert.equal(workflow.finalState.generation, 3);
+    assert.ok(workflow.finalState.evidence_count >= 1);
+    assert.equal(workflow.finalState.job_count, 2);
+    assert.equal(workflow.finalState.pending_job_count, 1);
+    assert.equal(workflow.markedImport.status, "saved");
+    assert.deepEqual(workflow.markedImportState, {
+      status: "draft",
+      content_hash: null,
+      review_state: "editing",
+      published_revision_id: null,
+      evidence_count: 0,
+    });
+    assert.equal(workflow.combinedCreate.status, "saved");
+    assert.equal(workflow.combinedSubmission.status, "transitioned");
+    assert.ok(workflow.combinedRollbackError);
+    assert.deepEqual(
+      workflow.combinedAfterRollback,
+      workflow.combinedBeforeRollback,
+    );
+    assert.equal(workflow.combinedPublished.status, "transitioned");
+    assert.ok(workflow.combinedPublished.approvalEventId);
+    assert.deepEqual(workflow.combinedEvents.slice(-2), [
+      { action: "approved" },
+      { action: "published" },
+    ]);
+
+    const recoveryResponse = await fetch(`${worker.origin}/recovery`, {
+      method: "POST",
+    });
+    const recovery = (await recoveryResponse.json()) as RecoveryResult & {
+      error?: string;
+    };
+    assert.equal(
+      recoveryResponse.status,
+      200,
+      `${recovery.error ?? "D1 recovery exercise failed"}\n${worker.output()}`,
+    );
+    assert.equal(recovery.published.status, "transitioned");
+    assert.equal(recovery.restored.status, "transitioned");
+    assert.equal(recovery.restored.action, "restored");
+    assert.equal(recovery.priorRevisionsUnchanged, true);
+    assert.deepEqual(
+      recovery.firstHistory?.items.map((item) => item.revisionNumber),
+      [3, 2],
+    );
+    assert.equal(recovery.firstHistory?.nextBeforeRevisionNumber, 2);
+    assert.deepEqual(
+      recovery.secondHistory?.items.map((item) => item.revisionNumber),
+      [1],
+    );
+    assert.equal(recovery.detail?.revisionNumber, 3);
+    assert.equal(recovery.detail?.article.title, "D1 recovery source");
+    assert.equal(recovery.detail?.changeKind, "rollback");
+    assert.ok(recovery.detail?.restoredFromRevisionId);
+    assert.deepEqual(recovery.detail?.events.map((event) => event.action), [
+      "restored",
+    ]);
+    assert.equal(recovery.disabledHistory, null);
+    assert.equal(recovery.disabledDetail, null);
+    assert.ok(recovery.roleChangedHistory);
+    assert.ok(recovery.roleChangedDetail);
+    assert.equal(recovery.cappedDetail?.events.length, 50);
+    assert.equal(recovery.cappedDetail?.eventsTruncated, true);
+    assert.equal(
+      recovery.doubleRestore.filter((result) => result.status === "transitioned").length,
+      1,
+    );
+    assert.equal(
+      recovery.doubleRestore.filter((result) => result.code === "STALE_REVISION").length,
+      1,
+    );
+    assert.deepEqual(recovery.slugConflictRestore, {
+      status: "conflict",
+      code: "SLUG_CONFLICT",
+    });
+    assert.equal(
+      recovery.restoreSlugRace.filter((result) => result.status === "transitioned")
+        .length,
+      1,
+    );
+    assert.equal(
+      recovery.restoreSlugRace.filter(
+        (result) => result.status === "conflict" && result.code === "SLUG_CONFLICT",
+      ).length,
+      1,
+    );
+    assert.deepEqual(recovery.missingCategoryRestore, {
+      status: "rejected",
+      code: "CATEGORY_UNAVAILABLE",
+    });
+    assert.deepEqual(recovery.unsafeRestore, {
+      status: "rejected",
+      code: "UNSAFE_REVISION",
+    });
+    assert.deepEqual(recovery.corruptRestore, {
+      status: "rejected",
+      code: "REVISION_INTEGRITY_FAILED",
+    });
+    assert.deepEqual(recovery.missingAssetRestore, {
+      status: "rejected",
+      code: "ASSET_UNAVAILABLE",
+    });
+    assert.deepEqual(recovery.inReviewRestore, {
+      status: "conflict",
+      code: "INVALID_REVIEW_STATE",
+      currentRevisionNumber: 1,
+      currentReviewState: "in_review",
+    });
+    assert.deepEqual(
+      recovery.negativeRevisionCounts.map((row) => Number(row.revision_count)),
+      [2, 2, 2, 2, 2],
+    );
+    assert.equal(
+      recovery.archiveRace.filter((result) => result.status === "transitioned").length,
+      1,
+    );
+    assert.deepEqual(
+      {
+        archived: Boolean(recovery.archivedState.archived_at),
+        contentHash: recovery.archivedState.content_hash,
+        evidenceCount: recovery.archivedState.evidence_count,
+        revisionCount: recovery.archivedState.revision_count,
+        revokedGrants: recovery.archivedState.revoked_grants,
+        status: recovery.archivedState.status,
+      },
+      {
+        archived: true,
+        contentHash: null,
+        evidenceCount: 0,
+        revisionCount: 4,
+        revokedGrants: 1,
+        status: "draft",
+      },
+    );
+    assert.deepEqual(recovery.restoreWhileArchived, {
+      status: "rejected",
+      code: "ARTICLE_ARCHIVED",
+    });
+    assert.deepEqual(
+      recovery.slugClaimsAfterArchive,
+      recovery.slugClaimsBeforeArchive,
+    );
+    assert.equal(
+      recovery.archiveRestoreRace.filter((result) => result.status === "transitioned")
+        .length,
+      1,
+    );
+    assert.equal(
+      recovery.archiveRestoreRace.filter(
+        (result) => result.status === "rejected" && result.code === "ARTICLE_NOT_ARCHIVED",
+      ).length,
+      1,
+    );
+    assert.deepEqual(
+      recovery.recoveredHead && {
+        archivedAt: recovery.recoveredHead.archivedAt,
+        publicStatus: recovery.recoveredHead.publicStatus,
+        reviewState: recovery.recoveredHead.reviewState,
+        revisionNumber: recovery.recoveredHead.revisionNumber,
+      },
+      {
+        archivedAt: null,
+        publicStatus: "draft",
+        reviewState: "editing",
+        revisionNumber: 4,
+      },
+    );
+    assert.equal(recovery.revokedHistory, null);
+    assert.equal(recovery.revokedDetail, null);
   } finally {
     if (worker) await stopWorker(worker.child);
     rmSync(directory, { force: true, recursive: true });
