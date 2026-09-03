@@ -1,6 +1,7 @@
 // ABOUTME: Defines the database-neutral records and operations used by OPAS application code.
 // ABOUTME: Keeps deployment driver details behind one small repository contract.
 import type { EmbeddingWorkerRepository } from "@/ai/embedding-worker";
+import type { ArticleDraftRepository } from "@/db/article-drafts";
 
 export type ArticleStatus = "draft" | "published";
 
@@ -510,7 +511,8 @@ export type Repository = {
     workspaceId: string,
     id: string,
   ): Promise<AnswerInferenceLease | null>;
-} & EmbeddingWorkerRepository;
+} & EmbeddingWorkerRepository &
+  ArticleDraftRepository;
 
 export type EvidenceRepository = Pick<
   Repository,

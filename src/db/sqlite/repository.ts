@@ -22,6 +22,7 @@ import type {
 } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
 import { createSqliteAnswerInferenceRepository } from "@/db/sqlite/answer-inference-repository";
+import { createSqliteArticleDraftRepository } from "@/db/sqlite/article-draft-repository";
 import {
   articleEvidenceCommitStatements,
   articleEvidenceInvalidationStatements,
@@ -402,6 +403,7 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
 
   return withAuthoringErrorBoundary<Repository>({
     ...createSqliteAnswerInferenceRepository(database),
+    ...createSqliteArticleDraftRepository(database),
     ...createSqliteEvidenceRepository(database),
     async checkHealth() {
       await executableDatabase.run(sql`select 1`);

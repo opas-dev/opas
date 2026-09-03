@@ -31,7 +31,7 @@
     "test:mdx": "tsx --test tests/mdx-safety.test.ts",
     "test:seo": "tsx --test tests/seo.test.ts tests/public-profile.test.ts",
     "test:search": "tsx --test tests/search.test.ts",
-    "test:repositories": "tsx --test --test-concurrency=1 tests/repository.integration.test.ts tests/evidence-repository.integration.test.ts",
+    "test:repositories": "tsx --test --test-concurrency=1 tests/repository.integration.test.ts tests/evidence-repository.integration.test.ts tests/article-draft-repository.integration.test.ts tests/article-draft-d1.integration.test.ts",
     "test:theme": "tsx --test tests/theme.test.ts",
     "build:prepare:postgres": "esbuild scripts/prepare-postgres.ts --bundle --platform=node --format=cjs --external:pg-native --outfile=.next/standalone/prepare-postgres.cjs",
     "maintenance:prepare": "tsx scripts/maintenance-artifact.ts prepare",

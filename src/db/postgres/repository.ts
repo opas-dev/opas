@@ -22,6 +22,7 @@ import type {
 } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
 import { createPostgresAnswerInferenceRepository } from "@/db/postgres/answer-inference-repository";
+import { createPostgresArticleDraftRepository } from "@/db/postgres/article-draft-repository";
 import {
   articleEvidenceCommitStatements,
   articleEvidenceInvalidationStatements,
@@ -395,6 +396,7 @@ function knowledgeImportStatements(
 export function createPostgresRepository(database: PostgresDatabase): Repository {
   return withAuthoringErrorBoundary<Repository>({
     ...createPostgresAnswerInferenceRepository(database),
+    ...createPostgresArticleDraftRepository(database),
     ...createPostgresEvidenceRepository(database),
     async checkHealth() {
       await database.execute(sql`select 1`);
