@@ -380,6 +380,7 @@ test("migration revision IDs are deterministic and scoped to workspace and artic
 test("team-authoring-standard freezes the complete release fixture", () => {
   assert.equal(teamAuthoringStandard.id, "team-authoring-standard");
   assert.equal(teamAuthoringStandard.version, 1);
+  assert.equal(teamAuthoringStandard.workspaceId, "workspace_demo");
   assert.deepEqual(
     teamAuthoringStandard.members.map(({ role }) => role),
     ["administrator", "editor", "reviewer"],

@@ -1,0 +1,11 @@
+// ABOUTME: Compiles the D1 acceptance driver with the same compatibility mode used by the disposable runner.
+// ABOUTME: Defines no routes or remote bindings, so Wrangler dry runs cannot reach shared resources.
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "opas-acceptance-worker-build",
+  "main": "./custom-worker.ts",
+  "compatibility_date": "2026-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false
+}

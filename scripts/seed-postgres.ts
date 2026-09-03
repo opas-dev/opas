@@ -1,12 +1,14 @@
 // ABOUTME: Runs the reusable Postgres seed operation from a local or deployment command.
 // ABOUTME: Closes the process pool so one-shot invocations terminate cleanly.
 import { closePostgres } from "../src/db/postgres/client";
-import { seedPostgres } from "../src/db/postgres/seed";
+import { reconcilePostgresDemoSeed } from "../src/db/postgres/seed";
 
 async function main() {
   try {
-    await seedPostgres();
-    console.info("Seeded the OPAS Postgres demo content.");
+    const result = await reconcilePostgresDemoSeed(undefined, {
+      configuredSiteUrl: process.env.OPAS_SITE_URL,
+    });
+    console.info("Reconciled the OPAS Postgres demo seed.", result);
   } finally {
     await closePostgres();
   }

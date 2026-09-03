@@ -74,3 +74,5 @@ USER ingress
 EXPOSE 8080
 
 CMD ["node", "scripts/docker-ingress.mjs"]
+
+FROM runner AS application

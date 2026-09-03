@@ -13,14 +13,19 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  cloudflareSeedFile,
   cloudflareCommandEnvironment,
+  cloudflareSeedProfile,
   prepareCloudflareTargetSnapshot,
   readCloudflareTarget,
   requiredCloudflareSecretNames,
   validateCloudflareConfig,
   validateCloudflareSecrets,
 } from "../scripts/bootstrap-cloudflare";
+import {
+  assertCloudflareDataEnvironment,
+  cloudflareDataConfig,
+  parseCloudflareDataCommand,
+} from "../scripts/cloudflare-data";
 
 test("preserves command discovery while pinning the validated Cloudflare account", () => {
   const accountId = "f8801c7e8853a113a25f8b52fd9ceec1";
@@ -52,13 +57,95 @@ test("preserves command discovery while pinning the validated Cloudflare account
   );
 });
 
+test("rejects ambient app secrets before constructing a D1 binding proxy", () => {
+  const accountId = "f8801c7e8853a113a25f8b52fd9ceec1";
+  const safeEnvironment = {
+    CLOUDFLARE_ACCOUNT_ID: accountId,
+    CLOUDFLARE_API_TOKEN: "cloudflare-credential",
+    HOME: "/tmp/operator-home",
+    PATH: "/usr/bin:/bin",
+  };
+  assert.doesNotThrow(() =>
+    assertCloudflareDataEnvironment(accountId, safeEnvironment),
+  );
+  assert.throws(
+    () =>
+      assertCloudflareDataEnvironment(accountId, {
+        ...safeEnvironment,
+        ADMIN_SESSION_SECRET: "must-not-reach-the-proxy",
+        DATABASE_URL: "must-not-reach-the-proxy",
+      }),
+    /ADMIN_SESSION_SECRET, DATABASE_URL/u,
+  );
+  assert.throws(() =>
+    assertCloudflareDataEnvironment(accountId, {
+      ...safeEnvironment,
+      CF_ACCOUNT_ID: "b".repeat(32),
+    }),
+  );
+});
+
+test("requires one exact location and config for native D1 data commands", () => {
+  assert.deepEqual(
+    parseCloudflareDataCommand([
+      "--local",
+      "--config",
+      "wrangler.jsonc",
+    ]),
+    { configPath: "wrangler.jsonc", remote: false },
+  );
+  assert.deepEqual(
+    parseCloudflareDataCommand([
+      "--remote",
+      "--config",
+      "wrangler.crofusion.jsonc",
+    ]),
+    { configPath: "wrangler.crofusion.jsonc", remote: true },
+  );
+  for (const args of [
+    [],
+    ["--remote"],
+    ["--remote", "--config"],
+    ["--remote", "--config", "wrangler.jsonc", "--local"],
+    ["--preview", "--config", "wrangler.jsonc"],
+  ]) {
+    assert.throws(() => parseCloudflareDataCommand(args));
+  }
+});
+
+test("reduces native D1 proxy configuration to the validated account and binding", () => {
+  const target = validateCloudflareConfig(validConfig());
+  const config = cloudflareDataConfig(target);
+
+  assert.deepEqual(Object.keys(config).sort(), [
+    "account_id",
+    "compatibility_date",
+    "compatibility_flags",
+    "d1_databases",
+    "name",
+  ]);
+  assert.equal(config.account_id, target.accountId);
+  assert.equal(config.name, target.workerName);
+  assert.deepEqual(config.d1_databases, target.config.d1_databases);
+  assert.equal("vars" in config, false);
+  assert.equal("secrets" in config, false);
+  assert.equal("main" in config, false);
+});
+
 test("routes every remote Cloudflare package command through target validation", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts: Record<string, string>;
   };
   const runner = readFileSync("scripts/run-cloudflare.ts", "utf8");
 
-  for (const name of ["cf:deploy", "cf:dry-run", "cf:migrate", "cf:seed"]) {
+  for (const name of [
+    "cf:backfill",
+    "cf:backfill:crofusion",
+    "cf:deploy",
+    "cf:dry-run",
+    "cf:migrate",
+    "cf:seed",
+  ]) {
     assert.match(packageJson.scripts[name], /scripts\/run-cloudflare\.ts/u);
   }
   assert.match(runner, /readCloudflareTarget/u);
@@ -242,7 +329,7 @@ test("accepts the maintained custom domain with workers.dev fallback", () => {
   assert.equal(target.workerName, "opas-mvp");
   assert.equal(target.databaseName, "opas-mvp");
   assert.equal(target.siteOrigin, "https://demo.opas.dev");
-  assert.equal(cloudflareSeedFile(target), "scripts/seed-d1.sql");
+  assert.equal(cloudflareSeedProfile(target), "opas");
 });
 
 test("accepts the isolated CROFusion demo target and its branded seed", () => {
@@ -259,13 +346,35 @@ test("accepts the isolated CROFusion demo target and its branded seed", () => {
   assert.equal(target.workerName, "opas-demo-cro");
   assert.equal(target.databaseName, "opas-demo-cro");
   assert.equal(target.siteOrigin, "https://demo-cro.opas.dev");
-  assert.equal(cloudflareSeedFile(target), "scripts/seed-crofusion-d1.sql");
+  assert.equal(cloudflareSeedProfile(target), "crofusion");
 });
 
-test("keeps deployment seeds below the D1 compound-select ceiling", () => {
-  for (const seed of ["scripts/seed-d1.sql", "scripts/seed-crofusion-d1.sql"]) {
-    assert.doesNotMatch(readFileSync(seed, "utf8"), /\bUNION\s+ALL\b/iu);
-  }
+test("runs Cloudflare backfill and seeds through typed native D1 paths", () => {
+  const runner = readFileSync("scripts/run-cloudflare.ts", "utf8");
+  const data = readFileSync("scripts/cloudflare-data.ts", "utf8");
+  const backfill = readFileSync("scripts/backfill-cloudflare.ts", "utf8");
+  const seed = readFileSync("scripts/seed-cloudflare.ts", "utf8");
+  assert.match(runner, /scripts\/backfill-cloudflare\.ts/u);
+  assert.match(runner, /scripts\/seed-cloudflare\.ts/u);
+  assert.match(runner, /runCloudflareProcess/u);
+  assert.match(
+    runner,
+    /environment: cloudflareCommandEnvironment\(target\.accountId\)/u,
+  );
+  assert.match(runner, /localData \? "--local" : "--remote"/u);
+  assert.doesNotMatch(runner, /d1["']?,\s*["']execute|--file|seed-d1\.sql/iu);
+  assert.match(data, /getPlatformProxy/u);
+  assert.match(data, /envFiles: \[\]/u);
+  assert.match(data, /remoteBindings: remote/u);
+  assert.match(data, /secret-isolated command runner/u);
+  assert.doesNotMatch(data, /\bvars\b|send_email|services|assets/u);
+  assert.match(backfill, /createD1TeamAuthoringBackfillStore/u);
+  assert.match(backfill, /runTeamAuthoringBackfill/u);
+  assert.match(seed, /reconcileSqliteDemoSeed/u);
+  assert.doesNotMatch(
+    `${data}\n${backfill}\n${seed}`,
+    /ADMIN_SESSION_SECRET|OPAS_HANDOFF_TO_EMAIL|wrangler["']?,\s*["'](?:dev|deploy)|d1["']?,\s*["']execute|--file|\.sql/iu,
+  );
 });
 
 test("retains the scoped workers.dev-only bootstrap path", () => {

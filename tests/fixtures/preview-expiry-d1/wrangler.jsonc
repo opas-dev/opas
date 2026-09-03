@@ -1,0 +1,18 @@
+// ABOUTME: Configures a disposable Wrangler-local D1 database for preview-expiry command tests.
+// ABOUTME: Uses an isolated persistence directory and cannot address a maintained OPAS resource.
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "opas-acceptance-expiry-d1-001",
+  "main": "custom-worker.ts",
+  "compatibility_date": "2026-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "opas-acceptance-expiry-d1-001",
+      "database_id": "00000000-0000-0000-0000-000000000021",
+      "preview_database_id": "DB",
+      "migrations_dir": "../../../drizzle/sqlite"
+    }
+  ]
+}

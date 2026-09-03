@@ -24,7 +24,21 @@ OPAS_SMOKE_SITE_NAME='CROFusion Help Center' \
   pnpm smoke https://demo-cro.opas.dev
 ```
 
-For a first CROFusion deployment, run `pnpm cf:bootstrap:crofusion`. Its target guard requires the exact Worker, D1 database, profile, seed, and Custom Domain shown above. Never point either config at the other target's database.
+For a first CROFusion deployment, use the complete paused-bootstrap sequence:
+
+```sh
+pnpm cf:bootstrap:crofusion
+pnpm cf:build:crofusion
+pnpm cf:migrate:crofusion
+pnpm operator:identity -- bootstrap --target cloudflare --workspace demo --display-name "CROFusion administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "CROFusion Help Center" --remote --config wrangler.crofusion.jsonc
+pnpm cf:backfill:crofusion
+pnpm authoring:control -- inspect --target cloudflare --workspace demo --remote --config wrangler.crofusion.jsonc
+pnpm authoring:control -- resume --target cloudflare --workspace demo --expected-generation GENERATION_FROM_THE_FRESH_INSPECT --remote --config wrangler.crofusion.jsonc
+pnpm cf:seed:crofusion
+pnpm cf:deploy:crofusion
+```
+
+Copy the numeric `control.generation` from the immediately preceding inspect into the resume command. Its target guard requires the exact Worker, D1 database, seed profile, and Custom Domain shown above. Never point either config at the other target's database.
 
 ## First deployment
 
@@ -35,24 +49,31 @@ For a first CROFusion deployment, run `pnpm cf:bootstrap:crofusion`. Its target 
    pnpm exec wrangler login
    ```
 
-2. Copy `.env.example` to `.env`. Set operator-only `ADMIN_EMAIL` and `ADMIN_PASSWORD` for first-member seeding, random `ADMIN_SESSION_SECRET` and `OPAS_PREVIEW_SIGNING_SECRET` values of at least 32 bytes for runtime signing, and `OPAS_HANDOFF_TO_EMAIL` to a verified destination. Wrangler OAuth supplies the Cloudflare credential; no API token belongs in `.env`.
+2. Copy `.env.example` to `.env`. Set operator-only `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first-member bootstrap, random `ADMIN_SESSION_SECRET` and `OPAS_PREVIEW_SIGNING_SECRET` values of at least 32 bytes for runtime signing, and `OPAS_HANDOFF_TO_EMAIL` to a verified destination. Wrangler OAuth supplies the Cloudflare credential; no API token belongs in `.env`.
 
 3. Create an AI Gateway named `opas-answers` in the same account as the Worker. The checked-in configuration deliberately does not use Cloudflare's auto-created `default` gateway. The bootstrap validates the identifier but cannot prove that the remote gateway exists without making an inference request.
 
-4. Run the guarded infrastructure bootstrap, build the release, migrate the database, bootstrap the first named administrator, reconcile seed content, and deploy:
+4. Run the guarded infrastructure bootstrap, build the release, migrate the database, bootstrap the first named administrator with authoring paused, run and audit the authoring baseline, inspect the fence, resume with that exact generation, reconcile seed content, and deploy:
 
    ```sh
    pnpm cf:bootstrap
    pnpm cf:build
    pnpm cf:migrate
    pnpm operator:identity -- bootstrap --target cloudflare --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo" --remote --config wrangler.jsonc
+   pnpm cf:backfill
+   pnpm authoring:control -- inspect --target cloudflare --workspace demo --remote --config wrangler.jsonc
+   pnpm authoring:control -- resume --target cloudflare --workspace demo --expected-generation GENERATION_FROM_THE_FRESH_INSPECT --remote --config wrangler.jsonc
    pnpm cf:seed
    pnpm cf:deploy
    ```
 
-Bootstrap creates or finds only the exact D1 database and pins its ID. It never builds, migrates, seeds, initializes evidence, or deploys. Run it before the explicit build, migration, seed, evidence-initialization, and deployment steps. Every remote OPAS package command validates the selected account, Worker, D1 name and ID, and route before it can touch Cloudflare. Deployment validates the complete runtime secret set, writes it to a mode-0600 temporary file, checks the exact remote secret names, uploads it with the Worker, and removes the file on success or failure.
+Copy the numeric `control.generation` from the immediately preceding inspect into the resume command; never guess or reuse it. Bootstrap creates or finds only the exact D1 database and pins its ID. It never builds, migrates, backfills, seeds, initializes evidence, or deploys. Run it before the explicit build, migration, identity, backfill, resume, seed, and deployment steps. Every remote OPAS package command validates the selected account, Worker, D1 name and ID, and route before it can touch Cloudflare. Deployment validates the complete runtime secret set, writes it to a mode-0600 temporary file, checks the exact remote secret names, uploads it with the Worker, and removes the file on success or failure.
 
-`wrangler.jsonc` declares the exact encrypted runtime bindings in `secrets.required`: `ADMIN_SESSION_SECRET`, `OPAS_PREVIEW_SIGNING_SECRET`, and `OPAS_HANDOFF_TO_EMAIL`. Operator-only `ADMIN_EMAIL` and `ADMIN_PASSWORD` values are seed inputs, never Worker bindings. An explicitly enabled cross-provider fallback also declares its API key and endpoint. Wrangler treats `--secrets-file` as additive, so guarded deployment checks the exact remote secret-name set before and after uploading the complete validated file. Secret values are never read back from Cloudflare or printed.
+The backfill and seed commands use a minimal secret-free native D1 binding. The backfill requires every workspace fence to remain paused while it creates or audits the team-authoring ledger; only its successful audit permits the explicit resume. Its `remoteBindings` option opens a D1 binding proxy session only: it does not start a development Worker or create or deploy any Worker. The command runner pins the validated account and strips application secrets before opening that session.
+
+The seed sends one prepared `batch()`. A clean workspace must already contain an active bootstrap administrator and must have zero articles and zero revisions. That batch creates the fixed profile's categories, theme, exact image BLOBs, articles, revision 1 records, heads, slug and asset links, emergency-publication events with reason `initial demo seed`, evidence chunks, indexing state, and jobs. D1 rolls the whole batch back if any statement fails. Once an article or revision exists, the command performs only an integrity audit of working heads and published pointers and never repairs, replaces, publishes, or appends content. The CROFusion profile intentionally owns no asset rows; its complete exact asset inventory is empty.
+
+`wrangler.jsonc` declares the exact encrypted runtime bindings in `secrets.required`: `ADMIN_SESSION_SECRET`, `OPAS_PREVIEW_SIGNING_SECRET`, and `OPAS_HANDOFF_TO_EMAIL`. Operator-only `ADMIN_EMAIL` and `ADMIN_PASSWORD` values are identity-bootstrap inputs, never seed inputs or Worker bindings. An explicitly enabled cross-provider fallback also declares its API key and endpoint. Wrangler treats `--secrets-file` as additive, so guarded deployment checks the exact remote secret-name set before and after uploading the complete validated file. Secret values are never read back from Cloudflare or printed.
 
 `wrangler.jsonc` binds Workers AI as `AI`, runs bounded embedding recovery every minute, and runs independent privacy cleanup daily at 00:15 UTC. The custom Worker keeps OpenNext's generated fetch handler and adds only the scheduled handler, following OpenNext's [custom Worker contract](https://opennext.js.org/cloudflare/howtos/custom-worker). D1 always uses `@cf/baai/bge-base-en-v1.5`, 768 dimensions, and `cls` pooling; those values are part of the persisted configuration identity and are not deployment variables. Cloudflare documents the model's [dimension and pooling contract](https://developers.cloudflare.com/workers-ai/models/bge-base-en-v1.5/) and notes that Workers AI binding calls incur usage even during local development.
 
@@ -84,7 +105,7 @@ Run `pnpm test:handoff` before release. After deploying the migration and Worker
 
 ## Routine deployment
 
-Apply schema changes and missing seed records before deploying application code:
+Build first, apply schema changes, then run the bootstrap-gated seed audit before deploying application code:
 
 ```sh
 pnpm cf:build

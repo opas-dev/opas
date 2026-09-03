@@ -47,13 +47,17 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The container waits for Postgres, applies migrations, and starts as a non-root user. Seed reconciliation and evidence initialization are explicit, so a restart cannot silently mutate content. On a clean database, bootstrap the named administrator before running them:
+The container waits for Postgres, applies migrations, and starts as a non-root user. Bootstrap leaves authoring paused so the explicit baseline backfill can install and audit its ledger before a compare-and-swap resume. The seed then commits the complete demo history, exact assets, and initial evidence atomically; every later run is a read-only integrity audit:
 
 ```sh
 pnpm operator:identity -- bootstrap --target postgres --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo"
-node --env-file=.env --import tsx scripts/prepare-postgres.ts seed
-node --env-file=.env --import tsx scripts/prepare-postgres.ts initialize-evidence
+pnpm db:backfill:postgres
+pnpm authoring:control -- inspect --target postgres --workspace demo
+pnpm authoring:control -- resume --target postgres --workspace demo --expected-generation GENERATION_FROM_THE_FRESH_INSPECT
+pnpm db:seed:postgres
 ```
+
+Do not guess or reuse the generation: copy the numeric `control.generation` from the immediately preceding inspect into the resume command. The standalone evidence initializer remains available for pre-existing articles that lack evidence; a clean atomic seed does not need it.
 
 Verify the public and database-backed routes from another terminal:
 
@@ -65,7 +69,7 @@ The public site is at [localhost:3000](http://localhost:3000) and administration
 
 ## Cloudflare quickstart
 
-Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and the `demo.opas.dev` custom domain. Its workers.dev endpoint remains enabled as a fallback. A fork can set its own explicit account ID and matching `opas-*` names for a workers.dev deployment. Copy `.env.example` to the gitignored `.env`, set the operator-only bootstrap credentials, runtime signing secrets, and verified `OPAS_HANDOFF_TO_EMAIL` destination, then run the explicit infrastructure, build, migration, identity, seed, and deployment steps:
+Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and the `demo.opas.dev` custom domain. Its workers.dev endpoint remains enabled as a fallback. A fork can set its own explicit account ID and matching `opas-*` names for a workers.dev deployment. Copy `.env.example` to the gitignored `.env`, set the operator-only bootstrap credentials, runtime signing secrets, and verified `OPAS_HANDOFF_TO_EMAIL` destination, then run the explicit infrastructure, build, migration, paused identity bootstrap, backfill audit, compare-and-swap resume, seed, and deployment steps:
 
 ```sh
 pnpm exec wrangler login
@@ -73,11 +77,14 @@ pnpm cf:bootstrap
 pnpm cf:build
 pnpm cf:migrate
 pnpm operator:identity -- bootstrap --target cloudflare --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo" --remote --config wrangler.jsonc
+pnpm cf:backfill
+pnpm authoring:control -- inspect --target cloudflare --workspace demo --remote --config wrangler.jsonc
+pnpm authoring:control -- resume --target cloudflare --workspace demo --expected-generation GENERATION_FROM_THE_FRESH_INSPECT --remote --config wrangler.jsonc
 pnpm cf:seed
 pnpm cf:deploy
 ```
 
-Before activating answers, create the checked-in `opas-answers` AI Gateway in the same Cloudflare account. Bootstrap validates the scoped names, account, answer variables, and optional topic-policy syntax, then creates or finds only the exact D1 database. The later commands are deliberately separate; deployment uploads the validated runtime-secret set but never migrates, seeds, or initializes evidence.
+Copy the numeric generation from the fresh inspect into the resume command. Before activating answers, create the checked-in `opas-answers` AI Gateway in the same Cloudflare account. Bootstrap validates the scoped names, account, answer variables, and optional topic-policy syntax, then creates or finds only the exact D1 database. The later commands are deliberately separate; the typed seed uses one native D1 batch after the audited resume, while deployment uploads the validated runtime-secret set but never migrates, backfills, or seeds.
 
 See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for configuration, migration, verification, and rollback details.
 
@@ -85,7 +92,7 @@ See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for configuration, mi
 
 Vercel and Neon are a live portability target, not OPAS production. “Production” in the commands below is only Vercel's environment name; promotion changes the Vercel project alias and does not move Cloudflare traffic or attach an OPAS domain.
 
-Create one Neon branch, copy `.env.example` to `.env`, and put its direct connection string plus operator-only bootstrap credentials there. Link the checkout to Vercel and configure only the runtime variables listed in [docs/deploy-vercel.md](docs/deploy-vercel.md). Then pin the project to Node 22, build before migrating, bootstrap the named administrator, reconcile seed data and evidence explicitly, and upload the staged artifact:
+Create one Neon branch, copy `.env.example` to `.env`, and put its direct connection string plus operator-only bootstrap credentials there. Link the checkout to Vercel and configure only the runtime variables listed in [docs/deploy-vercel.md](docs/deploy-vercel.md). Then pin the project to Node 22, build before migrating, bootstrap the named administrator in paused mode, backfill and audit authoring history, resume with the inspected generation, reconcile the atomic seed, and upload the staged artifact:
 
 ```sh
 vercel link
@@ -94,10 +101,14 @@ vercel project update opas-mvp --framework nextjs --node-version 22.x --yes
 pnpm vercel:build https://opas-mvp-timo-bejans-projects.vercel.app
 pnpm neon:migrate
 pnpm operator:identity -- bootstrap --target neon --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo"
+pnpm neon:backfill
+pnpm authoring:control -- inspect --target neon --workspace demo
+pnpm authoring:control -- resume --target neon --workspace demo --expected-generation GENERATION_FROM_THE_FRESH_INSPECT
 pnpm neon:seed
-pnpm neon:evidence
 pnpm vercel:deploy https://opas-mvp-timo-bejans-projects.vercel.app
 ```
+
+Copy the numeric generation from the fresh inspect into the resume command. Use `pnpm neon:evidence` only to initialize evidence for pre-existing articles that are missing it; the clean seed includes its initial evidence transactionally.
 
 Smoke-test the staged deployment and complete the browser MDX, client-navigation, console, and runtime-theme checks before promoting it. `vercel.json` keeps the function in `fra1`, close to the documented Neon region. The complete environment, verification, promotion, and rollback procedure is in [docs/deploy-vercel.md](docs/deploy-vercel.md).
 
@@ -108,10 +119,15 @@ Run the app against the Postgres URL in `.env`:
 ```sh
 docker compose up -d --wait db
 node --env-file=.env --import tsx scripts/prepare-postgres.ts migrate
-node --env-file=.env --import tsx scripts/prepare-postgres.ts seed
-node --env-file=.env --import tsx scripts/prepare-postgres.ts initialize-evidence
+pnpm operator:identity -- bootstrap --target postgres --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo"
+pnpm db:backfill:postgres
+pnpm authoring:control -- inspect --target postgres --workspace demo
+pnpm authoring:control -- resume --target postgres --workspace demo --expected-generation GENERATION_FROM_THE_FRESH_INSPECT
+pnpm db:seed:postgres
 pnpm dev
 ```
+
+Copy the numeric generation from the fresh inspect into the resume command. On an existing development database, the identity bootstrap, backfill, and seed commands audit their durable state without replacing edited content.
 
 Before submitting a change, keep Docker available for the cross-dialect repository suite and run:
 

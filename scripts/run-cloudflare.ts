@@ -1,12 +1,11 @@
 // ABOUTME: Exposes secret-isolated Cloudflare build, preview, and deployment commands.
-// ABOUTME: Validates every remote target before an OpenNext, migration, or seed invocation.
+// ABOUTME: Validates every remote target before an OpenNext or database invocation.
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  cloudflareSeedFile,
   cloudflareCommandEnvironment,
   prepareCloudflareTargetSnapshot,
   readCloudflareTarget,
@@ -32,18 +31,29 @@ async function runWrangler(
 
 async function main(args: string[]) {
   const [command, ...commandArgs] = args;
-  if (!["build", "deploy", "preview", "migrate", "seed"].includes(command)) {
+  if (
+    !["backfill", "build", "deploy", "preview", "migrate", "seed"].includes(
+      command,
+    )
+  ) {
     throw new Error(
-      "Usage: run-cloudflare.ts <build|deploy|preview|migrate|seed> [arguments]",
+      "Usage: run-cloudflare.ts <backfill|build|deploy|preview|migrate|seed> [arguments]",
     );
   }
   const maintenance = commandArgs[0] === "--maintenance";
   if (maintenance && command !== "build") {
     throw new Error("Maintenance mode is available only for isolated Cloudflare builds.");
   }
-  const targetArgs = maintenance ? commandArgs.slice(1) : commandArgs;
+  const localData =
+    (command === "backfill" || command === "seed") &&
+    commandArgs[0] === "--local";
+  const targetArgs = maintenance
+    ? commandArgs.slice(1)
+    : localData
+      ? commandArgs.slice(1)
+      : commandArgs;
   const mode =
-    command === "migrate" || command === "seed"
+    command === "backfill" || command === "migrate" || command === "seed"
       ? "data"
       : command === "build"
         ? "build"
@@ -115,30 +125,44 @@ async function main(args: string[]) {
     }
     return;
   }
-  if (command === "seed") {
-    await verifyCloudflareDatabaseTarget(target);
+  if (command === "backfill" || command === "seed") {
+    if (!localData) {
+      await verifyCloudflareDatabaseTarget(target);
+    }
+    const runDataCommand = async (configPath: string) => {
+      await runCloudflareProcess(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          resolve(
+            process.cwd(),
+            command === "seed"
+              ? "scripts/seed-cloudflare.ts"
+              : "scripts/backfill-cloudflare.ts",
+          ),
+          localData ? "--local" : "--remote",
+          "--config",
+          configPath,
+        ],
+        {
+          cwd: process.cwd(),
+          environment: cloudflareCommandEnvironment(target.accountId),
+        },
+      );
+    };
+    if (localData) {
+      await runDataCommand(target.configPath);
+      return;
+    }
     const snapshot = prepareCloudflareTargetSnapshot(target);
     try {
-      await runWrangler(
-        [
-          "d1",
-          "execute",
-          target.databaseName,
-          "--remote",
-          "--file",
-          resolve(snapshot.directory, cloudflareSeedFile(target)),
-          "--yes",
-          "--config",
-          snapshot.target.configPath,
-        ],
-        cloudflareCommandEnvironment(target.accountId),
-      );
+      await runDataCommand(snapshot.target.configPath);
     } finally {
       snapshot.dispose();
     }
     return;
   }
-
 }
 
 const invokedModule = process.argv[1]

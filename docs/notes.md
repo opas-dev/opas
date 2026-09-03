@@ -42,7 +42,7 @@ Runtime themes may change values only within OPAS's predefined semantic color, f
 
 The root server layout validates and injects the active database row on every request. The authenticated editor writes one trusted workspace row through the shared repository, and public reloads observe the change immediately. [`theme-before.png`](theme-before.png) and [`theme-after.png`](theme-after.png) show OPAS Default and Ocean from the same production build and server process; both light and dark computed values were verified, then the local row was restored.
 
-Admin sessions are signed, stateless, valid for eight hours, and limited to `/admin`. Production cookies are always Secure, so production admin access requires HTTPS. OpenNext labels Node.js Proxy support experimental during its Cloudflare build, but the deployed workerd boundary passed: an unauthenticated request redirected to `/admin/login`, authenticated Server Actions wrote D1, and rotating the signing secret invalidated the smoke session immediately.
+Named-member session cookies are signed, deployment-scoped, limited to `/admin`, and expire no later than their database session. Each protected request verifies the minimal workspace and session claims, then reloads the active member, current role, and unrevoked session from the database before authorizing an exact capability. Disabling a member, changing a role, revoking the session, or rotating the signing secret therefore takes effect without waiting for the cookie to expire. Production cookies are always Secure, so production admin access requires HTTPS. OpenNext labels Node.js Proxy support experimental during its Cloudflare build; the workerd boundary redirects an unauthenticated request to `/admin/login`.
 
 ## MDX threat model
 

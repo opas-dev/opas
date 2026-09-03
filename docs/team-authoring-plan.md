@@ -661,7 +661,7 @@ effect before confirmation; ordinary draft saves do not use confirmation dialogs
 | Identity and permissions | `src/auth/*`, `src/proxy.ts`, login actions, every current `requireAdmin` call site |
 | Team interface | new `/admin/team` page and invitation/reset handlers |
 | Preview | current unsaved preview remains; new `/preview` exchange, revision page, and scoped asset route |
-| Import and seeds | `src/import/execute.ts`, import activation route, Postgres/SQLite seeds, both D1 SQL seeds |
+| Import and seeds | `src/import/execute.ts`, import activation route, Postgres/SQLite seed reconcilers, native D1 batch command |
 | Deployment | environment template, Docker preparation, both Wrangler configs/bootstrap, Vercel environment allowlist, artifact scans, runbooks |
 | Verification | repository/auth/content/import/security tests, native D1 checks, smoke script, browser acceptance |
 
@@ -827,8 +827,9 @@ the intentional same-origin CSP rejects; no additional warning or error is accep
 
 Split migration-only, deployment-only, seed-reconciliation, and evidence-initialization
 commands so a paused cutover never invokes a guarded content write. Update Postgres and
-SQLite seeds, both D1 SQL seeds, imports, asset cleanup, Docker's trusted ingress,
-Cloudflare bootstrap/config/type generation, Vercel's explicit environment allowlist,
+SQLite seed reconcilers, the native D1 batch command, imports, asset cleanup, Docker's
+trusted ingress, Cloudflare bootstrap/config/type generation, Vercel's explicit
+environment allowlist,
 artifact secret scans, environment template, smoke scripts, and deployment runbooks.
 Make disposable Vercel target naming version-neutral.
 

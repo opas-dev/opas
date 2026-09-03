@@ -3,7 +3,7 @@
 
 import type { ArticleRevisionSnapshot } from "@/content/article-revision";
 
-const workspaceId = "workspace_team_authoring_standard";
+const workspaceId = "workspace_demo";
 const firstAssetHash = "1".repeat(64);
 const secondAssetHash = "2".repeat(64);
 const largeHeading = "# Large authoring guide\n\n";
@@ -139,10 +139,10 @@ const teamAuthoringStandardContract = Object.freeze({
       article: publishedArticle,
       status: "published" as const,
       expectedSerialization:
-        '["opas.article-revision.v1","workspace_team_authoring_standard","article_team_published","category_team_start","start","Start here","team-authoring","Team authoring","# Team authoring\\n\\n| Step | Owner |\\n| --- | --- |\\n| Draft | Editor |\\n| Review | Reviewer |\\n\\nContinue with [reviewing changes](/manage/reviewing-changes).\\n\\n![Draft screen](/api/assets/1111111111111111111111111111111111111111111111111111111111111111)\\n\\n![Review screen](/api/assets/2222222222222222222222222222222222222222222222222222222222222222)\\n\\n![Remote status](https://media.example.invalid/status.png)",false,"OPAS",0,["1111111111111111111111111111111111111111111111111111111111111111","2222222222222222222222222222222222222222222222222222222222222222"]]',
-      expectedHash: "c84353354046d2bf8dbee2ac990304f5f8556a89e70ab76296e2be144483bc00",
+        '["opas.article-revision.v1","workspace_demo","article_team_published","category_team_start","start","Start here","team-authoring","Team authoring","# Team authoring\\n\\n| Step | Owner |\\n| --- | --- |\\n| Draft | Editor |\\n| Review | Reviewer |\\n\\nContinue with [reviewing changes](/manage/reviewing-changes).\\n\\n![Draft screen](/api/assets/1111111111111111111111111111111111111111111111111111111111111111)\\n\\n![Review screen](/api/assets/2222222222222222222222222222222222222222222222222222222222222222)\\n\\n![Remote status](https://media.example.invalid/status.png)",false,"OPAS",0,["1111111111111111111111111111111111111111111111111111111111111111","2222222222222222222222222222222222222222222222222222222222222222"]]',
+      expectedHash: "0620d4c467052453fd04506dcf168b09ddd612c6dd8be78be608805352df4881",
       expectedRevisionId:
-        "revision_9c148afa30906fb1f03b597b82a0e7eb47ca6659948ed3e33f641168418040f4",
+        "revision_ed7a005886cf36f0a1f88eeb6882f9d453c8f8ab6af63601035fa1d74c92bc18",
       expectedHead: Object.freeze({
         workingRevisionNumber: 1,
         publishedRevisionNumber: 1,
@@ -153,10 +153,10 @@ const teamAuthoringStandardContract = Object.freeze({
       article: migrationDraftArticle,
       status: "draft" as const,
       expectedSerialization:
-        '["opas.article-revision.v1","workspace_team_authoring_standard","article_team_migration_draft","category_team_manage","manage","Manage OPAS","migration-draft","Migration draft","# Migration draft\\n\\nUnpublished baseline content.",true,"OPAS",2,["1111111111111111111111111111111111111111111111111111111111111111"]]',
-      expectedHash: "d4a8fd9889c1979743a757a0b5f99652c75c588362e773d8642b35df0d4dd377",
+        '["opas.article-revision.v1","workspace_demo","article_team_migration_draft","category_team_manage","manage","Manage OPAS","migration-draft","Migration draft","# Migration draft\\n\\nUnpublished baseline content.",true,"OPAS",2,["1111111111111111111111111111111111111111111111111111111111111111"]]',
+      expectedHash: "52db125912755362e6c6dea5134bc239c39a906be20771089a0d3ad43ba09b7e",
       expectedRevisionId:
-        "revision_26e5f2a25abb22b38f5078f3ad019135452c14546c352e2c83b89bdd9b560595",
+        "revision_2d83889b964009e0728750770e54ef4900434262f28b9ec790467a056e8654f3",
       expectedHead: Object.freeze({
         workingRevisionNumber: 1,
         publishedRevisionNumber: null,
@@ -172,5 +172,5 @@ export const teamAuthoringStandardHashInputV1 = JSON.stringify(
 
 export const teamAuthoringStandard = Object.freeze({
   ...teamAuthoringStandardContract,
-  contentHash: "2a7302be231e6d30148407469713c50bb39ef3b63c4a07d46233d1313390e2d2",
+  contentHash: "d0a6ae9bf97a365457f395303438f353931012c66e5aad153f00e63b64a62d0b",
 });

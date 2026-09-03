@@ -33,12 +33,10 @@ const maintainedTargets = {
   "opas-mvp": {
     customDomain: "demo.opas.dev",
     publicProfile: "opas",
-    seedFile: "scripts/seed-d1.sql",
   },
   "opas-demo-cro": {
     customDomain: "demo-cro.opas.dev",
     publicProfile: "crofusion",
-    seedFile: "scripts/seed-crofusion-d1.sql",
   },
 } as const;
 const opasResourcePattern = /^opas-[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -656,11 +654,16 @@ export function validateCloudflareConfig(
   };
 }
 
-export function cloudflareSeedFile(target: Pick<CloudflareTarget, "workerName">) {
-  return (
-    maintainedTargets[target.workerName as keyof typeof maintainedTargets]
-      ?.seedFile ?? "scripts/seed-d1.sql"
-  );
+export function cloudflareSeedProfile(
+  target: Pick<CloudflareTarget, "config" | "workerName">,
+): "opas" | "crofusion" {
+  const maintained =
+    maintainedTargets[target.workerName as keyof typeof maintainedTargets];
+  if (maintained) return maintained.publicProfile;
+  const vars = target.config.vars;
+  return isObject(vars) && vars.OPAS_PUBLIC_PROFILE === "crofusion"
+    ? "crofusion"
+    : "opas";
 }
 
 export function readCloudflareTarget(

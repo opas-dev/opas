@@ -46,7 +46,7 @@ OPAS_ANSWER_TOPIC_GUARDRAILS=<optional compact JSON; omit until a policy is appr
 
 `OPAS_SITE_URL` must be the stable Vercel compatibility origin above, with no path, query, or fragment. Set it before the build. Do not use a generated deployment URL or the Cloudflare production URL: OPAS uses this value for canonical metadata, sitemap entries, JSON-LD, Markdown links, and llms documents.
 
-Keep `NEON_DATABASE_URL` as the pooled serverless runtime connection. The guarded build and explicit `pnpm neon:migrate`, `pnpm neon:seed`, and `pnpm neon:evidence` commands derive the same branch's direct hostname in memory by removing Neon’s exact `-pooler.` label, validate the complete database identity, and never print or persist the direct value. An explicit matching `NEON_DIRECT_DATABASE_URL` in local `.env` is accepted but optional; never add it to Vercel.
+Keep `NEON_DATABASE_URL` as the pooled serverless runtime connection. The guarded build and explicit `pnpm neon:migrate`, `pnpm neon:backfill`, `pnpm neon:seed`, and `pnpm neon:evidence` commands derive the same branch's direct hostname in memory by removing Neon’s exact `-pooler.` label, validate the complete database identity, and never print or persist the direct value. An explicit matching `NEON_DIRECT_DATABASE_URL` in local `.env` is accepted but optional; never add it to Vercel.
 
 Answer generation requires the endpoint, model, and retention disclosure. The endpoint must be an absolute HTTP or HTTPS URL without embedded credentials, query, or fragment, and it must stream OpenAI-compatible server-sent events. Model and disclosure values must be non-empty and control-free, with respective UTF-8 limits of 256 and 1,024 bytes. The API key is optional for a trusted credential-free endpoint; a non-empty value may contain at most 16,384 UTF-8 bytes and no line break, and is sent only as a bearer credential. The retention disclosure is returned to and rendered by the browser, so it must be an accurate operator-authored statement rather than a secret or placeholder. OPAS sends provider requests with `cache: no-store`, discards non-success response bodies unread, and does not place prompts, evidence, credentials, responses, or provider messages in application logs. Provider-side storage and training remain governed by the selected provider and must agree with the disclosure. Redacted answer conversations default to 30 days, may be configured shorter or disabled, and never store requester IP, raw user agent, or cookies. A user-submitted support handoff stores its explicit contact and bounded context separately for `OPAS_HANDOFF_RETENTION_DAYS`, which defaults to 30 days and accepts 1 through 365.
 
@@ -125,7 +125,7 @@ vercel project protection disable opas-mvp --sso
 curl --fail --silent --show-error https://opas-mvp-timo-bejans-projects.vercel.app/api/health
 ```
 
-## Build, migrate, bootstrap, and seed
+## Build, migrate, bootstrap, backfill, and seed
 
 Keep the pooled `NEON_DATABASE_URL` and operator-only bootstrap values in the gitignored root `.env`. The wrapper derives a direct URL in memory or validates an optional explicit `NEON_DIRECT_DATABASE_URL`; either way, only the pooled URL and runtime signing secrets enter the isolated build environment. Build the staged Vercel Production-environment artifact before changing Neon:
 
@@ -133,16 +133,18 @@ Keep the pooled `NEON_DATABASE_URL` and operator-only bootstrap values in the gi
 pnpm vercel:build https://opas-mvp-timo-bejans-projects.vercel.app
 ```
 
-Then run the transactional migration, bootstrap the first named administrator, reconcile the missing seed records, and initialize evidence against the same database. The database commands reject every ambient `PG*`, Node TLS, OpenSSL, or certificate-store override before opening the validated URL. They construct the effective host, port, credentials, database, verified TLS, and channel-binding settings explicitly rather than letting `pg` reinterpret the URL through ambient defaults:
+Then run the transactional migration, bootstrap the first named administrator with authoring paused, run and audit the authoring baseline, inspect the fence, resume with that exact generation, and reconcile the atomic demo seed against the same database. The database commands reject every ambient `PG*`, Node TLS, OpenSSL, or certificate-store override before opening the validated URL. They construct the effective host, port, credentials, database, verified TLS, and channel-binding settings explicitly rather than letting `pg` reinterpret the URL through ambient defaults:
 
 ```sh
 pnpm neon:migrate
 pnpm operator:identity -- bootstrap --target neon --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo"
+pnpm neon:backfill
+pnpm authoring:control -- inspect --target neon --workspace demo
+pnpm authoring:control -- resume --target neon --workspace demo --expected-generation GENERATION_FROM_THE_FRESH_INSPECT
 pnpm neon:seed
-pnpm neon:evidence
 ```
 
-The commands separately apply migrations, create the one named bootstrap administrator, insert missing demo records, and initialize missing article evidence. Build and deploy never invoke bootstrap, seed, or evidence initialization. Run them in the order shown before acceptance testing.
+Copy the numeric `control.generation` from the immediately preceding inspect into the resume command; never guess or reuse it. The commands separately apply migrations, create the one named bootstrap administrator, backfill and audit authoring history under the paused fence, resume through compare-and-swap, and reconcile the demo profile. A clean seed runs only with an active bootstrap administrator and zero articles and revisions; it commits revision 1, emergency publication, exact assets, and initial evidence in one transaction. Once content exists, the seed is a read-only integrity audit and preserves every edit and history record. `pnpm neon:evidence` remains available for pre-existing articles missing evidence but is not part of a clean atomic seed. Build and deploy never invoke bootstrap, backfill, seed, or evidence initialization. Run the commands in the order shown before acceptance testing.
 
 Every migration must be expand-first and remain compatible with both the current deployment and the staged artifact. Building first removes compile failures from the post-migration window, but an upload can still fail while the current deployment continues using the migrated schema.
 

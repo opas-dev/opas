@@ -20,6 +20,7 @@ services:
   app:
     build:
       context: .
+      target: runner
     environment:
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:?Set ADMIN_SESSION_SECRET in .env}
       CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
@@ -137,6 +138,7 @@ services:
   embedding-recovery:
     build:
       context: .
+      target: runner
     command: ["node", "scripts/run-embedding-recovery.mjs"]
     environment:
       CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
@@ -150,6 +152,7 @@ services:
   analytics-cleanup:
     build:
       context: .
+      target: runner
     command: ["node", "scripts/run-analytics-cleanup.mjs"]
     environment:
       CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}

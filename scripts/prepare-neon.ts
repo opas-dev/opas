@@ -1,5 +1,5 @@
 // ABOUTME: Runs one explicit Neon database maintenance operation through a direct connection.
-// ABOUTME: Keeps migrations, seed data, and evidence initialization independently invokable.
+// ABOUTME: Keeps migrations, authoring backfill, seed data, and evidence independently invokable.
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -10,8 +10,10 @@ import { Pool, type PoolConfig } from "pg";
 import { initializeAllMissingArticleEvidence } from "../src/content/article-evidence-initialization";
 import { demoIds } from "../src/db/demo";
 import { createPostgresRepository } from "../src/db/postgres/repository";
-import { seedPostgres } from "../src/db/postgres/seed";
+import { reconcilePostgresDemoSeed } from "../src/db/postgres/seed";
+import { createPostgresTeamAuthoringBackfillStore } from "../src/db/postgres/team-authoring-backfill";
 import * as schema from "../src/db/schema/postgres";
+import { runTeamAuthoringBackfill } from "../src/db/team-authoring-backfill";
 import { requireNeonDirectConnectionString } from "./neon-connections";
 
 export { requireNeonDirectConnectionString };
@@ -59,8 +61,14 @@ function safeErrorMessage(error: unknown, connectionString: string) {
 }
 
 export async function runNeonDatabaseCommand(command: string | undefined) {
-  if (!(["migrate", "seed", "initialize-evidence"] as const).includes(command as never)) {
-    throw new Error("Usage: prepare-neon.ts <migrate|seed|initialize-evidence>");
+  if (
+    !(["backfill", "migrate", "seed", "initialize-evidence"] as const).includes(
+      command as never,
+    )
+  ) {
+    throw new Error(
+      "Usage: prepare-neon.ts <backfill|migrate|seed|initialize-evidence>",
+    );
   }
   let connectionString = "";
 
@@ -72,11 +80,20 @@ export async function runNeonDatabaseCommand(command: string | undefined) {
       const database = drizzle(pool, { schema });
 
       if (command === "migrate") {
-        await migrate(database, { migrationsFolder: resolve(process.cwd(), "drizzle/postgres") });
+        await migrate(database, {
+          migrationsFolder: resolve(process.cwd(), "drizzle/postgres"),
+        });
         console.info("Applied OPAS Neon migrations.");
+      } else if (command === "backfill") {
+        const result = await runTeamAuthoringBackfill(
+          createPostgresTeamAuthoringBackfillStore(pool),
+        );
+        console.info("Reconciled the OPAS team-authoring backfill.", result);
       } else if (command === "seed") {
-        await seedPostgres(database);
-        console.info("Seeded the OPAS Neon database.");
+        const result = await reconcilePostgresDemoSeed(database, {
+          configuredSiteUrl: process.env.OPAS_SITE_URL,
+        });
+        console.info("Reconciled the OPAS Neon demo seed.", result);
       } else {
         const evidence = await initializeAllMissingArticleEvidence({
           ...(process.env.OPAS_SITE_URL === undefined
