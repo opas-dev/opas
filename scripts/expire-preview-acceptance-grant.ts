@@ -7,11 +7,13 @@ import { pathToFileURL } from "node:url";
 import { Pool } from "pg";
 
 import {
+  cloudflareCommandEnvironment,
   readCloudflareTarget,
   verifyCloudflareDatabaseTarget,
   type CloudflareTarget,
 } from "./bootstrap-cloudflare";
 import { openCloudflareDataTarget } from "./cloudflare-data";
+import { runCloudflareProcess } from "./cloudflare-process";
 import {
   parseTeamAuthoringAcceptanceCommand,
   validateCloudflareAcceptanceTarget,
@@ -37,6 +39,7 @@ export type PreviewAcceptanceExpiryCommand = TeamAuthoringAcceptanceCommand &
 
 const usage =
   "Usage: expire-preview-acceptance-grant.ts --target <docker|vercel|cloudflare> --origin <origin> --run-id <id> --confirm-disposable <same-id> --grant-id <id> [--config <route-free-wrangler-config> <--local|--remote>]";
+const cloudflareChildMarker = "CLOUDFLARE_DATA_COMMAND_CHILD";
 function invalid(code = "PREVIEW_EXPIRY_ARGUMENTS_INVALID"): never {
   throw new Error(`${code}\n${usage}`);
 }
@@ -220,11 +223,67 @@ function errorCode(error: unknown) {
     : "PREVIEW_EXPIRY_COMMAND_FAILED";
 }
 
+export function cloudflarePreviewExpiryChildEnvironment(
+  accountId: string,
+  environment: TeamAuthoringAcceptanceEnvironment,
+): Record<string, string | undefined> {
+  return {
+    ...cloudflareCommandEnvironment(accountId, environment),
+    [cloudflareChildMarker]: "1",
+  };
+}
+
+export function previewExpiryChildFailure(output: string) {
+  for (const line of output.trim().split("\n").reverse()) {
+    try {
+      const result = JSON.parse(line) as { code?: unknown; outcome?: unknown };
+      if (
+        result.outcome === "refused" &&
+        typeof result.code === "string" &&
+        /^[A-Z0-9_]+$/u.test(result.code)
+      ) {
+        return new Error(result.code);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 export async function main(
   args: readonly string[],
   environment: TeamAuthoringAcceptanceEnvironment = process.env,
 ) {
   try {
+    const command = parsePreviewAcceptanceExpiryCommand(args);
+    if (
+      command.target === "cloudflare" &&
+      environment[cloudflareChildMarker] !== "1"
+    ) {
+      const target = readCloudflareTarget(command.configPath ?? "");
+      validatePreviewAcceptanceExpiryCloudflareTarget(command, target);
+      const output = await runCloudflareProcess(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          path.resolve(process.cwd(), "scripts/expire-preview-acceptance-grant.ts"),
+          ...args,
+        ],
+        {
+          captureOutput: true,
+          classifyFailure: previewExpiryChildFailure,
+          cwd: process.cwd(),
+          environment: cloudflarePreviewExpiryChildEnvironment(
+            target.accountId,
+            environment,
+          ),
+        },
+      );
+      process.stdout.write(output);
+      return;
+    }
     process.stdout.write(
       `${JSON.stringify(await runPreviewAcceptanceExpiryCommand(args, environment))}\n`,
     );

@@ -11,7 +11,9 @@ import { migrate as migratePostgres } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 
 import {
+  cloudflarePreviewExpiryChildEnvironment,
   parsePreviewAcceptanceExpiryCommand,
+  previewExpiryChildFailure,
   runPreviewAcceptanceExpiryCommand,
   validatePreviewAcceptanceExpiryDatabaseTarget,
 } from "../scripts/expire-preview-acceptance-grant";
@@ -32,6 +34,7 @@ const grantId = "A".repeat(43);
 const issuedAt = new Date("2026-09-03T12:00:00.000Z");
 const expiresAt = new Date("2026-09-10T12:00:00.000Z");
 const checkedAt = new Date("2026-09-03T12:05:00.000Z");
+const cloudflareAccountId = "f8801c7e8853a113a25f8b52fd9ceec1";
 
 function commandArgs(target: "cloudflare" | "docker" | "vercel" = "docker") {
   return [
@@ -114,6 +117,31 @@ test("preview expiry refuses maintained hosts and databases outside its run ID",
       }),
     /ACCEPTANCE_DATABASE_NOT_DISPOSABLE/u,
   );
+});
+
+test("Cloudflare preview expiry isolates its child and preserves typed refusals", () => {
+  const environment = cloudflarePreviewExpiryChildEnvironment(
+    cloudflareAccountId,
+    {
+      ADMIN_SESSION_SECRET: "must-not-reach-child",
+      CLOUDFLARE_API_TOKEN: "cloudflare-credential",
+      CODEX_SESSION_ID: "must-not-reach-child",
+      HOME: "/tmp/operator-home",
+      PATH: "/usr/bin:/bin",
+    },
+  );
+  assert.equal(environment.CLOUDFLARE_ACCOUNT_ID, cloudflareAccountId);
+  assert.equal(environment.CLOUDFLARE_DATA_COMMAND_CHILD, "1");
+  assert.equal(environment.CLOUDFLARE_API_TOKEN, "cloudflare-credential");
+  assert.equal(environment.ADMIN_SESSION_SECRET, undefined);
+  assert.equal(environment.CODEX_SESSION_ID, undefined);
+  assert.equal(
+    previewExpiryChildFailure(
+      'worker diagnostic\n{"code":"PREVIEW_EXPIRY_ACTIVE_GRANT_NOT_FOUND","outcome":"refused"}\n',
+    )?.message,
+    "PREVIEW_EXPIRY_ACTIVE_GRANT_NOT_FOUND",
+  );
+  assert.equal(previewExpiryChildFailure("unstructured child failure"), undefined);
 });
 
 async function seedPreview(pool: Pool) {
