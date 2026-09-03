@@ -30,6 +30,8 @@ export function proxy(request: NextRequest) {
   if (
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
+    pathname === "/preview" ||
+    pathname.startsWith("/preview/") ||
     pathname === "/api/internal" ||
     pathname.startsWith("/api/internal/") ||
     (request.method !== "GET" && request.method !== "HEAD")

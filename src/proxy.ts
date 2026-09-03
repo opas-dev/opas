@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import { authorizeAdminRoute } from "@/auth/admin-route";
+import { applyArticlePreviewResponseHeaders } from "@/auth/article-preview-headers";
 import { embedParentOrigins } from "@/embed/config";
 import { createEmbedContentSecurityPolicy } from "@/security/headers";
 
@@ -12,6 +13,15 @@ export async function proxy(request: NextRequest) {
     const { getAdminSessionConfig } = await import("@/auth/config");
     const { deploymentId, sessionSecret } = getAdminSessionConfig();
     return authorizeAdminRoute(request, sessionSecret, deploymentId);
+  }
+
+  if (
+    request.nextUrl.pathname === "/preview" ||
+    request.nextUrl.pathname.startsWith("/preview/")
+  ) {
+    const response = NextResponse.next();
+    applyArticlePreviewResponseHeaders(response.headers);
+    return response;
   }
 
   const response = NextResponse.next();
@@ -23,5 +33,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/embed"],
+  matcher: ["/admin/:path*", "/embed", "/preview/:path*"],
 };

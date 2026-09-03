@@ -20,6 +20,7 @@ const forbiddenArtifactText = [
   "ADMIN_EMAIL",
   "ADMIN_PASSWORD",
   "ADMIN_SESSION_SECRET",
+  "OPAS_PREVIEW_SIGNING_SECRET",
   "The artifact can authenticate administrators",
 ] as const;
 
@@ -49,7 +50,12 @@ export function prepareMaintenanceProject(projectPathname: string) {
     throw new Error("The maintenance proxy template is missing.");
   }
 
-  for (const path of ["src/app/admin", "src/app/api/internal", "src/auth"]) {
+  for (const path of [
+    "src/app/admin",
+    "src/app/api/internal",
+    "src/app/preview",
+    "src/auth",
+  ]) {
     rmSync(projectPath(project, path), { force: true, recursive: true });
   }
   copyFileSync(template, projectPath(project, "src/proxy.ts"));
