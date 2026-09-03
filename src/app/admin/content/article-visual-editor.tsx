@@ -61,7 +61,9 @@ import {
   useState,
   type ClipboardEvent,
   type DragEvent,
+  type FocusEvent,
   type FormEvent,
+  type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
 
@@ -86,19 +88,42 @@ type ArticleVisualEditorProps = {
   stageImage?: StageArticleImage;
 };
 
-type PendingImageContextValue = {
+type EditorDialogContextValue = {
   pendingImageFile: File | null;
+  restoreEditorFocus: () => void;
   setPendingImageFile: (file: File | null) => void;
 };
 
-const PendingImageContext = createContext<PendingImageContextValue | null>(null);
+const EditorDialogContext = createContext<EditorDialogContextValue | null>(null);
 
-function usePendingImage() {
-  const value = useContext(PendingImageContext);
+function useEditorDialog() {
+  const value = useContext(EditorDialogContext);
   if (!value) {
-    throw new Error("The article image dialog must be rendered inside its editor.");
+    throw new Error("The article dialog must be rendered inside its editor.");
   }
   return value;
+}
+
+const dialogFocusSelector =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function trapDialogFocus(event: KeyboardEvent<HTMLElement>) {
+  if (event.key !== "Tab") return;
+  const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(dialogFocusSelector)]
+    .filter((control) => control.getClientRects().length > 0);
+  const first = controls[0];
+  const last = controls.at(-1);
+  if (!first || !last) {
+    event.preventDefault();
+    return;
+  }
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -147,6 +172,9 @@ function ArticleLinkEditDialog({ state }: { state: EditLinkDialog }) {
   const [text, setText] = useState(state.text);
   const [title, setTitle] = useState(state.title);
   const [urlIssue, setUrlIssue] = useState<string | null>(null);
+  const { restoreEditorFocus } = useEditorDialog();
+
+  useEffect(() => restoreEditorFocus, [restoreEditorFocus]);
 
   function submitLink(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -177,7 +205,9 @@ function ArticleLinkEditDialog({ state }: { state: EditLinkDialog }) {
             event.preventDefault();
             event.stopPropagation();
             cancelLinkEdit();
+            return;
           }
+          trapDialogFocus(event);
         }}
       >
         <h2 id="opas-editor-link-dialog-title" className={styles.dialogTitle}>
@@ -253,7 +283,7 @@ function ArticleImageDialogSession({ state }: { state: ActiveImageDialogState })
   const imageUploadHandler = useCellValue(imageUploadHandler$);
   const saveImage = usePublisher(saveImage$);
   const closeImageDialog = usePublisher(closeImageDialog$);
-  const { pendingImageFile, setPendingImageFile } = usePendingImage();
+  const { pendingImageFile, restoreEditorFocus, setPendingImageFile } = useEditorDialog();
   const initialValues = state.type === "editing" ? state.initialValues : undefined;
   const initialAltText = initialValues?.altText ?? "";
   const [source, setSource] = useState(initialValues?.src ?? "");
@@ -266,6 +296,8 @@ function ArticleImageDialogSession({ state }: { state: ActiveImageDialogState })
   const [busy, setBusy] = useState(false);
   const [issue, setIssue] = useState<string | null>(null);
   const focusAltText = Boolean(pendingImageFile) || state.type === "editing";
+
+  useEffect(() => restoreEditorFocus, [restoreEditorFocus]);
 
   function cancelImage() {
     setPendingImageFile(null);
@@ -324,7 +356,9 @@ function ArticleImageDialogSession({ state }: { state: ActiveImageDialogState })
             event.preventDefault();
             event.stopPropagation();
             cancelImage();
+            return;
           }
+          trapDialogFocus(event);
         }}
       >
         <h2 id="opas-editor-image-dialog-title" className={styles.dialogTitle}>
@@ -369,7 +403,7 @@ function ArticleImageDialogSession({ state }: { state: ActiveImageDialogState })
 function ArticleImageDialog() {
   const state = useCellValue(imageDialogState$);
   const openImageDialog = usePublisher(openNewImageDialog$);
-  const { pendingImageFile } = usePendingImage();
+  const { pendingImageFile } = useEditorDialog();
 
   useEffect(() => {
     if (pendingImageFile && state.type === "inactive") {
@@ -433,6 +467,22 @@ export function ArticleVisualEditor({
   const acceptedMarkdownRef = useRef(markdown);
   const [editorIssue, setEditorIssue] = useState<string | null>(null);
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  const rememberEditorFocus = useCallback((event: FocusEvent<HTMLDivElement>) => {
+    if (
+      event.target instanceof HTMLElement &&
+      event.currentTarget.contains(event.target)
+    ) {
+      returnFocusRef.current = event.target;
+    }
+  }, []);
+
+  const restoreEditorFocus = useCallback(() => {
+    const target = returnFocusRef.current;
+    if (!target?.isConnected) return;
+    requestAnimationFrame(() => target.focus());
+  }, []);
 
   const uploadImage = useCallback<NonNullable<ImageUploadHandler>>(
     async (file) => {
@@ -580,11 +630,14 @@ export function ArticleVisualEditor({
 
   return (
     <div
+      onFocusCapture={rememberEditorFocus}
       onPasteCapture={readOnly ? undefined : handlePaste}
       onDragOverCapture={readOnly ? undefined : handleDragOver}
       onDropCapture={readOnly ? undefined : handleDrop}
     >
-      <PendingImageContext.Provider value={{ pendingImageFile, setPendingImageFile }}>
+      <EditorDialogContext.Provider
+        value={{ pendingImageFile, restoreEditorFocus, setPendingImageFile }}
+      >
         <MDXEditor
           ref={editorRef}
           markdown={markdown}
@@ -609,7 +662,7 @@ export function ArticleVisualEditor({
           }}
           plugins={plugins}
         />
-      </PendingImageContext.Provider>
+      </EditorDialogContext.Provider>
       {editorIssue ? (
         <p className="m-0 border-t border-danger bg-background px-4 py-3 text-sm text-danger" role="alert">
           {editorIssue}
