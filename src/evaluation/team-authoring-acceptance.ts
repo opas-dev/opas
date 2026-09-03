@@ -84,6 +84,7 @@ export type TeamAuthoringAcceptanceBoundary = Readonly<{
   members: MemberRepository;
   previews: ArticlePreviewRepository;
   prepareFixture(): Promise<void>;
+  settlePublicProjection?(articleId: string): Promise<void>;
   readPublicProjection(articleId: string): Promise<TeamAuthoringPublicProjection | null>;
   readPublicRagProjection(articleId: string): Promise<TeamAuthoringRagProjection>;
   readRevisionAssetHashes(
@@ -411,6 +412,7 @@ export async function runTeamAuthoringAcceptance(
         reason: "Disposable acceptance baseline",
       });
       requireAcceptance(published.status === "transitioned", "BASELINE_PUBLISH_FAILED");
+      await boundary.settlePublicProjection?.(articleId);
       baselinePublic = await boundary.readPublicProjection(articleId);
       requireAcceptance(baselinePublic, "BASELINE_PUBLIC_MISSING");
       requireAcceptance(
@@ -558,6 +560,7 @@ export async function runTeamAuthoringAcceptance(
         published.status === "transitioned" && published.action === "published",
         "REVIEW_PUBLICATION_FAILED",
       );
+      await boundary.settlePublicProjection?.(articleId);
       const currentPublic = await boundary.readPublicProjection(articleId);
       requireAcceptance(currentPublic, "REVIEWED_PUBLIC_MISSING");
       requireAcceptance(

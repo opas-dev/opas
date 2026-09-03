@@ -710,10 +710,18 @@ test(
       databaseName,
       server.origin,
     );
-    acceptanceBoundary.current = opened.boundary;
+    const settledTitles: string[] = [];
+    acceptanceBoundary.current = Object.freeze({
+      ...opened.boundary,
+      async settlePublicProjection(articleId: string) {
+        const projection = await opened.boundary.readPublicProjection(articleId);
+        assert.ok(projection);
+        settledTitles.push(projection.article.title);
+      },
+    });
     try {
       const report = await runTeamAuthoringAcceptance({
-        boundary: opened.boundary,
+        boundary: acceptanceBoundary.current,
         previewConfiguration: configuration,
         target: {
           kind: "docker-postgres",
@@ -741,6 +749,10 @@ test(
         report.publicSurfaceHashes.baseline,
       );
       assert.equal(report.coverage.publicSurfaces, "live-http");
+      assert.deepEqual(settledTitles, [
+        teamAuthoringStandard.publishedArticle.title,
+        "Acceptance private revision 10",
+      ]);
       assert.deepEqual(report.limitations, [
         "BROWSER_ACCESSIBILITY_AND_MAINTENANCE_ROLLBACK_RUN_SEPARATELY",
       ]);

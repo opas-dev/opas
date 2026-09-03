@@ -3,9 +3,12 @@
 
 import { drizzle } from "drizzle-orm/d1";
 
+import { runEmbeddingWorkerBatch } from "../../../src/ai/embedding-runner";
+import type { WorkersAiEmbeddingBinding } from "../../../src/ai/embeddings";
 import { createSqliteMemberRepository } from "../../../src/db/sqlite/member-repository";
 import { createSqliteArticleDraftRepository } from "../../../src/db/sqlite/article-draft-repository";
 import { createSqliteArticlePreviewRepository } from "../../../src/db/sqlite/article-preview-repository";
+import { createSqliteRepository } from "../../../src/db/sqlite/repository";
 import * as schema from "../../../src/db/schema/sqlite";
 import {
   runTeamAuthoringAcceptance,
@@ -22,7 +25,10 @@ import {
   teamAuthoringBackfillVersion,
 } from "../../../src/db/team-authoring-backfill";
 
-type Environment = Readonly<{ DB: D1Database }>;
+type Environment = Readonly<{
+  AI: WorkersAiEmbeddingBinding;
+  DB: D1Database;
+}>;
 type RunRequest = Readonly<{
   origin: string;
   previewSecret: string;
@@ -292,9 +298,72 @@ function indexRow(row: Record<string, unknown>): TeamAuthoringIndexRow {
   });
 }
 
+async function publicProjectionSettled(
+  environment: Environment,
+  articleId: string,
+) {
+  const ready = await environment.DB.prepare(
+    `select (
+       article.content_hash is not null
+       and state.active_embedding_generation_id is not null
+       and exists (
+         select 1
+         from embedding_jobs as completed_job
+         where completed_job.id = (
+           select latest_job.id
+           from embedding_jobs as latest_job
+           where latest_job.workspace_id = article.workspace_id
+             and latest_job.article_id = article.id
+             and latest_job.article_content_hash = article.content_hash
+           order by latest_job.created_at desc, latest_job.id desc
+           limit 1
+         )
+           and completed_job.status = 'completed'
+           and completed_job.embedding_generation_id = state.active_embedding_generation_id
+       )
+       and exists (
+         select 1
+         from evidence_chunks as current_chunk
+         where current_chunk.workspace_id = article.workspace_id
+           and current_chunk.article_id = article.id
+           and current_chunk.article_content_hash = article.content_hash
+       )
+       and not exists (
+         select 1
+         from evidence_chunks as current_chunk
+         where current_chunk.workspace_id = article.workspace_id
+           and current_chunk.article_id = article.id
+           and current_chunk.article_content_hash = article.content_hash
+           and not exists (
+             select 1
+             from chunk_embeddings as stored_embedding
+             inner join embedding_generations as active_generation
+               on active_generation.id = stored_embedding.embedding_generation_id
+              and active_generation.workspace_id = stored_embedding.workspace_id
+              and active_generation.status = 'active'
+             where stored_embedding.chunk_id = current_chunk.id
+               and stored_embedding.workspace_id = current_chunk.workspace_id
+               and stored_embedding.embedding_generation_id = state.active_embedding_generation_id
+               and stored_embedding.content_hash = current_chunk.content_hash
+               and stored_embedding.embedding_input_hash = current_chunk.embedding_input_hash
+               and stored_embedding.dimension = active_generation.dimension
+           )
+       )
+     ) as ready
+     from articles as article
+     inner join workspace_index_states as state
+       on state.workspace_id = article.workspace_id
+     where article.workspace_id = ? and article.id = ? and article.status = 'published'`,
+  )
+    .bind(teamAuthoringStandard.workspaceId, articleId)
+    .first<number>("ready");
+  return ready === 1;
+}
+
 function boundary(environment: Environment, origin: string): TeamAuthoringAcceptanceBoundary {
   const acceptanceActors = actors();
   const database = drizzle(environment.DB, { schema });
+  const embeddingRepository = createSqliteRepository(database);
   const repositoryOptions = {
     configuredSiteUrl: origin,
     createEvidenceId: () => `evidence_${crypto.randomUUID()}`,
@@ -331,6 +400,19 @@ function boundary(environment: Environment, origin: string): TeamAuthoringAccept
           migrationProjectionHash,
         ),
       );
+    },
+    async settlePublicProjection(articleId) {
+      await runEmbeddingWorkerBatch({
+        environment: {
+          OPAS_DATABASE_DRIVER: "d1",
+          OPAS_SITE_URL: origin,
+        },
+        getRepository: async () => embeddingRepository,
+        workersAiBinding: environment.AI,
+      });
+      if (!(await publicProjectionSettled(environment, articleId))) {
+        throw new Error("ACCEPTANCE_PUBLIC_RAG_NOT_SETTLED");
+      }
     },
     async readPublicProjection(articleId) {
       const article = await environment.DB.prepare(

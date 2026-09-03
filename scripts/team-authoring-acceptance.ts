@@ -160,6 +160,10 @@ async function runCloudflareAcceptance(
         account_id: target.accountId,
         compatibility_date: "2026-09-02",
         compatibility_flags: ["nodejs_compat"],
+        ai: {
+          binding: "AI",
+          remote: true,
+        },
         d1_databases: [
           {
             binding: "DB",
