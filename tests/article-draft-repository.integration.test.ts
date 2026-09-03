@@ -2207,6 +2207,11 @@ async function exerciseHistoryAndRecovery(harness: Harness) {
 async function createPostgresHarness(): Promise<Harness> {
   const container = await new PostgreSqlContainer("postgres:18.6-alpine").start();
   const pool = new Pool({ connectionString: container.getConnectionUri(), max: 24 });
+  const unexpectedPoolErrors: Error[] = [];
+  let closing = false;
+  pool.on("error", (error) => {
+    if (!closing) unexpectedPoolErrors.push(error);
+  });
   const database = createPostgresDatabase(pool, { schema: postgresSchema });
   try {
     await migratePostgres(database, { migrationsFolder: migrations.postgres });
@@ -2314,6 +2319,7 @@ async function createPostgresHarness(): Promise<Harness> {
     );
     for (const statement of postgresTeamAuthoringGuardStatements) await pool.query(statement);
   } catch (error) {
+    closing = true;
     await pool.end();
     await container.stop();
     throw error;
@@ -2556,8 +2562,11 @@ async function createPostgresHarness(): Promise<Harness> {
       };
     },
     async close() {
+      const unexpectedPoolError = unexpectedPoolErrors[0];
+      closing = true;
       await pool.end();
       await container.stop();
+      if (unexpectedPoolError) throw unexpectedPoolError;
     },
   };
 }
