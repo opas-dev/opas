@@ -67,7 +67,10 @@ export function cloudflareDataConfig(target: CloudflareTarget, remote = false) {
     throw new Error("The validated Cloudflare target has no D1 binding.");
   }
   const database = { ...sourceDatabase };
-  if (remote) delete database.preview_database_id;
+  if (remote) {
+    delete database.preview_database_id;
+    database.remote = true;
+  }
   return {
     account_id: target.accountId,
     compatibility_date: target.config.compatibility_date,

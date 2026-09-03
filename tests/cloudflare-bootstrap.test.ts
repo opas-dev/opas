@@ -133,6 +133,7 @@ test("reduces native D1 proxy configuration to the validated account and binding
       database_name: target.databaseName,
       database_id: target.databaseId,
       migrations_dir: "drizzle/sqlite",
+      remote: true,
     },
   ]);
   assert.equal("vars" in config, false);
