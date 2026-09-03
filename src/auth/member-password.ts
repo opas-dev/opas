@@ -1,5 +1,5 @@
 // ABOUTME: Enforces the named-member password policy and creates portable password verifiers.
-// ABOUTME: Performs one bounded PBKDF2 derivation and constant-time HMAC verification through Web Crypto.
+// ABOUTME: Chains bounded PBKDF2 stages and performs constant-time HMAC verification through Web Crypto.
 
 import {
   authEncoder,
@@ -9,13 +9,22 @@ import {
   type RandomBytes,
 } from "@/auth/security-encoding";
 
+export const memberPasswordScheme = Object.freeze({
+  digestBytes: 32,
+  hash: "SHA-256",
+  id: "opas-pbkdf2-hmac-sha256-chain-v1",
+  iterationsPerStage: 100_000,
+  stageCount: 6,
+  totalIterations: 600_000,
+});
+
 export const memberPasswordPolicy = Object.freeze({
   minimumCodePoints: 15,
   maximumCodePoints: 1024,
   maximumUtf8Bytes: 4096,
-  iterations: 600_000,
+  iterations: memberPasswordScheme.totalIterations,
   saltBytes: 32,
-  digestBytes: 32,
+  digestBytes: memberPasswordScheme.digestBytes,
 });
 
 export type MemberPasswordVerifier = {
@@ -39,6 +48,7 @@ export class MemberPasswordPolicyError extends Error {
 }
 
 const verifierMessage = authEncoder.encode("opas-member-password-verifier-v1");
+const stageDomain = authEncoder.encode(`${memberPasswordScheme.id}\0`);
 const dummyPassword = authEncoder.encode("opas-bounded-password-verification-dummy");
 const dummySalt = new Uint8Array(memberPasswordPolicy.saltBytes);
 const dummyDigest = new Uint8Array(memberPasswordPolicy.digestBytes);
@@ -111,23 +121,45 @@ function passwordBytesForVerification(password: string): {
   };
 }
 
+function createStageSalt(
+  salt: Uint8Array<ArrayBuffer>,
+  stageNumber: number,
+): Uint8Array<ArrayBuffer> {
+  const stageSalt = new Uint8Array(stageDomain.byteLength + 4 + salt.byteLength);
+  stageSalt.set(stageDomain);
+  new DataView(stageSalt.buffer).setUint32(stageDomain.byteLength, stageNumber, false);
+  stageSalt.set(salt, stageDomain.byteLength + 4);
+  return stageSalt;
+}
+
 async function deriveVerifierKey(
   password: Uint8Array<ArrayBuffer>,
   salt: Uint8Array<ArrayBuffer>,
 ): Promise<CryptoKey> {
-  const passwordKey = await crypto.subtle.importKey("raw", password, "PBKDF2", false, [
-    "deriveKey",
-  ]);
+  let stageInput = password;
 
-  return crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      iterations: memberPasswordPolicy.iterations,
-      salt,
-    },
-    passwordKey,
-    { name: "HMAC", hash: "SHA-256", length: 256 },
+  for (let stageNumber = 1; stageNumber <= memberPasswordScheme.stageCount; stageNumber += 1) {
+    const passwordKey = await crypto.subtle.importKey("raw", stageInput, "PBKDF2", false, [
+      "deriveBits",
+    ]);
+    stageInput = new Uint8Array(
+      await crypto.subtle.deriveBits(
+        {
+          name: "PBKDF2",
+          hash: memberPasswordScheme.hash,
+          iterations: memberPasswordScheme.iterationsPerStage,
+          salt: createStageSalt(salt, stageNumber),
+        },
+        passwordKey,
+        memberPasswordScheme.digestBytes * 8,
+      ),
+    );
+  }
+
+  return crypto.subtle.importKey(
+    "raw",
+    stageInput,
+    { name: "HMAC", hash: memberPasswordScheme.hash },
     false,
     ["sign", "verify"],
   );

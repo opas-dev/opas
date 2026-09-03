@@ -32,6 +32,7 @@ import {
   createMemberPasswordVerifier,
   MemberPasswordPolicyError,
   memberPasswordPolicy,
+  memberPasswordScheme,
   verifyMemberPassword,
 } from "@/auth/member-password";
 import {
@@ -69,6 +70,14 @@ test("member password policy counts Unicode code points without composition rule
   assert.equal(memberPasswordPolicy.minimumCodePoints, 15);
   assert.equal(memberPasswordPolicy.maximumCodePoints >= 128, true);
   assert.equal(memberPasswordPolicy.iterations, 600_000);
+  assert.deepEqual(memberPasswordScheme, {
+    digestBytes: 32,
+    hash: "SHA-256",
+    id: "opas-pbkdf2-hmac-sha256-chain-v1",
+    iterationsPerStage: 100_000,
+    stageCount: 6,
+    totalIterations: 600_000,
+  });
 
   assert.doesNotThrow(() => assertMemberPasswordPolicy("a".repeat(15)));
   assert.doesNotThrow(() => assertMemberPasswordPolicy("🔐".repeat(128)));
@@ -92,12 +101,12 @@ test("member password policy counts Unicode code points without composition rule
   );
 });
 
-test("password verifier pins PBKDF2-HMAC-SHA-256 storage fields and exact matching", async () => {
+test("password verifier pins the staged PBKDF2-HMAC-SHA-256 scheme and exact matching", async () => {
   const password = "Correct horse 🐴 battery staple";
   const verifier = await createMemberPasswordVerifier(password, fixedBytes());
 
   assert.deepEqual(verifier, {
-    digest: "4S9oraFYj1VHYsEAzJv7I26Du_KI5JPSBFQWO9kIVI8",
+    digest: "78bLnh4GPF_lM-Tc41tAtF3gX7Ghu_cAXtk7UUMO5cs",
     iterations: 600_000,
     salt: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
   });

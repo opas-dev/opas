@@ -1,0 +1,12 @@
+// ABOUTME: Configures an isolated workerd password-cost benchmark on the DevPlant account.
+// ABOUTME: Uses a protected workers.dev endpoint without a database, preview URL, or custom route.
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "opas-member-password-benchmark",
+  "main": "custom-worker.ts",
+  "account_id": "f8801c7e8853a113a25f8b52fd9ceec1",
+  "workers_dev": true,
+  "preview_urls": false,
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"]
+}

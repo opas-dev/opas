@@ -97,6 +97,7 @@ one-row-per-article head record carries authoring workflow state:
 | `published_revision_id` | Nullable pointer to the materialized or last-published revision; live status remains in `articles`. |
 | `published_revision_number` | Nullable number coupled to the published revision ID. |
 | `review_state` | `editing`, `in_review`, `changes_requested`, `approved`, or `published`. |
+| `submitted_by_member_id` | Same-workspace member attribution; non-null exactly while `review_state` is `in_review`. |
 | `archived_at` | Nullable timestamp; archived articles are absent from all public and normal admin lists. |
 | `archived_by_member_id` | Nullable member attribution for recovery history. |
 
@@ -106,6 +107,9 @@ only the working pointer and changes the review state to `editing`; the material
 public fields, public assets, and published pointer do not move. Keeping the pointers
 outside `articles` avoids a circular backfill and lets a prior application version
 continue reading the public projection after the expand-only migration.
+Submitting stores the current member in `submitted_by_member_id`; withdraw,
+request-changes, approval, publication, and every other exit from `in_review` clear it
+in the same transaction.
 
 A never-published article initially materializes revision 1 with public status `draft`
 to satisfy the existing row contract, but subsequent admin reads come from its head.
@@ -295,10 +299,18 @@ administrator invitation; there is no hidden permanent environment superuser.
 
 Passwords are single-factor credentials, so the implementation requires at least 15
 Unicode code points, permits at least 128, permits paste and password managers, and
-adds no character-class composition rules. Passwords use a unique salt and
-PBKDF2-HMAC-SHA-256 with at least 600,000 iterations through Web Crypto. The exact work
-factor must be benchmarked on workerd and may only increase if the login latency and
-Worker CPU gates still pass. These choices follow current
+adds no character-class composition rules. The fixed
+`opas-pbkdf2-hmac-sha256-chain-v1` scheme uses one unique 32-byte salt and six
+sequential 100,000-iteration PBKDF2-HMAC-SHA-256 stages through Web Crypto. Stage one
+takes the UTF-8 password and every later stage takes the prior 32-byte output. Each
+stage salt is the UTF-8 scheme ID plus a NUL byte, the one-based stage number as a
+big-endian 32-bit integer, and the member salt. The final output is an HMAC-SHA-256 key
+that signs `opas-member-password-verifier-v1`; the stored iteration field is the total
+600,000. Changing any of those values requires a distinct scheme and migration. This
+preserves a sequential 600,000-round work factor while respecting deployed Workers'
+100,000-iteration limit per PBKDF2 operation. The exact work factor must be benchmarked
+on workerd and may only increase if the login latency and Worker CPU gates still pass.
+These choices follow current
 [NIST password guidance](https://pages.nist.gov/800-63-4/sp800-63b.html) and the
 [OWASP password-storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
 
@@ -859,8 +871,9 @@ The release records these exact measurements:
 - **Concurrency:** 12 simultaneous saves submit the same expected revision; exactly
   one succeeds, 11 return the typed conflict, and the revision count increases by one.
 - **Password cost:** local workerd and an isolated Workers deployment each run five
-  warmups followed by 20 measured 600,000-iteration PBKDF2 verifications; p95 is at
-  most one second and no request reaches its Worker CPU limit.
+  warmups followed by 20 externally timed requests containing exactly one
+  600,000-round staged PBKDF2 verification; end-to-end p95 is at most one second and
+  no request reaches its Worker CPU limit.
 - **Draft isolation:** request the baseline twice and prove the chosen payload is
   deterministic before hashing. Compare canonicalized semantic DOM for the public
   article/category/home `<main>` regions, stable serialized public result records,
