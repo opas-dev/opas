@@ -1,0 +1,18 @@
+// ABOUTME: Configures a disposable native D1 Worker for demo-seed acceptance.
+// ABOUTME: Keeps its local database isolated from maintained OPAS targets.
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "opas-demo-seed-test",
+  "main": "custom-worker.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "opas-demo-seed-test",
+      "database_id": "00000000-0000-0000-0000-000000000006",
+      "preview_database_id": "DB",
+      "migrations_dir": "../../../drizzle/sqlite"
+    }
+  ]
+}

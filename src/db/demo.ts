@@ -18,10 +18,19 @@ export const demoIds = {
   runtimeThemesArticle: "article_runtime_themes",
   deploymentTargetsArticle: "article_deployment_targets",
   agentAccessArticle: "article_agent_access",
+  markAsset: "asset_demo_mark",
   theme: "theme_default",
 } as const;
 
 export const demoSeededAt = "2026-01-01T00:00:00.000Z";
+export const demoMarkAssetHash =
+  "d4c7ec5429a148a1776245ed4ac32bbff04e5c7565aa64e026feb2963215b9e4";
+
+const demoMarkAssetContent = Uint8Array.from(
+  "89504e470d0a1a0a0000000d4948445200000020000000200806000000737a7af40000004d4944415478da63f8fae9cdff81c40ca30e1875c0a07580b0bc3655f1a8038697033e65eb63c5a30ea0a90370594aac63461d30ea80a1ef80d17260503960b4361c190e186d158f3a60c43800009790f01a41649ce10000000049454e44ae426082"
+    .match(/.{2}/gu)
+    ?.map((byte) => Number.parseInt(byte, 16)) ?? [],
+);
 
 export const demoContent = {
   workspace: {
@@ -63,6 +72,16 @@ export const demoContent = {
       position: 3,
     },
   ],
+  assets: [
+    {
+      id: demoIds.markAsset,
+      workspaceId: demoIds.workspace,
+      hash: demoMarkAssetHash,
+      mediaType: "image/png",
+      byteSize: demoMarkAssetContent.byteLength,
+      content: demoMarkAssetContent,
+    },
+  ],
   articles: [
     {
       id: demoIds.publishedArticle,
@@ -76,10 +95,13 @@ This article is loaded from the deployment database through **Drizzle ORM** and 
 
 > Edit this article, reload the page, and OPAS renders the updated answer without rebuilding.
 
-The same content model runs on Docker, Vercel, and Cloudflare Workers.`,
+The same content model runs on Docker, Vercel, and Cloudflare Workers.
+
+![OPAS database asset](/api/assets/${demoMarkAssetHash})`,
       status: "published",
       isFaq: false,
       authorName: "OPAS",
+      assetHashes: [demoMarkAssetHash],
       publishedAt: demoSeededAt,
     },
     {
