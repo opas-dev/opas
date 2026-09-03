@@ -157,28 +157,24 @@ test("the environment template documents secret and provider settings without va
   assert.match(template, /^OPAS_GENERATION_API_KEY=$/mu);
 });
 
-test("article publication and imports schedule recovery only after durable writes", () => {
+test("only durable article publication schedules recovery while private writes never do", () => {
   const actions = readFileSync("src/app/admin/content/actions.ts", "utf8");
+  const articleRuntime = readFileSync(
+    "src/app/admin/content/article-action-runtime.ts",
+    "utf8",
+  );
   const imports = readFileSync(
     "src/app/admin/content/import/run/route.ts",
     "utf8",
   );
   const saveStart = actions.indexOf("export async function saveArticleAction");
-  const deleteStart = actions.indexOf("export async function deleteArticleAction");
-  const saveBody = actions.slice(saveStart, deleteStart);
-  const deleteBody = actions.slice(deleteStart);
+  const dependenciesStart = actions.indexOf("async function articleActionDependencies");
+  const saveBody = actions.slice(saveStart, dependenciesStart);
 
-  assert.ok(saveStart >= 0 && deleteStart > saveStart);
-  assert.ok(
-    saveBody.indexOf("scheduleEmbeddingRecovery();") >
-      saveBody.indexOf("await repository.updateArticle"),
-  );
-  assert.ok(
-    deleteBody.indexOf("scheduleEmbeddingRecovery();") >
-      deleteBody.indexOf("await repository.deleteArticle"),
-  );
-  assert.ok(
-    imports.indexOf("scheduleEmbeddingRecovery();") >
-      imports.indexOf("await executeKnowledgeImport"),
-  );
+  assert.ok(saveStart >= 0 && dependenciesStart > saveStart);
+  assert.doesNotMatch(saveBody, /scheduleEmbeddingRecovery/u);
+  assert.match(articleRuntime, /if \(result\.evidenceJobId\)/u);
+  assert.match(articleRuntime, /dependencies\.scheduleEvidenceRecovery\?\.\(\)/u);
+  assert.ok(imports.includes("await executeKnowledgeImport"));
+  assert.equal(imports.includes("scheduleEmbeddingRecovery"), false);
 });

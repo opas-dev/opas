@@ -117,12 +117,15 @@ test("every current content, asset, import, theme, and quality write boundary ma
     "saveCategoryAction",
     "deleteCategoryAction",
     "saveArticleAction",
-    "deleteArticleAction",
   ] as const;
   for (const [index, name] of contentActionNames.entries()) {
     const body = functionBody(contentActions, name, contentActionNames[index + 1]);
     assert.match(body, /pausedErrorState\(previousState, error\)/u, name);
   }
+  assert.match(
+    contentActions.slice(contentActions.indexOf("async function articleWorkflowAction")),
+    /getAuthoringPausedFailure\(error\)/u,
+  );
   assert.match(
     functionBody(themeActions, "updateThemeAction"),
     /getAuthoringPausedFailure\(error\)/u,

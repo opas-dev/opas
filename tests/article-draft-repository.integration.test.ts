@@ -1399,6 +1399,25 @@ function archiveTarget(
 
 async function exerciseHistoryAndRecovery(harness: Harness) {
   const initialPublic = await harness.inventory();
+  const initialLibrary = await harness.repository.listArticleLibrary({
+    actor: actors.reviewer,
+    workspaceId,
+  });
+  assert.deepEqual(initialLibrary.map((item) => item.articleId), [publicArticleId]);
+  assert.deepEqual(
+    {
+      publicStatus: initialLibrary[0]?.publicStatus,
+      publishedRevisionNumber: initialLibrary[0]?.publishedRevisionNumber,
+      title: initialLibrary[0]?.title,
+      workingRevisionNumber: initialLibrary[0]?.workingRevisionNumber,
+    },
+    {
+      publicStatus: "published",
+      publishedRevisionNumber: 1,
+      title: "Public guide",
+      workingRevisionNumber: 1,
+    },
+  );
   const initialDetailRequest = {
     actor: actors.reviewer,
     articleId: publicArticleId,
@@ -1417,6 +1436,13 @@ async function exerciseHistoryAndRecovery(harness: Harness) {
   assert.equal(initialHistory.items[0]?.createdByDisplayName, "Editor");
   assert.ok(await harness.repository.getArticleRevisionDetail(initialDetailRequest));
   await harness.setMemberStatus(reviewerMemberId, "disabled");
+  assert.deepEqual(
+    await harness.repository.listArticleLibrary({
+      actor: actors.reviewer,
+      workspaceId,
+    }),
+    [],
+  );
   assert.equal(
     await harness.repository.listArticleRevisionHistory({
       actor: actors.reviewer,
@@ -1424,6 +1450,13 @@ async function exerciseHistoryAndRecovery(harness: Harness) {
       workspaceId,
     }),
     null,
+  );
+  assert.deepEqual(
+    await harness.repository.listArticleLibrary({
+      actor: { memberId: reviewerMemberId, sessionId: "X".repeat(43) },
+      workspaceId,
+    }),
+    [],
   );
   assert.equal(
     await harness.repository.getArticleRevisionDetail(initialDetailRequest),
@@ -2027,6 +2060,17 @@ async function exerciseHistoryAndRecovery(harness: Harness) {
   assert.ok(head.archivedAt);
   assert.equal(head.publicStatus, "draft");
   assert.equal(head.reviewState, "editing");
+  const archivedLibrary = await harness.repository.listArticleLibrary({
+    actor: actors.reviewer,
+    workspaceId,
+  });
+  const archivedLibraryItem = archivedLibrary.find(
+    (item) => item.articleId === publicArticleId,
+  );
+  assert.ok(archivedLibraryItem?.archivedAt);
+  assert.equal(archivedLibraryItem.publicStatus, "draft");
+  assert.equal(archivedLibraryItem.publishedRevisionNumber, 1);
+  assert.equal(archivedLibraryItem.workingRevisionNumber, head.revisionNumber);
   const [archivedPublic] = await harness.query<{
     content_hash: string | null;
     published_assets: number | string;
@@ -2141,6 +2185,13 @@ async function exerciseHistoryAndRecovery(harness: Harness) {
       workspaceId,
     }),
     null,
+  );
+  assert.deepEqual(
+    await harness.repository.listArticleLibrary({
+      actor: actors.reviewer,
+      workspaceId,
+    }),
+    [],
   );
   assert.equal(
     await harness.repository.getArticleRevisionDetail(initialDetailRequest),

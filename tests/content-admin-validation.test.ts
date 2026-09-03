@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   parseArticleRequest,
+  parseArticleWorkflowRequest,
   parseCategoryDeleteRequest,
   parseCategoryRequest,
   parseRecordRequest,
@@ -106,16 +107,16 @@ test("category updates and deletes require a positive concurrency version", () =
   );
 });
 
-test("article requests normalize checkbox and publication fields", () => {
+test("article requests normalize checkbox fields and require a saved revision on updates", () => {
   const result = parseArticleRequest(
     formData({
       mode: "update",
       id: "article_1",
+      expectedWorkingRevisionNumber: "7",
       categoryId: "category_1",
       title: "  Reset a password  ",
       slug: "reset-a-password",
       mdx: "# Reset a password\n\nFollow these steps.",
-      status: "published",
       isFaq: "on",
       authorName: "  OPAS  ",
       assetManifestId: "asset_manifest_123e4567-e89b-42d3-a456-426614174000",
@@ -127,16 +128,32 @@ test("article requests normalize checkbox and publication fields", () => {
     data: {
       mode: "update",
       id: "article_1",
+      expectedWorkingRevisionNumber: 7,
       categoryId: "category_1",
       title: "Reset a password",
       slug: "reset-a-password",
       mdx: "# Reset a password\n\nFollow these steps.",
-      status: "published",
       isFaq: true,
       authorName: "OPAS",
       assetManifestId: "asset_manifest_123e4567-e89b-42d3-a456-426614174000",
     },
   });
+
+  const missingRevision = parseArticleRequest(
+    formData({
+      mode: "update",
+      id: "article_1",
+      categoryId: "category_1",
+      title: "Reset a password",
+      slug: "reset-a-password",
+      mdx: "# Reset a password",
+      authorName: "OPAS",
+    }),
+  );
+  assert.equal(missingRevision.success, false);
+  if (!missingRevision.success) {
+    assert.ok(missingRevision.fieldErrors.expectedWorkingRevisionNumber);
+  }
 });
 
 test("article requests accept only server-issued asset manifest ids", () => {
@@ -147,7 +164,6 @@ test("article requests accept only server-issued asset manifest ids", () => {
       title: "Reset a password",
       slug: "reset-a-password",
       mdx: "# Reset a password",
-      status: "draft",
       authorName: "OPAS",
       assetManifestId: "asset_manifest_other-workspace",
     }),
@@ -167,7 +183,6 @@ test("article requests reject unsafe slugs and forged fields", () => {
       title: "Reset a password",
       slug: "Reset Password",
       mdx: "# Reset a password",
-      status: "draft",
       authorName: "OPAS",
     }),
   );
@@ -185,7 +200,6 @@ test("article requests reject unsafe slugs and forged fields", () => {
     title: "Reset a password",
     slug: "reset-a-password",
     mdx: "# Reset a password",
-    status: "draft",
     authorName: "OPAS",
     workspaceId: "workspace_other",
   });
@@ -204,7 +218,6 @@ test("article MDX begins with the canonical database title", () => {
       title: "Reset a password",
       slug: "reset-a-password",
       mdx: "# Recover an account\n\nFollow these steps.",
-      status: "draft",
       authorName: "OPAS",
     }),
   );
@@ -226,7 +239,6 @@ test("article requests reject a second level-one heading before reaching persist
       title: "Reset a password",
       slug: "reset-a-password",
       mdx: "# Reset a password\n\nFollow these steps.\n\n# Contact support",
-      status: "draft",
       authorName: "OPAS",
     }),
   );
@@ -237,6 +249,88 @@ test("article requests reject a second level-one heading before reaching persist
       result.fieldErrors.mdx,
       "Article MDX must contain exactly one level-one heading",
     );
+  }
+});
+
+test("workflow requests strictly parse exact revision identity, state, and bounded notes", () => {
+  assert.deepEqual(
+    parseArticleWorkflowRequest(
+      "requestChanges",
+      formData({
+        id: "article_1",
+        revisionId: "revision_7",
+        expectedWorkingRevisionNumber: "7",
+        expectedReviewState: "in_review",
+        note: "  Clarify the recovery step.  ",
+      }),
+    ),
+    {
+      success: true,
+      data: {
+        id: "article_1",
+        revisionId: "revision_7",
+        expectedWorkingRevisionNumber: 7,
+        expectedReviewState: "in_review",
+        note: "Clarify the recovery step.",
+      },
+    },
+  );
+
+  for (const invalid of [
+    formData({
+      id: "article_1",
+      revisionId: "../revision_7",
+      expectedWorkingRevisionNumber: "7",
+      expectedReviewState: "in_review",
+      note: "Clarify the recovery step.",
+    }),
+    formData({
+      id: "article_1",
+      revisionId: "revision_7",
+      expectedWorkingRevisionNumber: "0",
+      expectedReviewState: "in_review",
+      note: "Clarify the recovery step.",
+    }),
+    formData({
+      id: "article_1",
+      revisionId: "revision_7",
+      expectedWorkingRevisionNumber: "7",
+      expectedReviewState: "approved",
+      note: "Clarify the recovery step.",
+    }),
+  ]) {
+    assert.equal(parseArticleWorkflowRequest("requestChanges", invalid).success, false);
+  }
+});
+
+test("emergency publication requires a reason and rejects forged form fields", () => {
+  const missingReason = parseArticleWorkflowRequest(
+    "emergencyPublish",
+    formData({
+      id: "article_1",
+      revisionId: "revision_7",
+      expectedWorkingRevisionNumber: "7",
+      expectedReviewState: "editing",
+      reason: "   ",
+    }),
+  );
+  assert.equal(missingReason.success, false);
+  if (!missingReason.success) {
+    assert.equal(missingReason.fieldErrors.reason, "Enter a reason before continuing");
+  }
+
+  const forged = formData({
+    id: "article_1",
+    revisionId: "revision_7",
+    expectedWorkingRevisionNumber: "7",
+    expectedReviewState: "editing",
+    reason: "Urgent correction",
+    workspaceId: "workspace_other",
+  });
+  const result = parseArticleWorkflowRequest("emergencyPublish", forged);
+  assert.equal(result.success, false);
+  if (!result.success) {
+    assert.equal(result.fieldErrors.form, "The request contained unexpected fields.");
   }
 });
 

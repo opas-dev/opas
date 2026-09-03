@@ -4,6 +4,10 @@ import { z } from "zod";
 
 import { isAssetManifestId } from "@/assets/identity";
 import { articleTitleHeadingIssue } from "@/content/runtime-mdx-plugins";
+import {
+  articleReviewStates,
+  type ArticleReviewState,
+} from "@/content/article-workflow";
 
 const identifierSchema = z
   .string()
@@ -72,7 +76,6 @@ const articleFields = {
     .string()
     .min(1, "Enter article content")
     .max(100_000, "Article content must be 100 KB or smaller"),
-  status: z.enum(["draft", "published"]),
   isFaq: z.literal("on").optional().transform(Boolean),
   authorName: z
     .string()
@@ -85,10 +88,30 @@ const articleFields = {
     .optional(),
 };
 
+const revisionNumberSchema = z.coerce
+  .number()
+  .int("The saved revision is invalid")
+  .safe("The saved revision is invalid")
+  .min(1, "The saved revision is invalid");
+
+const workflowIdentifierSchema = z
+  .string()
+  .min(1, "The saved revision is invalid")
+  .max(128, "The saved revision is invalid")
+  .regex(
+    /^[A-Za-z0-9_-]+$/u,
+    "The saved revision is invalid",
+  );
+
 const articleRequestSchema = z
   .discriminatedUnion("mode", [
     z.strictObject({ mode: z.literal("create"), ...articleFields }),
-    z.strictObject({ mode: z.literal("update"), id: identifierSchema, ...articleFields }),
+    z.strictObject({
+      mode: z.literal("update"),
+      id: identifierSchema,
+      expectedWorkingRevisionNumber: revisionNumberSchema,
+      ...articleFields,
+    }),
   ])
   .superRefine((article, context) => {
     const headingIssue = articleTitleHeadingIssue(article.mdx, article.title);
@@ -107,6 +130,78 @@ const categoryDeleteRequestSchema = z.strictObject({
   expectedCategoryVersion: categoryVersionSchema,
 });
 
+const optionalReviewNoteSchema = z
+  .string()
+  .trim()
+  .max(500, "Review notes must be 500 characters or fewer")
+  .optional()
+  .transform((value) => value || null);
+
+const requiredReviewNoteSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter a reason before continuing")
+  .max(500, "Review notes must be 500 characters or fewer");
+
+const workflowTargetFields = {
+  id: workflowIdentifierSchema,
+  revisionId: workflowIdentifierSchema,
+  expectedWorkingRevisionNumber: revisionNumberSchema,
+};
+
+const workflowRequestSchemas = {
+  approve: z.strictObject({
+    ...workflowTargetFields,
+    expectedReviewState: z.literal("in_review"),
+    note: optionalReviewNoteSchema,
+  }),
+  approveAndPublish: z.strictObject({
+    ...workflowTargetFields,
+    expectedReviewState: z.literal("in_review"),
+    note: optionalReviewNoteSchema,
+  }),
+  emergencyPublish: z.strictObject({
+    ...workflowTargetFields,
+    expectedReviewState: z.enum(articleReviewStates),
+    reason: requiredReviewNoteSchema,
+  }),
+  publish: z.strictObject({
+    ...workflowTargetFields,
+    expectedReviewState: z.literal("approved"),
+  }),
+  requestChanges: z.strictObject({
+    ...workflowTargetFields,
+    expectedReviewState: z.literal("in_review"),
+    note: requiredReviewNoteSchema,
+  }),
+  submit: z.strictObject({
+    ...workflowTargetFields,
+    expectedReviewState: z.enum(["editing", "changes_requested"]),
+    note: optionalReviewNoteSchema,
+  }),
+  unpublish: z.strictObject({
+    ...workflowTargetFields,
+    expectedReviewState: z.enum(articleReviewStates),
+    note: optionalReviewNoteSchema,
+  }),
+  withdraw: z.strictObject({
+    ...workflowTargetFields,
+    expectedReviewState: z.literal("in_review"),
+    note: optionalReviewNoteSchema,
+  }),
+} as const;
+
+export type ArticleWorkflowIntent = keyof typeof workflowRequestSchemas;
+
+export type ArticleWorkflowRequest = Readonly<{
+  id: string;
+  revisionId: string;
+  expectedWorkingRevisionNumber: number;
+  expectedReviewState: ArticleReviewState;
+  note?: string | null;
+  reason?: string;
+}>;
+
 export type CategoryRequest = z.infer<typeof categoryRequestSchema>;
 export type ArticleRequest = z.infer<typeof articleRequestSchema>;
 
@@ -115,6 +210,11 @@ export type ContentFieldErrors = Partial<
     | "form"
     | "id"
     | "expectedCategoryVersion"
+    | "expectedWorkingRevisionNumber"
+    | "revisionId"
+    | "expectedReviewState"
+    | "note"
+    | "reason"
     | "name"
     | "slug"
     | "description"
@@ -122,7 +222,6 @@ export type ContentFieldErrors = Partial<
     | "categoryId"
     | "title"
     | "mdx"
-    | "status"
     | "isFaq"
     | "authorName"
     | "assetManifestId",
@@ -164,6 +263,11 @@ function requestErrors(error: z.ZodError): ContentFieldErrors {
 const contentFieldNames = {
   id: true,
   expectedCategoryVersion: true,
+  expectedWorkingRevisionNumber: true,
+  revisionId: true,
+  expectedReviewState: true,
+  note: true,
+  reason: true,
   name: true,
   slug: true,
   description: true,
@@ -171,7 +275,6 @@ const contentFieldNames = {
   categoryId: true,
   title: true,
   mdx: true,
-  status: true,
   isFaq: true,
   authorName: true,
   assetManifestId: true,
@@ -196,6 +299,17 @@ export function parseCategoryRequest(formData: FormData) {
 
 export function parseArticleRequest(formData: FormData) {
   return parseRequest(articleRequestSchema, formData);
+}
+
+export function parseArticleWorkflowRequest(
+  intent: ArticleWorkflowIntent,
+  formData: FormData,
+): ContentRequestResult<ArticleWorkflowRequest> {
+  const parsed = workflowRequestSchemas[intent].safeParse(formValues(formData));
+  if (!parsed.success) {
+    return { success: false, fieldErrors: requestErrors(parsed.error) };
+  }
+  return { success: true, data: parsed.data as ArticleWorkflowRequest };
 }
 
 export function parseCategoryDeleteRequest(formData: FormData) {

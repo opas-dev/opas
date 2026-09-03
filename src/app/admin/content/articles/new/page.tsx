@@ -1,5 +1,5 @@
 // ABOUTME: Starts a safe draft article in the authenticated OPAS content editor.
-// ABOUTME: Derives the available category choices from the trusted demo workspace.
+// ABOUTME: Derives all authoring category choices from the authenticated workspace boundary.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { ArticleEditor } from "@/app/admin/content/article-editor";
 import { AdminHeader } from "@/app/admin/header";
 import { requireMemberCapability } from "@/auth/admin";
-import { getRepository } from "@/db";
+import { getCategoryAuthoringRepository } from "@/db/category-authoring-database";
 import { demoIds } from "@/db/demo";
 
 export const runtime = "nodejs";
@@ -19,7 +19,9 @@ export const metadata: Metadata = {
 
 export default async function NewArticlePage() {
   const admin = await requireMemberCapability("draft:edit", demoIds.workspace);
-  const categories = await (await getRepository()).listCategories(demoIds.workspace);
+  const categories = await (
+    await getCategoryAuthoringRepository()
+  ).listCategories(demoIds.workspace);
 
   if (categories.length === 0) {
     redirect("/admin/content");
@@ -39,13 +41,13 @@ export default async function NewArticlePage() {
           </h1>
         </div>
         <ArticleEditor
+          canEdit
           categories={categories.map(({ id, name }) => ({ id, name }))}
           article={{
             categoryId: categories[0].id,
             title: "Untitled article",
             slug: "",
             mdx: "# Untitled article\n\nWrite a clear answer here.",
-            status: "draft",
             isFaq: false,
             authorName: "OPAS",
           }}

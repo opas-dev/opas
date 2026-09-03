@@ -102,6 +102,13 @@ type ExerciseResult = Readonly<{
 type RecoveryResult = Readonly<{
   archiveRace: readonly WorkflowOutcome[];
   archiveRestoreRace: readonly WorkflowOutcome[];
+  archivedLibrary: readonly {
+    archivedAt: string | null;
+    articleId: string;
+    publicStatus: string;
+    publishedRevisionNumber: number | null;
+    workingRevisionNumber: number;
+  }[];
   archivedState: {
     archived_at: number | null;
     content_hash: string | null;
@@ -123,12 +130,26 @@ type RecoveryResult = Readonly<{
   } | null;
   disabledDetail: unknown;
   disabledHistory: unknown;
+  disabledLibrary: readonly unknown[];
   doubleRestore: readonly WorkflowOutcome[];
   firstHistory: {
     items: readonly { revisionNumber: number }[];
     nextBeforeRevisionNumber: number | null;
   } | null;
   inReviewRestore: WorkflowOutcome;
+  initialLibrary: readonly {
+    archivedAt: string | null;
+    articleId: string;
+    categoryName: string;
+    categorySlug: string;
+    createdByMemberId: string | null;
+    publicStatus: string;
+    publishedRevisionNumber: number | null;
+    reviewState: string;
+    slug: string;
+    title: string;
+    workingRevisionNumber: number;
+  }[];
   missingAssetRestore: WorkflowOutcome;
   missingCategoryRestore: WorkflowOutcome;
   negativeRevisionCounts: readonly {
@@ -145,11 +166,13 @@ type RecoveryResult = Readonly<{
   } | null;
   revokedDetail: unknown;
   revokedHistory: unknown;
+  revokedLibrary: readonly unknown[];
   restoreWhileArchived: WorkflowOutcome;
   restoreSlugRace: readonly WorkflowOutcome[];
   restored: WorkflowOutcome;
   roleChangedDetail: unknown;
   roleChangedHistory: unknown;
+  roleChangedLibrary: readonly unknown[];
   secondHistory: {
     items: readonly { revisionNumber: number }[];
     nextBeforeRevisionNumber: number | null;
@@ -422,6 +445,19 @@ test("native D1 draft and publication batches admit one exact winner", { timeout
     assert.equal(recovery.restored.status, "transitioned");
     assert.equal(recovery.restored.action, "restored");
     assert.equal(recovery.priorRevisionsUnchanged, true);
+    const recoveryLibraryItem = recovery.initialLibrary.find(
+      (item) => item.articleId === "article_d1_recovery",
+    );
+    assert.equal(recoveryLibraryItem?.archivedAt, null);
+    assert.equal(recoveryLibraryItem?.categoryName, "Guides");
+    assert.equal(recoveryLibraryItem?.categorySlug, "guides");
+    assert.equal(recoveryLibraryItem?.createdByMemberId, "member_d1_editor");
+    assert.equal(recoveryLibraryItem?.publicStatus, "published");
+    assert.equal(recoveryLibraryItem?.publishedRevisionNumber, 1);
+    assert.equal(recoveryLibraryItem?.reviewState, "editing");
+    assert.equal(recoveryLibraryItem?.slug, "d1-recovery-private");
+    assert.equal(recoveryLibraryItem?.title, "D1 private recovery");
+    assert.equal(recoveryLibraryItem?.workingRevisionNumber, 2);
     assert.deepEqual(
       recovery.firstHistory?.items.map((item) => item.revisionNumber),
       [3, 2],
@@ -440,8 +476,10 @@ test("native D1 draft and publication batches admit one exact winner", { timeout
     ]);
     assert.equal(recovery.disabledHistory, null);
     assert.equal(recovery.disabledDetail, null);
+    assert.deepEqual(recovery.disabledLibrary, []);
     assert.ok(recovery.roleChangedHistory);
     assert.ok(recovery.roleChangedDetail);
+    assert.ok(recovery.roleChangedLibrary.length > 0);
     assert.equal(recovery.cappedDetail?.events.length, 50);
     assert.equal(recovery.cappedDetail?.eventsTruncated, true);
     assert.equal(
@@ -519,6 +557,11 @@ test("native D1 draft and publication batches admit one exact winner", { timeout
       status: "rejected",
       code: "ARTICLE_ARCHIVED",
     });
+    const archivedLibraryItem = recovery.archivedLibrary.find(
+      (item) => item.articleId === "article_d1_recovery",
+    );
+    assert.equal(archivedLibraryItem?.publicStatus, "draft");
+    assert.ok(archivedLibraryItem?.archivedAt);
     assert.deepEqual(
       recovery.slugClaimsAfterArchive,
       recovery.slugClaimsBeforeArchive,
@@ -550,6 +593,7 @@ test("native D1 draft and publication batches admit one exact winner", { timeout
     );
     assert.equal(recovery.revokedHistory, null);
     assert.equal(recovery.revokedDetail, null);
+    assert.deepEqual(recovery.revokedLibrary, []);
   } finally {
     if (worker) await stopWorker(worker.child);
     rmSync(directory, { force: true, recursive: true });

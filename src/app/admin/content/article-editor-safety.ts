@@ -1,14 +1,11 @@
 // ABOUTME: Defines stable article snapshots and filters navigation clicks that can discard edits.
 // ABOUTME: Keeps dirty-state and same-document navigation decisions deterministic and testable.
 
-import type { ArticleStatus } from "@/db/repository";
-
 export type ArticleEditorSnapshotValues = {
   title: string;
   categoryId: string;
   slug: string;
   authorName: string;
-  status: ArticleStatus;
   isFaq: boolean;
   source: string;
 };
@@ -31,7 +28,6 @@ export function articleEditorSnapshot(values: ArticleEditorSnapshotValues) {
     values.categoryId,
     values.slug,
     values.authorName,
-    values.status,
     values.isFaq,
     values.source,
   ]);

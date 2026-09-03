@@ -1,9 +1,10 @@
-// ABOUTME: Edits article metadata and MDX with authenticated save, preview, and delete actions.
-// ABOUTME: Debounces safe server compilation so authors see the rendered answer while typing.
+// ABOUTME: Edits private article revisions with authenticated saves and working-state controls.
+// ABOUTME: Preserves local text and staged images across conflicts while previewing safe MDX.
 "use client";
 
 import type { FormEvent, KeyboardEvent } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import {
   useActionState,
   useCallback,
@@ -15,12 +16,10 @@ import {
 } from "react";
 
 import {
-  deleteArticleAction,
   saveArticleAction,
   type ContentActionState,
 } from "@/app/admin/content/actions";
 import { articleAssetManifestNeedsReset } from "@/app/admin/content/article-asset-state";
-import { ArticleDeletionConfirmation } from "@/app/admin/content/article-authoring-controls";
 import {
   articleEditorNavigationNeedsConfirmation,
   articleEditorSnapshot,
@@ -31,9 +30,14 @@ import {
   replaceArticleTitleHeading,
 } from "@/app/admin/content/article-source";
 import type { StageArticleImage } from "@/app/admin/content/article-visual-editor";
+import {
+  ArticleWorkflowControls,
+  type ArticleWorkflowActions,
+  type ArticleWorkflowPermissions,
+  type ArticleWorkflowSnapshot,
+} from "@/app/admin/content/article-workflow-controls";
 import { isAssetHash, isAssetManifestId } from "@/assets/identity";
 import { BrowserMdx } from "@/content/browser-mdx";
-import type { ArticleStatus } from "@/db/repository";
 
 export type ArticleEditorRecord = {
   id?: string;
@@ -41,14 +45,18 @@ export type ArticleEditorRecord = {
   title: string;
   slug: string;
   mdx: string;
-  status: ArticleStatus;
   isFaq: boolean;
   authorName: string;
 };
 
 type ArticleEditorProps = {
   article: ArticleEditorRecord;
+  canEdit: boolean;
   categories: Array<{ id: string; name: string }>;
+  isArchived?: boolean;
+  workflowActions?: ArticleWorkflowActions;
+  workflow?: ArticleWorkflowSnapshot;
+  workflowPermissions?: ArticleWorkflowPermissions;
 };
 
 type ArticlePreviewResult =
@@ -128,12 +136,19 @@ async function assetStageResponse(response: Response): Promise<AssetStageResult>
   return { manifestId: body.manifestId, hash: body.hash, url: body.url };
 }
 
-export function ArticleEditor({ article, categories }: ArticleEditorProps) {
+export function ArticleEditor({
+  article,
+  canEdit,
+  categories,
+  isArchived = false,
+  workflowActions,
+  workflow,
+  workflowPermissions,
+}: ArticleEditorProps) {
   const [title, setTitle] = useState(article.title);
   const [categoryId, setCategoryId] = useState(article.categoryId);
   const [slug, setSlug] = useState(article.slug);
   const [authorName, setAuthorName] = useState(article.authorName);
-  const [status, setStatus] = useState<ArticleStatus>(article.status);
   const [isFaq, setIsFaq] = useState(article.isFaq);
   const [source, setSource] = useState(article.mdx);
   const [editorMode, setEditorMode] = useState<"visual" | "source">(() =>
@@ -144,14 +159,12 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
   const [preview, setPreview] = useState<ArticlePreviewResult>(initialPreview);
   const [previewPending, setPreviewPending] = useState(false);
   const [assetUploadPending, setAssetUploadPending] = useState(false);
-  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState(() =>
     articleEditorSnapshot({
       title: article.title,
       categoryId: article.categoryId,
       slug: article.slug,
       authorName: article.authorName,
-      status: article.status,
       isFaq: article.isFaq,
       source: article.mdx,
     }),
@@ -161,13 +174,14 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
   const assetUploadCountRef = useRef(0);
   const assetUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
   const submittedSnapshotRef = useRef<string | null>(null);
+  const saveFeedbackRef = useRef<HTMLParagraphElement>(null);
   const navigationApprovedRef = useRef(false);
-  const [saveState, saveAction, saving] = useActionState(saveArticleAction, initialActionState);
+  const [saveState, saveAction, saving] = useActionState(saveArticleAction, {
+    ...initialActionState,
+    persistedRevisionId: workflow?.revisionId,
+    persistedRevisionNumber: workflow?.revisionNumber,
+  });
   const [, startSaving] = useTransition();
-  const [deleteState, deleteAction, deleting] = useActionState(
-    deleteArticleAction,
-    initialActionState,
-  );
 
   const currentSnapshot = useMemo(
     () =>
@@ -176,13 +190,27 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
         categoryId,
         slug,
         authorName,
-        status,
         isFaq,
         source,
       }),
-    [authorName, categoryId, isFaq, slug, source, status, title],
+    [authorName, categoryId, isFaq, slug, source, title],
   );
   const hasUnsavedChanges = currentSnapshot !== savedSnapshot;
+  const savedRevisionAheadOfPage =
+    workflow !== undefined &&
+    saveState.status === "success" &&
+    saveState.persistedRevisionNumber !== undefined &&
+    saveState.persistedRevisionNumber > workflow.revisionNumber;
+  const workingRevisionNumber = savedRevisionAheadOfPage
+    ? saveState.persistedRevisionNumber!
+    : (workflow?.revisionNumber ?? 0);
+  const workingRevisionId = savedRevisionAheadOfPage
+    ? saveState.persistedRevisionId!
+    : (workflow?.revisionId ?? "");
+  const workingReviewState = savedRevisionAheadOfPage
+    ? "editing"
+    : workflow?.reviewState;
+  const canEditRevision = canEdit && workingReviewState !== "in_review";
 
   const discardAssetManifest = useCallback((manifestId: string) => {
     void fetch("/admin/content/assets", {
@@ -233,7 +261,16 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
       setSavedSnapshot(submittedSnapshotRef.current);
       submittedSnapshotRef.current = null;
     }
-  }, [saveState.revision, saveState.status]);
+  }, [
+    saveState.revision,
+    saveState.status,
+  ]);
+
+  useEffect(() => {
+    if (saveState.status === "error" && saveState.code === "STALE_REVISION") {
+      saveFeedbackRef.current?.focus();
+    }
+  }, [saveState.code, saveState.revision, saveState.status]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) {
@@ -392,7 +429,7 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
 
   function submitArticle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (assetUploadPending) {
+    if (!canEditRevision || assetUploadPending) {
       return;
     }
     const formData = new FormData(event.currentTarget);
@@ -440,9 +477,30 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
 
   return (
     <div className="space-y-8">
+      {workflow && workflowActions && workflowPermissions ? (
+        <ArticleWorkflowControls
+          actions={workflowActions}
+          hasUnsavedChanges={hasUnsavedChanges}
+          permissions={workflowPermissions}
+          workflow={{
+            ...workflow,
+            reviewState: workingReviewState ?? workflow.reviewState,
+            revisionId: workingRevisionId,
+            revisionNumber: workingRevisionNumber,
+          }}
+        />
+      ) : null}
+
       <form onSubmit={submitArticle} className="space-y-8">
         <input type="hidden" name="mode" value={article.id ? "update" : "create"} />
         {article.id ? <input type="hidden" name="id" value={article.id} /> : null}
+        {article.id ? (
+          <input
+            type="hidden"
+            name="expectedWorkingRevisionNumber"
+            value={workingRevisionNumber}
+          />
+        ) : null}
 
         <section
           aria-labelledby="article-details-heading"
@@ -453,11 +511,11 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
               Article details
             </h2>
             <p className="mt-2 text-sm leading-6 text-muted">
-              Drafts stay private. Publishing makes the article available in its category on the
-              next reload.
+              Saving creates an immutable private revision. Review and publication are separate
+              actions, so the current live answer stays safe while you edit.
             </p>
           </div>
-          <fieldset disabled={saving} className="grid gap-5 sm:grid-cols-2">
+          <fieldset disabled={saving || !canEditRevision} className="grid gap-5 sm:grid-cols-2">
             <legend className="sr-only">Article metadata</legend>
             <div className="sm:col-span-2">
               <label htmlFor="article-title" className="block text-sm font-semibold">
@@ -559,21 +617,6 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
                 </p>
               ) : null}
             </div>
-            <div>
-              <label htmlFor="article-status" className="block text-sm font-semibold">
-                Publication state
-              </label>
-              <select
-                id="article-status"
-                name="status"
-                value={status}
-                onChange={(event) => setStatus(event.target.value as ArticleStatus)}
-                className="mt-2 min-h-11 w-full rounded-md border border-border bg-background px-3"
-              >
-                <option value="draft">Draft</option>
-                <option value="published">Published</option>
-              </select>
-            </div>
             <label className="flex min-h-11 items-center gap-3 rounded-md bg-surface-strong px-3 text-sm sm:col-span-2">
               <input
                 type="checkbox"
@@ -648,7 +691,8 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
                   <ArticleVisualEditor
                     markdown={visualSource.body}
                     onChange={(body) => setSource(joinArticleSource(title, body))}
-                    stageImage={stageImage}
+                    readOnly={!canEditRevision}
+                    stageImage={canEditRevision ? stageImage : undefined}
                   />
                 </div>
               ) : (
@@ -675,6 +719,7 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
                     maxLength={100_000}
                     rows={28}
                     spellCheck={false}
+                    readOnly={!canEditRevision}
                     value={source}
                     onChange={(event) => setSource(event.target.value)}
                     aria-invalid={Boolean(saveState.fieldErrors?.mdx)}
@@ -715,54 +760,82 @@ export function ArticleEditor({ article, categories }: ArticleEditorProps) {
           </div>
         </section>
 
-        <div className="sticky bottom-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-elevated p-3 shadow-sm">
-          <button
-            type="submit"
-            disabled={saving || assetUploadPending}
-            className="min-h-11 rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground disabled:cursor-wait disabled:opacity-60"
-          >
-            {assetUploadPending
-              ? "Uploading image…"
-              : saving
-                ? "Saving…"
-                : article.id
-                  ? "Save article"
-                  : "Create article"}
-          </button>
-          <p
-            className={`m-0 text-sm ${saveState.status === "error" ? "text-danger" : !hasUnsavedChanges && saveState.status === "success" ? "text-success" : "text-muted"}`}
-            role={saveState.status === "error" ? "alert" : "status"}
-            aria-live="polite"
-          >
-            {saving
-              ? "Saving changes…"
-              : hasUnsavedChanges
-                ? "Unsaved changes."
-                : saveState.message || "All changes are saved."}
+        {canEditRevision ? (
+          <div className="sticky bottom-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-elevated p-3 shadow-sm">
+            <button
+              type="submit"
+              disabled={saving || assetUploadPending}
+              className="min-h-11 rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground disabled:cursor-wait disabled:opacity-60"
+            >
+              {assetUploadPending
+                ? "Uploading image…"
+                : saving
+                  ? "Saving…"
+                  : article.id
+                    ? "Save draft"
+                    : "Create draft"}
+            </button>
+            <p
+              className={`m-0 text-sm ${saveState.status === "error" ? "text-danger" : !hasUnsavedChanges && saveState.status === "success" ? "text-success" : "text-muted"}`}
+              ref={saveFeedbackRef}
+              role={saveState.status === "error" ? "alert" : "status"}
+              aria-live="polite"
+              aria-atomic="true"
+              tabIndex={saveState.code === "STALE_REVISION" ? -1 : undefined}
+            >
+              {saving
+                ? "Saving a private revision…"
+                : saveState.status === "error"
+                  ? saveState.message
+                  : hasUnsavedChanges
+                    ? "Unsaved local changes."
+                    : saveState.message ||
+                    (workingRevisionNumber > 0
+                      ? `Revision ${workingRevisionNumber} is persisted.`
+                      : "This draft has not been saved yet.")}
+              {saveState.fieldErrors?.form ? ` ${saveState.fieldErrors.form}` : ""}
+              {saveState.code === "STALE_REVISION" &&
+              saveState.currentRevisionNumber &&
+              article.id ? (
+                <>
+                  <Link
+                    className="ml-2 inline-flex min-h-9 items-center rounded-md border border-border-strong px-3 text-sm font-semibold text-foreground no-underline"
+                    href={`/admin/content/articles/${article.id}/history/${saveState.currentRevisionNumber}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Compare with revision {saveState.currentRevisionNumber}
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </Link>
+                  <button
+                    className="ml-2 min-h-9 rounded-md border border-border-strong px-3 text-sm font-semibold text-foreground"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          "Reload the latest revision and discard your local changes?",
+                        )
+                      ) {
+                        window.location.reload();
+                      }
+                    }}
+                    type="button"
+                  >
+                    Reload latest and discard local changes
+                  </button>
+                </>
+              ) : null}
+            </p>
+          </div>
+        ) : (
+          <p className="m-0 rounded-md bg-surface-strong px-4 py-3 text-sm leading-6 text-muted">
+            {isArchived
+              ? "This archived article is read-only. Restore it as a private draft before editing."
+              : workingReviewState === "in_review"
+              ? "This exact revision is locked for review. Withdraw it before editing."
+              : "Your role can review this article but cannot edit its content."}
           </p>
-        </div>
+        )}
       </form>
-
-      {article.id ? (
-        <section aria-labelledby="delete-article-heading" className="rounded-lg border border-danger p-5">
-          <h2 id="delete-article-heading" className="m-0 text-lg font-semibold text-danger">
-            Delete article
-          </h2>
-          <p className="mb-4 mt-2 max-w-2xl text-sm leading-6 text-muted">
-            This permanently removes the article and its feedback and view records. This action
-            cannot be undone.
-          </p>
-          <ArticleDeletionConfirmation
-            articleId={article.id}
-            confirmationOpen={deleteConfirmationOpen}
-            deleting={deleting}
-            message={deleteState.message}
-            action={deleteAction}
-            onRequestConfirmation={() => setDeleteConfirmationOpen(true)}
-            onCancel={() => setDeleteConfirmationOpen(false)}
-          />
-        </section>
-      ) : null}
     </div>
   );
 }

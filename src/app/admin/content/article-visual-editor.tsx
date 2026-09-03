@@ -82,6 +82,7 @@ export type StageArticleImage = ImageUploadHandler;
 type ArticleVisualEditorProps = {
   markdown: string;
   onChange: (markdown: string) => void;
+  readOnly?: boolean;
   stageImage?: StageArticleImage;
 };
 
@@ -425,6 +426,7 @@ function literalPastedText(value: string) {
 export function ArticleVisualEditor({
   markdown,
   onChange,
+  readOnly = false,
   stageImage,
 }: ArticleVisualEditorProps) {
   const editorRef = useRef<MDXEditorMethods>(null);
@@ -578,14 +580,15 @@ export function ArticleVisualEditor({
 
   return (
     <div
-      onPasteCapture={handlePaste}
-      onDragOverCapture={handleDragOver}
-      onDropCapture={handleDrop}
+      onPasteCapture={readOnly ? undefined : handlePaste}
+      onDragOverCapture={readOnly ? undefined : handleDragOver}
+      onDropCapture={readOnly ? undefined : handleDrop}
     >
       <PendingImageContext.Provider value={{ pendingImageFile, setPendingImageFile }}>
         <MDXEditor
           ref={editorRef}
           markdown={markdown}
+          readOnly={readOnly}
           trim={false}
           onChange={handleChange}
           onError={({ error }) =>

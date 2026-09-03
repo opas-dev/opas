@@ -6,41 +6,30 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { scheduleEmbeddingRecovery } from "@/ai/embedding-scheduling";
+import type {
+  ArticleWorkflowActionState,
+  ContentActionState,
+} from "@/app/admin/content/article-action-contracts";
 import {
-  parseArticleRequest,
+  runArticleWorkflowAction,
+  runSaveArticleAction,
+  type ArticleActionDependencies,
+} from "@/app/admin/content/article-action-runtime";
+import {
   parseCategoryDeleteRequest,
   parseCategoryRequest,
-  parseRecordRequest,
+  type ArticleWorkflowIntent,
   type ContentFieldErrors,
 } from "@/app/admin/content/validation";
-import {
-  failedArticleAssetManifestStatus,
-  type ArticleAssetManifestStatus,
-} from "@/app/admin/content/article-asset-state";
-import {
-  getAuthoringPausedFailure,
-  type AuthoringPausedFailure,
-} from "@/authoring/failures";
+import { getAuthoringPausedFailure } from "@/authoring/failures";
 import { requireMemberCapability } from "@/auth/admin";
-import { referencedArticleAssetHashes } from "@/content/article-assets";
-import { prepareArticleEvidence } from "@/content/article-evidence";
-import {
-  ArticleMdxValidationError,
-  validateArticleMdx,
-} from "@/content/mdx-safety";
+import type { Capability } from "@/auth/capabilities";
+import type { ActiveMemberSession } from "@/auth/member-repository";
 import { getRepository } from "@/db";
 import { getCategoryAuthoringRepository } from "@/db/category-authoring-database";
 import { demoIds } from "@/db/demo";
 
-export type ContentActionState = {
-  status: "idle" | "error" | "success";
-  message: string;
-  revision: number;
-  fieldErrors?: ContentFieldErrors;
-  assetManifestStatus?: ArticleAssetManifestStatus;
-  code?: AuthoringPausedFailure["code"];
-  recordVersion?: number;
-};
+export type { ContentActionState } from "@/app/admin/content/article-action-contracts";
 
 function databaseErrorDetails(error: unknown) {
   const code =
@@ -248,140 +237,112 @@ export async function saveArticleAction(
   previousState: ContentActionState,
   formData: FormData,
 ): Promise<ContentActionState> {
-  await requireMemberCapability("draft:edit", demoIds.workspace);
-  const request = parseArticleRequest(formData);
-
-  if (!request.success) {
-    return errorState(previousState, "Review the highlighted article fields.", request.fieldErrors);
-  }
-
+  const member = await requireMemberCapability("draft:edit", demoIds.workspace);
+  let result: ContentActionState;
   try {
-    await validateArticleMdx(request.data.mdx, request.data.title);
-  } catch (error) {
-    const message =
-      error instanceof ArticleMdxValidationError
-        ? error.message
-        : "Article MDX could not be validated.";
-    return errorState(previousState, "The article contains unsafe or invalid MDX.", {
-      mdx: message,
-    });
-  }
-
-  const repository = await getRepository();
-  const categories = await repository.listCategories(demoIds.workspace);
-  const category = categories.find(
-    (candidate) => candidate.id === request.data.categoryId,
-  );
-  if (!category) {
-    return errorState(previousState, "Choose a category from this workspace.", {
-      categoryId: "That category is unavailable",
-    });
-  }
-
-  const existing =
-    request.data.mode === "update"
-      ? await repository.getArticle(demoIds.workspace, request.data.id)
-      : null;
-  if (request.data.mode === "update" && !existing) {
-    return errorState(previousState, "That article no longer exists.");
-  }
-
-  const id = existing?.id ?? `article_${crypto.randomUUID()}`;
-  const publishedAt =
-    existing?.publishedAt ?? (request.data.status === "published" ? new Date() : null);
-  const assetSelection = {
-    manifestId: request.data.assetManifestId,
-    hashes: referencedArticleAssetHashes(request.data.mdx),
-  };
-
-  try {
-    const article = {
-      id,
-      workspaceId: demoIds.workspace,
-      categoryId: request.data.categoryId,
-      slug: request.data.slug,
-      title: request.data.title,
-      mdx: request.data.mdx,
-      status: request.data.status,
-      isFaq: request.data.isFaq,
-      authorName: request.data.authorName,
-      publishedAt,
-    };
-    const evidence = await prepareArticleEvidence(article, category.slug);
-
-    if (request.data.mode === "create") {
-      await repository.createArticle(article, assetSelection, evidence);
-    } else {
-      await repository.updateArticle(article, assetSelection, evidence);
-    }
+    result = await runSaveArticleAction(
+      previousState,
+      formData,
+      await articleActionDependencies(member),
+    );
   } catch (error) {
     const paused = pausedErrorState(previousState, error);
     if (paused) return paused;
     console.error("Article persistence failed.", databaseErrorDetails(error));
-    const assetManifestStatus = failedArticleAssetManifestStatus(
-      request.data.assetManifestId,
-      error,
-    );
-
-    if (assetManifestStatus) {
-      const message =
-        assetManifestStatus === "discarded"
-          ? "The article was not saved. Its staged image session was discarded; re-upload each unsaved image still in the source or remove it before retrying."
-          : "The article was not saved and staged-image cleanup could not be confirmed. Re-upload each unsaved image still in the source or remove it before retrying.";
-      return errorState(
-        previousState,
-        message,
-        {
-          mdx:
-            "The previous image staging session cannot be reused. Re-upload or remove its unsaved images.",
-        },
-        assetManifestStatus,
-      );
-    }
-
     return errorState(
       previousState,
-      "The article could not be saved. Check its URL slug and remove any image that is no longer staged for this article.",
+      "The article could not be saved. Your local changes are still here; try again.",
     );
   }
 
-  scheduleEmbeddingRecovery();
-  revalidateContent();
-
-  if (request.data.mode === "create") {
-    redirect(`/admin/content/articles/${id}`);
+  if (result.status === "success" && result.created && result.articleId) {
+    redirect(`/admin/content/articles/${result.articleId}`);
   }
-
-  return successState(previousState, `${request.data.title} was saved.`);
+  return result;
 }
 
-export async function deleteArticleAction(
-  previousState: ContentActionState,
+async function articleActionDependencies(
+  member: ActiveMemberSession,
+): Promise<ArticleActionDependencies> {
+  return {
+    actor: { memberId: member.memberId, sessionId: member.sessionId },
+    repository: await getRepository(),
+    revalidateContent,
+    reportFailure(operation, error) {
+      console.error(
+        operation === "save"
+          ? "Article persistence failed."
+          : "Article workflow failed.",
+        databaseErrorDetails(error),
+      );
+    },
+    scheduleEvidenceRecovery: scheduleEmbeddingRecovery,
+    workspaceId: demoIds.workspace,
+  };
+}
+
+async function articleWorkflowAction(
+  capability: Capability,
+  intent: ArticleWorkflowIntent,
   formData: FormData,
-): Promise<ContentActionState> {
-  await requireMemberCapability("article:retire", demoIds.workspace);
-  const request = parseRecordRequest(formData);
-
-  if (!request.success) {
-    return errorState(previousState, "The article request is invalid.", request.fieldErrors);
-  }
-
-  const repository = await getRepository();
-  const article = await repository.getArticle(demoIds.workspace, request.data.id);
-  if (!article) {
-    return errorState(previousState, "That article no longer exists.");
-  }
-
+): Promise<ArticleWorkflowActionState> {
+  const member = await requireMemberCapability(capability, demoIds.workspace);
   try {
-    await repository.deleteArticle(demoIds.workspace, article.id);
+    return await runArticleWorkflowAction(
+      intent,
+      formData,
+      await articleActionDependencies(member),
+    );
   } catch (error) {
-    const paused = pausedErrorState(previousState, error);
-    if (paused) return paused;
-    console.error("Article deletion failed.", databaseErrorDetails(error));
-    return errorState(previousState, "The article could not be deleted. Try again.");
+    const paused = getAuthoringPausedFailure(error);
+    if (paused) {
+      return { status: "error", message: paused.message, code: paused.code };
+    }
+    console.error("Article workflow failed.", databaseErrorDetails(error));
+    return {
+      status: "error",
+      message: "The article action could not be completed. Reload and try again.",
+    };
   }
+}
 
-  scheduleEmbeddingRecovery();
-  revalidateContent();
-  redirect("/admin/content");
+export async function submitArticleForReviewAction(formData: FormData) {
+  return articleWorkflowAction("review:submit", "submit", formData);
+}
+
+export async function withdrawArticleReviewAction(formData: FormData) {
+  return articleWorkflowAction("review:submit", "withdraw", formData);
+}
+
+export async function requestArticleChangesAction(formData: FormData) {
+  return articleWorkflowAction("review:decide", "requestChanges", formData);
+}
+
+export async function approveArticleRevisionAction(formData: FormData) {
+  return articleWorkflowAction("review:decide", "approve", formData);
+}
+
+export async function approveAndPublishArticleRevisionAction(formData: FormData) {
+  await requireMemberCapability("review:decide", demoIds.workspace);
+  return articleWorkflowAction(
+    "publication:publish",
+    "approveAndPublish",
+    formData,
+  );
+}
+
+export async function publishArticleRevisionAction(formData: FormData) {
+  return articleWorkflowAction("publication:publish", "publish", formData);
+}
+
+export async function emergencyPublishArticleAction(formData: FormData) {
+  return articleWorkflowAction(
+    "publication:emergency-publish",
+    "emergencyPublish",
+    formData,
+  );
+}
+
+export async function unpublishArticleAction(formData: FormData) {
+  return articleWorkflowAction("article:retire", "unpublish", formData);
 }

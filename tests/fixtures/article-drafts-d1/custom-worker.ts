@@ -974,6 +974,10 @@ async function exerciseRecovery(environment: Environment) {
     expectedWorkingRevisionNumber: head.revisionNumber,
   });
   if (saved.status !== "saved") throw new Error("D1 recovery draft was not saved");
+  const initialLibrary = await repository.listArticleLibrary({
+    actor: { memberId: reviewerMemberId, sessionId: reviewerSessionId },
+    workspaceId,
+  });
   head = await repository.getArticleWorkingHead({
     actor: { memberId, sessionId },
     articleId: "article_d1_recovery",
@@ -1039,6 +1043,10 @@ async function exerciseRecovery(environment: Environment) {
     articleId: head.article.id,
     workspaceId,
   });
+  const disabledLibrary = await repository.listArticleLibrary({
+    actor: { memberId: reviewerMemberId, sessionId: reviewerSessionId },
+    workspaceId,
+  });
   const disabledDetail = await repository.getArticleRevisionDetail({
     actor: { memberId: reviewerMemberId, sessionId: reviewerSessionId },
     articleId: head.article.id,
@@ -1054,6 +1062,10 @@ async function exerciseRecovery(environment: Environment) {
   const roleChangedHistory = await repository.listArticleRevisionHistory({
     actor: { memberId: reviewerMemberId, sessionId: reviewerSessionId },
     articleId: head.article.id,
+    workspaceId,
+  });
+  const roleChangedLibrary = await repository.listArticleLibrary({
+    actor: { memberId: reviewerMemberId, sessionId: reviewerSessionId },
     workspaceId,
   });
   const roleChangedDetail = await repository.getArticleRevisionDetail({
@@ -1561,6 +1573,10 @@ async function exerciseRecovery(environment: Environment) {
     workspaceId,
   });
   if (!head) throw new Error("D1 archived recovery head was unavailable");
+  const archivedLibrary = await repository.listArticleLibrary({
+    actor: { memberId: reviewerMemberId, sessionId: reviewerSessionId },
+    workspaceId,
+  });
   const restoreWhileArchived = await repository.restoreRevisionAsDraft({
     actor: { memberId, sessionId },
     articleId: head.article.id,
@@ -1621,6 +1637,10 @@ async function exerciseRecovery(environment: Environment) {
     articleId: head.article.id,
     workspaceId,
   });
+  const revokedLibrary = await repository.listArticleLibrary({
+    actor: { memberId: reviewerMemberId, sessionId: reviewerSessionId },
+    workspaceId,
+  });
   const revokedDetail = await repository.getArticleRevisionDetail({
     actor: { memberId: reviewerMemberId, sessionId: reviewerSessionId },
     articleId: head.article.id,
@@ -1631,14 +1651,17 @@ async function exerciseRecovery(environment: Environment) {
   return {
     archiveRace,
     archiveRestoreRace,
+    archivedLibrary,
     archivedState,
     cappedDetail,
     detail,
     disabledDetail,
     disabledHistory,
+    disabledLibrary,
     doubleRestore,
     firstHistory,
     inReviewRestore,
+    initialLibrary,
     missingAssetRestore,
     missingCategoryRestore,
     negativeRevisionCounts: negativeRevisionCounts.results,
@@ -1649,10 +1672,12 @@ async function exerciseRecovery(environment: Environment) {
     recoveredHead,
     revokedDetail,
     revokedHistory,
+    revokedLibrary,
     restoreWhileArchived,
     restored,
     roleChangedDetail,
     roleChangedHistory,
+    roleChangedLibrary,
     restoreSlugRace,
     secondHistory,
     slugClaimsAfterArchive: slugClaimsAfterArchive.results,

@@ -270,7 +270,7 @@ test("every protected entry point requests its exact capability", () => {
       "category:manage",
       "category:manage",
       "draft:edit",
-      "article:retire",
+      "review:decide",
     ],
     "src/app/admin/content/articles/[id]/page.tsx": ["content:read"],
     "src/app/admin/content/articles/new/page.tsx": ["draft:edit"],
@@ -279,7 +279,7 @@ test("every protected entry point requests its exact capability", () => {
     "src/app/admin/content/import/page.tsx": ["import:run"],
     "src/app/admin/content/import/run/route.ts": ["import:run"],
     "src/app/admin/content/page.tsx": ["content:read"],
-    "src/app/admin/content/preview/route.ts": ["draft:edit"],
+    "src/app/admin/content/preview/route.ts": ["content:read"],
     "src/app/admin/page.tsx": ["content:read"],
     "src/app/admin/quality/export/route.ts": ["content:read"],
     "src/app/admin/quality/import/route.ts": ["quality:manage"],
@@ -316,5 +316,37 @@ test("every protected entry point requests its exact capability", () => {
     )].map((match) => match[1]);
     assert.deepEqual(actual, expected, file);
     assert.doesNotMatch(source, /requireAdmin/u, file);
+  }
+
+  const contentActions = readFileSync(
+    path.join(process.cwd(), "src/app/admin/content/actions.ts"),
+    "utf8",
+  );
+  for (const [action, capability, intent] of [
+    ["submitArticleForReviewAction", "review:submit", "submit"],
+    ["withdrawArticleReviewAction", "review:submit", "withdraw"],
+    ["requestArticleChangesAction", "review:decide", "requestChanges"],
+    ["approveArticleRevisionAction", "review:decide", "approve"],
+    [
+      "approveAndPublishArticleRevisionAction",
+      "publication:publish",
+      "approveAndPublish",
+    ],
+    ["publishArticleRevisionAction", "publication:publish", "publish"],
+    [
+      "emergencyPublishArticleAction",
+      "publication:emergency-publish",
+      "emergencyPublish",
+    ],
+    ["unpublishArticleAction", "article:retire", "unpublish"],
+  ] as const) {
+    assert.match(
+      contentActions,
+      new RegExp(
+        `export async function ${action}\\b[\\s\\S]*?articleWorkflowAction\\(\\s*"${capability}",\\s*"${intent}"`,
+        "u",
+      ),
+      action,
+    );
   }
 });

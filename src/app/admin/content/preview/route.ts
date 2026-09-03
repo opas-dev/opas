@@ -11,7 +11,7 @@ import { demoIds } from "@/db/demo";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  await requireMemberCapability("draft:edit", demoIds.workspace);
+  await requireMemberCapability("content:read", demoIds.workspace);
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > 120_000) {

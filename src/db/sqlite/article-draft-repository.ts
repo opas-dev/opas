@@ -34,6 +34,8 @@ import {
   type ArchiveArticleRequest,
   type ArticleDraftRepository,
   type ArticleDraftRepositoryOptions,
+  type ArticleLibraryItem,
+  type ArticleLibraryRequest,
   type ArticleRevisionDetail,
   type ArticleRevisionDetailRequest,
   type ArticleRevisionHistoryPage,
@@ -843,6 +845,83 @@ async function readAuthorizedWorkingHead(
     revisionNumber: first.revisionNumber,
     submittedByMemberId: first.submittedByMemberId,
   };
+}
+
+async function listAuthorizedArticleLibrary(
+  database: SqliteDatabase,
+  request: ArticleLibraryRequest,
+  checkedAt: Date,
+): Promise<readonly ArticleLibraryItem[]> {
+  return executable(database)
+    .select({
+      archivedAt: articleHeads.archivedAt,
+      articleId: articleHeads.articleId,
+      categoryId: articleRevisions.categoryId,
+      categoryName: categories.name,
+      categorySlug: categories.slug,
+      createdByMemberId: articleRevisions.createdByMemberId,
+      publicStatus: articles.status,
+      publishedRevisionId: articleHeads.publishedRevisionId,
+      publishedRevisionNumber: articleHeads.publishedRevisionNumber,
+      reviewState: articleHeads.reviewState,
+      slug: articleRevisions.slug,
+      submittedByMemberId: articleHeads.submittedByMemberId,
+      title: articleRevisions.title,
+      updatedAt: articleRevisions.createdAt,
+      workingRevisionId: articleHeads.workingRevisionId,
+      workingRevisionNumber: articleHeads.workingRevisionNumber,
+    })
+    .from(articleHeads)
+    .innerJoin(
+      articleRevisions,
+      and(
+        eq(articleRevisions.workspaceId, articleHeads.workspaceId),
+        eq(articleRevisions.articleId, articleHeads.articleId),
+        eq(articleRevisions.id, articleHeads.workingRevisionId),
+        eq(articleRevisions.revisionNumber, articleHeads.workingRevisionNumber),
+      ),
+    )
+    .innerJoin(
+      articles,
+      and(
+        eq(articles.workspaceId, articleHeads.workspaceId),
+        eq(articles.id, articleHeads.articleId),
+      ),
+    )
+    .innerJoin(
+      categories,
+      and(
+        eq(categories.workspaceId, articleRevisions.workspaceId),
+        eq(categories.id, articleRevisions.categoryId),
+      ),
+    )
+    .innerJoin(
+      workspaceMembers,
+      and(
+        eq(workspaceMembers.workspaceId, articleHeads.workspaceId),
+        eq(workspaceMembers.id, request.actor.memberId),
+        eq(workspaceMembers.status, "active"),
+        inArray(workspaceMembers.role, ["administrator", "editor", "reviewer"]),
+      ),
+    )
+    .innerJoin(
+      adminSessions,
+      and(
+        eq(adminSessions.workspaceId, workspaceMembers.workspaceId),
+        eq(adminSessions.memberId, workspaceMembers.id),
+        eq(adminSessions.id, request.actor.sessionId),
+        isNull(adminSessions.revokedAt),
+        gt(adminSessions.expiresAt, checkedAt),
+      ),
+    )
+    .where(eq(articleHeads.workspaceId, request.workspaceId))
+    .orderBy(
+      asc(categories.position),
+      asc(categories.id),
+      asc(articleRevisions.position),
+      asc(articleHeads.articleId),
+    )
+    .execute();
 }
 
 async function listAuthorizedRevisionHistory(
@@ -2780,6 +2859,10 @@ export function createSqliteArticleDraftRepository(
 
     async getArticleRevisionDetail(request) {
       return readAuthorizedRevisionDetail(database, request, draftRepositoryClock(options));
+    },
+
+    async listArticleLibrary(request) {
+      return listAuthorizedArticleLibrary(database, request, draftRepositoryClock(options));
     },
 
     async listArticleRevisionHistory(request) {

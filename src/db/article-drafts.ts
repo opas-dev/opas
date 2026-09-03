@@ -189,6 +189,30 @@ export type ArticleWorkingHeadRequest = Readonly<{
   workspaceId: string;
 }>;
 
+export type ArticleLibraryRequest = Readonly<{
+  actor: DraftActor;
+  workspaceId: string;
+}>;
+
+export type ArticleLibraryItem = Readonly<{
+  archivedAt: Date | null;
+  articleId: string;
+  categoryId: string;
+  categoryName: string;
+  categorySlug: string;
+  createdByMemberId: string | null;
+  publicStatus: "draft" | "published";
+  publishedRevisionId: string | null;
+  publishedRevisionNumber: number | null;
+  reviewState: ArticleReviewState;
+  slug: string;
+  submittedByMemberId: string | null;
+  title: string;
+  updatedAt: Date;
+  workingRevisionId: string;
+  workingRevisionNumber: number;
+}>;
+
 export type ArticleWorkingHead = Readonly<{
   article: DraftArticleValues;
   archivedAt: Date | null;
@@ -320,6 +344,7 @@ export type ArticleDraftRepository = {
   getArticleRevisionDetail(
     request: ArticleRevisionDetailRequest,
   ): Promise<ArticleRevisionDetail | null>;
+  listArticleLibrary(request: ArticleLibraryRequest): Promise<readonly ArticleLibraryItem[]>;
   listArticleRevisionHistory(
     request: ArticleRevisionHistoryRequest,
   ): Promise<ArticleRevisionHistoryPage | null>;

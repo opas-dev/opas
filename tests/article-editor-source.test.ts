@@ -162,7 +162,6 @@ test("derives unsaved state from the complete saved article snapshot", () => {
     categoryId: "category_1",
     slug: "reset-your-password",
     authorName: "OPAS",
-    status: "draft" as const,
     isFaq: false,
     source: supportedSource,
   };
@@ -174,7 +173,6 @@ test("derives unsaved state from the complete saved article snapshot", () => {
     { ...values, categoryId: "category_2" },
     { ...values, slug: "recover-account-access" },
     { ...values, authorName: "Support" },
-    { ...values, status: "published" as const },
     { ...values, isFaq: true },
     { ...values, source: `${supportedSource}\nMore guidance.\n` },
   ]) {
