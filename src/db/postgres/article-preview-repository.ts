@@ -1,18 +1,21 @@
 // ABOUTME: Persists revision-pinned preview grants on PostgreSQL and Neon.
-// ABOUTME: Serializes rotations on the article head and rechecks every anonymous read.
+// ABOUTME: Serializes rotations and rechecks anonymous and authenticated reads.
 
 import { sql, type SQL } from "drizzle-orm";
 import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
-import type {
-  ActiveArticlePreviewGrant,
-  ActiveArticlePreviewLookup,
-  ArticlePreviewAsset,
-  ArticlePreviewRepository,
-  ArticlePreviewRevision,
-  ArticlePreviewRevocationRequest,
-  ArticlePreviewRotationRequest,
+import {
+  articlePreviewRepositoryClock,
+  type ActiveArticlePreviewGrant,
+  type ActiveArticlePreviewLookup,
+  type ArticlePreviewAsset,
+  type ArticlePreviewRepository,
+  type ArticlePreviewRepositoryOptions,
+  type ArticlePreviewRevision,
+  type ArticlePreviewRevocationRequest,
+  type ArticlePreviewRotationRequest,
+  type ManagedArticlePreviewLookup,
 } from "@/auth/article-preview";
 import {
   AuthoringPausedError,
@@ -251,6 +254,47 @@ async function findActiveGrant(
   return rows[0] ? grant(rows[0]) : null;
 }
 
+async function findManagedGrant(
+  database: PostgresDatabase,
+  request: ManagedArticlePreviewLookup,
+  checkedAt: Date,
+) {
+  const rows = resultRows<DatabaseRow>(
+    await database.execute(sql`
+      select ${activeGrantSelect()}
+      from article_preview_grants preview_grant
+      inner join article_revisions revision
+        on revision.workspace_id = preview_grant.workspace_id
+       and revision.id = preview_grant.revision_id
+      inner join article_heads head
+        on head.workspace_id = revision.workspace_id
+       and head.article_id = revision.article_id
+      inner join workspace_members creator
+        on creator.workspace_id = preview_grant.workspace_id
+       and creator.id = preview_grant.created_by_member_id
+      inner join workspace_members actor
+        on actor.workspace_id = preview_grant.workspace_id
+       and actor.id = ${request.actor.memberId}
+      inner join admin_sessions actor_session
+        on actor_session.workspace_id = actor.workspace_id
+       and actor_session.member_id = actor.id
+       and actor_session.id = ${request.actor.sessionId}
+      where preview_grant.workspace_id = ${request.actor.workspaceId}
+        and preview_grant.revision_id = ${request.revisionId}
+        and preview_grant.revoked_at is null
+        and preview_grant.expires_at > ${checkedAt}
+        and creator.status = 'active'
+        and head.archived_at is null
+        and actor.status = 'active'
+        and actor.role in ('administrator', 'editor', 'reviewer')
+        and actor_session.revoked_at is null
+        and actor_session.expires_at > ${checkedAt}
+      limit 1
+    `),
+  );
+  return rows[0] ? grant(rows[0]) : null;
+}
+
 async function readActiveRevision(
   database: PostgresDatabase,
   request: ActiveArticlePreviewLookup,
@@ -399,10 +443,18 @@ async function authoringIsOpen(database: PostgresDatabase, workspaceId: string) 
 
 export function createPostgresArticlePreviewRepository(
   database: PostgresDatabase,
+  options?: ArticlePreviewRepositoryOptions,
 ): ArticlePreviewRepository {
   return withAuthoringErrorBoundary<ArticlePreviewRepository>({
     findActiveGrant(request) {
       return findActiveGrant(database, request);
+    },
+    findManagedGrant(request) {
+      return findManagedGrant(
+        database,
+        request,
+        articlePreviewRepositoryClock(options),
+      );
     },
     readActiveAsset(request) {
       return readActiveAsset(database, request);

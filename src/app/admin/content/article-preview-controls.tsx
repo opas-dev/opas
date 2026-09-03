@@ -8,11 +8,14 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import type {
   ArticlePreviewAction,
   ArticlePreviewActionState,
+  ArticlePreviewAvailability,
   ArticlePreviewShare,
+  ArticlePreviewStatusActionState,
 } from "@/app/admin/content/article-preview-contracts";
 
 type ArticlePreviewControlsProps = Readonly<{
   createPreview: ArticlePreviewAction;
+  initialStatus: ArticlePreviewStatusActionState;
   revisionId: string;
   revisionNumber: number;
   revokePreview: ArticlePreviewAction;
@@ -64,7 +67,7 @@ export function ArticlePreviewLink({ link }: Readonly<{ link: ArticlePreviewShar
           value={link.url}
         />
         <button
-          className="min-h-11 shrink-0 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground"
+          className="min-h-11 shrink-0 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 active:opacity-80 motion-reduce:transition-none"
           onClick={copyLink}
           type="button"
         >
@@ -93,25 +96,40 @@ export function ArticlePreviewLink({ link }: Readonly<{ link: ArticlePreviewShar
 
 export function ArticlePreviewControls({
   createPreview,
+  initialStatus,
   revisionId,
   revisionNumber,
   revokePreview,
 }: ArticlePreviewControlsProps) {
   const [pending, startTransition] = useTransition();
   const submitting = useRef(false);
+  const [pendingOperation, setPendingOperation] = useState<"create" | "revoke" | null>(
+    null,
+  );
   const [result, setResult] = useState<ArticlePreviewActionState | null>(null);
+  const [preview, setPreview] = useState<ArticlePreviewAvailability | null>(
+    initialStatus.status === "success" ? initialStatus.preview : null,
+  );
 
-  function submit(action: ArticlePreviewAction) {
+  const activeGrant = preview?.availability === "active" ? preview.grant : null;
+
+  function submit(
+    action: ArticlePreviewAction,
+    operation: "create" | "revoke",
+  ) {
     return (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (submitting.current) return;
       submitting.current = true;
+      setPendingOperation(operation);
       setResult(null);
       const formData = new FormData(event.currentTarget);
 
       startTransition(async () => {
         try {
-          setResult(await action(formData));
+          const nextResult = await action(formData);
+          setResult(nextResult);
+          if (nextResult.preview) setPreview(nextResult.preview);
         } catch {
           setResult({
             message: "The preview request could not be completed. Reload and try again.",
@@ -119,6 +137,7 @@ export function ArticlePreviewControls({
           });
         } finally {
           submitting.current = false;
+          setPendingOperation(null);
         }
       });
     };
@@ -126,6 +145,7 @@ export function ArticlePreviewControls({
 
   return (
     <section
+      aria-busy={pending}
       aria-labelledby="article-preview-controls-heading"
       className="rounded-lg border border-border bg-surface p-5 sm:p-6"
     >
@@ -143,14 +163,62 @@ export function ArticlePreviewControls({
         another link for this revision immediately replaces the previous one.
       </p>
 
-      <form className="mt-5" onSubmit={submit(createPreview)}>
+      <div className="mt-5 border-y border-border py-4">
+        {activeGrant ? (
+          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <p className="m-0 text-sm font-semibold text-foreground">Active link</p>
+              <p className="mb-0 mt-1 text-xs leading-5 text-muted">
+                Expires{" "}
+                <time dateTime={activeGrant.expiresAt}>
+                  {dateFormatter.format(new Date(activeGrant.expiresAt))} UTC
+                </time>
+              </p>
+              <p className="mb-0 mt-1 max-w-[62ch] text-xs leading-5 text-muted">
+                Its address is hidden after creation. Rotate it to get a new link.
+              </p>
+            </div>
+            <form onSubmit={submit(revokePreview, "revoke")}>
+              <input name="grantId" type="hidden" value={activeGrant.grantId} />
+              <input name="revisionId" type="hidden" value={revisionId} />
+              <button
+                className="min-h-11 rounded-md border border-danger bg-background px-4 text-sm font-semibold text-danger transition-colors hover:bg-danger hover:text-danger-foreground active:opacity-80 disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
+                disabled={pending}
+                type="submit"
+              >
+                {pendingOperation === "revoke" ? "Revoking…" : "Revoke link"}
+              </button>
+            </form>
+          </div>
+        ) : preview?.availability === "inactive" ? (
+          <p className="m-0 text-sm leading-6 text-muted">
+            No active preview link for this revision.
+          </p>
+        ) : (
+          <p className="m-0 text-sm leading-6 text-danger" role="alert">
+            {initialStatus.status === "error"
+              ? initialStatus.message
+              : "Preview status is unavailable. Reload to try again."}
+          </p>
+        )}
+      </div>
+
+      <form className="mt-5" onSubmit={submit(createPreview, "create")}>
         <input name="revisionId" type="hidden" value={revisionId} />
         <button
-          className="min-h-11 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:cursor-wait disabled:opacity-60"
+          className="min-h-11 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 active:opacity-80 disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
           disabled={pending}
           type="submit"
         >
-          {pending ? "Creating…" : result?.link ? "Rotate link" : "Create share link"}
+          {pendingOperation === "create"
+            ? activeGrant
+              ? "Rotating…"
+              : "Creating…"
+            : activeGrant
+              ? "Rotate link"
+              : preview?.availability === "inactive"
+                ? "Create share link"
+                : "Create or rotate link"}
         </button>
       </form>
 
@@ -168,21 +236,7 @@ export function ArticlePreviewControls({
           >
             {result.message}
           </p>
-          {result.link ? (
-            <>
-              <ArticlePreviewLink link={result.link} />
-              <form onSubmit={submit(revokePreview)}>
-                <input name="grantId" type="hidden" value={result.link.grantId} />
-                <button
-                  className="min-h-11 rounded-md border border-danger bg-background px-4 text-sm font-semibold text-danger disabled:cursor-wait disabled:opacity-60"
-                  disabled={pending}
-                  type="submit"
-                >
-                  {pending ? "Revoking…" : "Revoke link"}
-                </button>
-              </form>
-            </>
-          ) : null}
+          {result.link ? <ArticlePreviewLink link={result.link} /> : null}
         </div>
       ) : null}
     </section>

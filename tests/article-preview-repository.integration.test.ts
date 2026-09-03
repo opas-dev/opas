@@ -51,10 +51,13 @@ type Harness = Readonly<{
   activeGrantIds(): Promise<readonly string[]>;
   archive(): Promise<void>;
   close(): Promise<void>;
-  disableCreator(): Promise<void>;
   grantRows(): Promise<readonly Record<string, unknown>[]>;
+  insertExpiredGrant(createdAt: Date, expiresAt: Date): Promise<void>;
   pause(paused: boolean): Promise<void>;
   repository: ArticlePreviewRepository;
+  setCreatorEnabled(enabled: boolean): Promise<void>;
+  setManagementTime(checkedAt: Date): void;
+  setSessionRevoked(revoked: boolean): Promise<void>;
 }>;
 
 function fixedBytes(offset: number) {
@@ -132,6 +135,41 @@ async function exerciseRepository(name: string, harness: Harness) {
     new RegExp(`/preview/assets/${assetHash}`, "u"),
   );
 
+  harness.setManagementTime(new Date(rotationTime.getTime() + 1_000));
+  assert.equal(
+    (await harness.repository.findManagedGrant({ actor, revisionId }))?.grantId,
+    winner.grantId,
+  );
+  assert.equal(
+    await harness.repository.findManagedGrant({
+      actor: { ...actor, sessionId: "T".repeat(43) },
+      revisionId,
+    }),
+    null,
+  );
+  assert.equal(
+    await harness.repository.findManagedGrant({
+      actor,
+      revisionId: "revision_preview_5",
+    }),
+    null,
+  );
+  await harness.setSessionRevoked(true);
+  assert.equal(
+    await harness.repository.findManagedGrant({ actor, revisionId }),
+    null,
+  );
+  await harness.setSessionRevoked(false);
+  await harness.setCreatorEnabled(false);
+  assert.equal(
+    await harness.repository.findManagedGrant({ actor, revisionId }),
+    null,
+  );
+  await harness.setCreatorEnabled(true);
+  assert.equal(
+    (await harness.repository.findManagedGrant({ actor, revisionId }))?.grantId,
+    winner.grantId,
+  );
   const previewAsset = await resolveArticlePreviewAsset(
     winner.token,
     assetHash,
@@ -181,6 +219,18 @@ async function exerciseRepository(name: string, harness: Harness) {
     concurrentRevocations.filter(({ outcome }) => outcome === "rejected").length,
     1,
   );
+
+  const expiredAt = new Date(rotationTime.getTime() + 3_500);
+  await harness.insertExpiredGrant(
+    new Date(expiredAt.getTime() - 7 * 24 * 60 * 60 * 1_000),
+    expiredAt,
+  );
+  harness.setManagementTime(new Date(expiredAt.getTime() + 1));
+  assert.equal(
+    await harness.repository.findManagedGrant({ actor, revisionId }),
+    null,
+  );
+  harness.setManagementTime(new Date(rotationTime.getTime() + 1_000));
 
   const pausedTarget = await issue(
     harness.repository,
@@ -233,7 +283,7 @@ async function exerciseRepository(name: string, harness: Harness) {
     null,
   );
 
-  await harness.disableCreator();
+  await harness.setCreatorEnabled(false);
   assert.equal(
     await harness.repository.findActiveGrant({
       checkedAt: new Date(rotationTime.getTime() + 6_000),
@@ -362,6 +412,10 @@ async function sqliteHarness(): Promise<Harness> {
   migrateSqlite(database, { migrationsFolder: migrations.sqlite });
   seedSqlite(client);
   for (const statement of sqliteTeamAuthoringGuardStatements) client.exec(statement);
+  let managementTime = new Date(startedAt.getTime() + 500);
+  const repository = createSqliteArticlePreviewRepository(database, {
+    clock: () => managementTime,
+  });
   return {
     async activeGrantIds() {
       return (
@@ -383,15 +437,31 @@ async function sqliteHarness(): Promise<Harness> {
     async close() {
       client.close();
     },
-    async disableCreator() {
+    async setCreatorEnabled(enabled) {
       client
-        .prepare("update workspace_members set status = 'disabled' where id = ?")
-        .run(creatorId);
+        .prepare("update workspace_members set status = ? where id = ?")
+        .run(enabled ? "active" : "disabled", creatorId);
     },
     async grantRows() {
       return client
         .prepare("select * from article_preview_grants order by id")
         .all() as Record<string, unknown>[];
+    },
+    async insertExpiredGrant(createdAt, expiresAt) {
+      client
+        .prepare(
+          `insert into article_preview_grants (
+             id, workspace_id, revision_id, created_by_member_id, expires_at, created_at
+           ) values (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "E".repeat(43),
+          workspaceId,
+          revisionId,
+          creatorId,
+          expiresAt.getTime(),
+          createdAt.getTime(),
+        );
     },
     async pause(paused) {
       client
@@ -402,7 +472,15 @@ async function sqliteHarness(): Promise<Harness> {
         )
         .run(paused ? 1 : 0, startedAt.getTime() + 3_000, workspaceId);
     },
-    repository: createSqliteArticlePreviewRepository(database),
+    repository,
+    setManagementTime(checkedAt) {
+      managementTime = checkedAt;
+    },
+    async setSessionRevoked(revoked) {
+      client
+        .prepare("update admin_sessions set revoked_at = ? where id = ?")
+        .run(revoked ? startedAt.getTime() + 900 : null, sessionId);
+    },
   };
 }
 
@@ -512,6 +590,10 @@ async function postgresHarness(): Promise<Harness> {
   for (const statement of postgresTeamAuthoringGuardStatements) {
     await pool.query(statement);
   }
+  let managementTime = new Date(startedAt.getTime() + 500);
+  const repository = createPostgresArticlePreviewRepository(database, {
+    clock: () => managementTime,
+  });
   return {
     async activeGrantIds() {
       const result = await pool.query<{ id: string }>(
@@ -532,14 +614,23 @@ async function postgresHarness(): Promise<Harness> {
       await pool.end();
       await container.stop();
     },
-    async disableCreator() {
-      await pool.query("update workspace_members set status = 'disabled' where id = $1", [
+    async setCreatorEnabled(enabled) {
+      await pool.query("update workspace_members set status = $1 where id = $2", [
+        enabled ? "active" : "disabled",
         creatorId,
       ]);
     },
     async grantRows() {
       return (await pool.query("select * from article_preview_grants order by id"))
         .rows as Record<string, unknown>[];
+    },
+    async insertExpiredGrant(createdAt, expiresAt) {
+      await pool.query(
+        `insert into article_preview_grants (
+           id, workspace_id, revision_id, created_by_member_id, expires_at, created_at
+         ) values ($1, $2, $3, $4, $5, $6)`,
+        ["E".repeat(43), workspaceId, revisionId, creatorId, expiresAt, createdAt],
+      );
     },
     async pause(paused) {
       await pool.query(
@@ -549,7 +640,16 @@ async function postgresHarness(): Promise<Harness> {
         [paused, new Date(startedAt.getTime() + 3_000), workspaceId],
       );
     },
-    repository: createPostgresArticlePreviewRepository(database),
+    repository,
+    setManagementTime(checkedAt) {
+      managementTime = checkedAt;
+    },
+    async setSessionRevoked(revoked) {
+      await pool.query("update admin_sessions set revoked_at = $1 where id = $2", [
+        revoked ? new Date(startedAt.getTime() + 900) : null,
+        sessionId,
+      ]);
+    },
   };
 }
 

@@ -108,6 +108,13 @@ function memoryRepository() {
         ? active
         : null;
     },
+    async findManagedGrant(request) {
+      return available &&
+        active?.workspaceId === request.actor.workspaceId &&
+        active.revisionId === request.revisionId
+        ? active
+        : null;
+    },
     async readActiveAsset(request) {
       const record = await repository.findActiveGrant(request);
       return record && request.hash === assetHash ? asset(record) : null;

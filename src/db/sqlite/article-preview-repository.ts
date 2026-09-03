@@ -1,18 +1,21 @@
 // ABOUTME: Persists revision-pinned preview grants on SQLite and Cloudflare D1.
-// ABOUTME: Uses atomic batches for rotation and exact grant checks for every private read.
+// ABOUTME: Uses atomic batches for rotation and exact checks for every private read.
 
 import { sql, type SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { AnyD1Database, DrizzleD1Database } from "drizzle-orm/d1";
 
-import type {
-  ActiveArticlePreviewGrant,
-  ActiveArticlePreviewLookup,
-  ArticlePreviewAsset,
-  ArticlePreviewRepository,
-  ArticlePreviewRevision,
-  ArticlePreviewRevocationRequest,
-  ArticlePreviewRotationRequest,
+import {
+  articlePreviewRepositoryClock,
+  type ActiveArticlePreviewGrant,
+  type ActiveArticlePreviewLookup,
+  type ArticlePreviewAsset,
+  type ArticlePreviewRepository,
+  type ArticlePreviewRepositoryOptions,
+  type ArticlePreviewRevision,
+  type ArticlePreviewRevocationRequest,
+  type ArticlePreviewRotationRequest,
+  type ManagedArticlePreviewLookup,
 } from "@/auth/article-preview";
 import {
   AuthoringPausedError,
@@ -294,6 +297,45 @@ async function findActiveGrant(
   return records[0] ? grant(records[0]) : null;
 }
 
+async function findManagedGrant(
+  database: SqliteDatabase,
+  request: ManagedArticlePreviewLookup,
+  checkedAt: Date,
+) {
+  const records = await rows(database, sql`
+    select ${activeGrantSelect()}
+    from article_preview_grants preview_grant
+    inner join article_revisions revision
+      on revision.workspace_id = preview_grant.workspace_id
+     and revision.id = preview_grant.revision_id
+    inner join article_heads head
+      on head.workspace_id = revision.workspace_id
+     and head.article_id = revision.article_id
+    inner join workspace_members creator
+      on creator.workspace_id = preview_grant.workspace_id
+     and creator.id = preview_grant.created_by_member_id
+    inner join workspace_members actor
+      on actor.workspace_id = preview_grant.workspace_id
+     and actor.id = ${request.actor.memberId}
+    inner join admin_sessions actor_session
+      on actor_session.workspace_id = actor.workspace_id
+     and actor_session.member_id = actor.id
+     and actor_session.id = ${request.actor.sessionId}
+    where preview_grant.workspace_id = ${request.actor.workspaceId}
+      and preview_grant.revision_id = ${request.revisionId}
+      and preview_grant.revoked_at is null
+      and preview_grant.expires_at > ${checkedAt.getTime()}
+      and creator.status = 'active'
+      and head.archived_at is null
+      and actor.status = 'active'
+      and actor.role in ('administrator', 'editor', 'reviewer')
+      and actor_session.revoked_at is null
+      and actor_session.expires_at > ${checkedAt.getTime()}
+    limit 1
+  `);
+  return records[0] ? grant(records[0]) : null;
+}
+
 async function readActiveRevision(
   database: SqliteDatabase,
   request: ActiveArticlePreviewLookup,
@@ -436,10 +478,18 @@ async function authoringIsOpen(database: SqliteDatabase, workspaceId: string) {
 
 export function createSqliteArticlePreviewRepository(
   database: SqliteDatabase,
+  options?: ArticlePreviewRepositoryOptions,
 ): ArticlePreviewRepository {
   return withAuthoringErrorBoundary<ArticlePreviewRepository>({
     findActiveGrant(request) {
       return findActiveGrant(database, request);
+    },
+    findManagedGrant(request) {
+      return findManagedGrant(
+        database,
+        request,
+        articlePreviewRepositoryClock(options),
+      );
     },
     readActiveAsset(request) {
       return readActiveAsset(database, request);

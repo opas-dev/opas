@@ -24,6 +24,11 @@ type ExerciseResult = Readonly<{
   collision: Readonly<{ code: string; outcome: string }>;
   concurrentRevocations: readonly string[];
   firstStillValidAfterCollision: boolean;
+  managedActiveId: string | null;
+  managedAfterExpiry: boolean;
+  managedAfterRevocation: boolean;
+  managedWrongRevision: boolean;
+  managedWrongSession: boolean;
   pausedCode: string | null;
   resolutionCount: number;
   resolvedAssetHash: string | null;
@@ -211,6 +216,11 @@ test("native D1 signed previews keep one exact active grant", { timeout: 120_000
       code: "GRANT_ID_COLLISION_EXHAUSTED",
     });
     assert.equal(body.firstStillValidAfterCollision, true);
+    assert.equal(body.managedActiveId, body.activeId);
+    assert.equal(body.managedAfterExpiry, false);
+    assert.equal(body.managedAfterRevocation, false);
+    assert.equal(body.managedWrongRevision, false);
+    assert.equal(body.managedWrongSession, false);
     assert.deepEqual(body.rotations, ["issued", "issued"]);
     assert.equal(
       body.concurrentRevocations.filter((outcome) => outcome === "revoked").length,

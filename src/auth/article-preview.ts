@@ -96,6 +96,11 @@ export type ArticlePreviewRevocationRequest = Readonly<{
   revokedAt: Date;
 }>;
 
+export type ManagedArticlePreviewLookup = Readonly<{
+  actor: PreviewActor;
+  revisionId: string;
+}>;
+
 export type ArticlePreviewRevocationOutcome =
   | Readonly<{ outcome: "revoked" }>
   | Readonly<{
@@ -117,6 +122,9 @@ export interface ArticlePreviewRepository {
   findActiveGrant(
     request: ActiveArticlePreviewLookup,
   ): Promise<ActiveArticlePreviewGrant | null>;
+  findManagedGrant(
+    request: ManagedArticlePreviewLookup,
+  ): Promise<ActiveArticlePreviewGrant | null>;
   readActiveAsset(
     request: ActiveArticlePreviewAssetLookup,
   ): Promise<ArticlePreviewAsset | null>;
@@ -135,6 +143,10 @@ export type ArticlePreviewDependencies = Readonly<{
   clock?: () => Date;
   randomBytes?: RandomBytes;
   repository: ArticlePreviewRepository;
+}>;
+
+export type ArticlePreviewRepositoryOptions = Readonly<{
+  clock?: () => Date;
 }>;
 
 export type ArticlePreviewIssueOutcome =
@@ -156,6 +168,16 @@ export type ArticlePreviewIssueOutcome =
     }>;
 
 const maximumGrantIdAttempts = 3;
+
+export function articlePreviewRepositoryClock(
+  options?: ArticlePreviewRepositoryOptions,
+) {
+  const checkedAt = options?.clock?.() ?? new Date();
+  if (!Number.isFinite(checkedAt.getTime())) {
+    throw new Error("Article preview time must be valid.");
+  }
+  return checkedAt;
+}
 
 function grantExpiry(createdAt: Date) {
   const milliseconds = createdAt.getTime();
@@ -240,6 +262,14 @@ export async function issueArticlePreview(
     code: "GRANT_ID_COLLISION_EXHAUSTED",
     outcome: "rejected",
   });
+}
+
+export function readManagedArticlePreviewGrant(
+  actor: PreviewActor,
+  revisionId: string,
+  dependencies: Pick<ArticlePreviewDependencies, "repository">,
+) {
+  return dependencies.repository.findManagedGrant({ actor, revisionId });
 }
 
 export async function exchangeArticlePreview(

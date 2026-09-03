@@ -1,9 +1,15 @@
 // ABOUTME: Parses preview-management forms and maps grant outcomes to bounded feedback.
 // ABOUTME: Returns each signed fragment link only from its explicit creation request.
 
-import type { ArticlePreviewActionState } from "@/app/admin/content/article-preview-contracts";
+import type {
+  ArticlePreviewActionState,
+  ArticlePreviewAvailability,
+  ArticlePreviewGrantStatus,
+  ArticlePreviewStatusActionState,
+} from "@/app/admin/content/article-preview-contracts";
 import {
   issueArticlePreview,
+  readManagedArticlePreviewGrant,
   resolveArticlePreview,
   revokeArticlePreview,
   type ArticlePreviewRepository,
@@ -27,30 +33,45 @@ function state(
   status: ArticlePreviewActionState["status"],
   message: string,
   link?: ArticlePreviewActionState["link"],
+  preview?: ArticlePreviewActionState["preview"],
 ): ArticlePreviewActionState {
-  return Object.freeze({ status, message, ...(link ? { link } : {}) });
+  return Object.freeze({
+    status,
+    message,
+    ...(link ? { link } : {}),
+    ...(preview ? { preview } : {}),
+  });
 }
 
 export function unavailableArticlePreviewAction() {
   return state("error", "Preview sharing is unavailable. Try again.");
 }
 
-function exactTextField(formData: FormData, name: string) {
+function exactTextFields(formData: FormData, names: readonly string[]) {
   const keys = [...formData.keys()];
   if (
-    keys.length !== 1 ||
-    keys[0] !== name ||
-    formData.getAll(name).length !== 1
+    keys.length !== names.length ||
+    keys.some((key) => !names.includes(key)) ||
+    names.some((name) => formData.getAll(name).length !== 1)
   ) {
     return null;
   }
-  const value = formData.get(name);
-  if (typeof value !== "string") return null;
-  try {
-    return assertAuthIdentifier(value);
-  } catch {
-    return null;
+
+  const fields: Record<string, string> = {};
+  for (const name of names) {
+    const value = formData.get(name);
+    if (typeof value !== "string") return null;
+    try {
+      fields[name] = assertAuthIdentifier(value);
+    } catch {
+      return null;
+    }
   }
+  return fields;
+}
+
+function exactTextField(formData: FormData, name: string) {
+  return exactTextFields(formData, [name])?.[name] ?? null;
 }
 
 function issueFailure(code: string) {
@@ -67,6 +88,66 @@ function issueFailure(code: string) {
     return state("error", "A secure preview link could not be created. Try again.");
   }
   return unavailableArticlePreviewAction();
+}
+
+function grantStatus(
+  grant: Readonly<{ expiresAt: Date; grantId: string; revisionId: string }>,
+): ArticlePreviewGrantStatus {
+  return Object.freeze({
+    expiresAt: grant.expiresAt.toISOString(),
+    grantId: grant.grantId,
+    revisionId: grant.revisionId,
+  });
+}
+
+async function managedAvailability(
+  revisionId: string,
+  dependencies: ArticlePreviewActionDependencies,
+): Promise<ArticlePreviewAvailability | undefined> {
+  try {
+    const activeGrant = await readManagedArticlePreviewGrant(
+      dependencies.actor,
+      revisionId,
+      dependencies,
+    );
+    return activeGrant
+      ? Object.freeze({
+          availability: "active" as const,
+          grant: grantStatus(activeGrant),
+        })
+      : Object.freeze({ availability: "inactive" as const });
+  } catch {
+    return undefined;
+  }
+}
+
+export function unavailableArticlePreviewStatusAction(): ArticlePreviewStatusActionState {
+  return Object.freeze({
+    message: "Preview status is unavailable. Reload to try again.",
+    status: "error",
+  });
+}
+
+export async function runReadArticlePreviewStatusAction(
+  formData: FormData,
+  dependencies: ArticlePreviewActionDependencies,
+): Promise<ArticlePreviewStatusActionState> {
+  const revisionId = exactTextField(formData, "revisionId");
+  if (!revisionId) {
+    return Object.freeze({
+      message: "The preview status request is invalid. Reload and try again.",
+      status: "error",
+    });
+  }
+
+  const preview = await managedAvailability(revisionId, dependencies);
+  if (preview) {
+    return Object.freeze({
+      preview,
+      status: "success" as const,
+    });
+  }
+  return unavailableArticlePreviewStatusAction();
 }
 
 async function revokeUnsharedGrant(
@@ -124,20 +205,22 @@ export async function runCreateArticlePreviewAction(
       return state(
         "error",
         "Another preview replaced this link. Create a fresh link to share.",
+        undefined,
+        await managedAvailability(revisionId, dependencies),
       );
     }
 
     url.hash = issued.token;
+    const currentGrant = grantStatus(issued);
     return state(
       "success",
       "Preview link created. Copy it now; OPAS cannot show it again.",
       Object.freeze({
-        expiresAt: issued.expiresAt.toISOString(),
+        ...currentGrant,
         externalImageHosts: preview.remoteImageHosts,
-        grantId: issued.grantId,
-        revisionId: issued.revisionId,
         url: url.href,
       }),
+      Object.freeze({ availability: "active", grant: currentGrant }),
     );
   } catch (error) {
     const paused = getAuthoringPausedFailure(error);
@@ -151,22 +234,32 @@ export async function runRevokeArticlePreviewAction(
   formData: FormData,
   dependencies: ArticlePreviewActionDependencies,
 ): Promise<ArticlePreviewActionState> {
-  const grantId = exactTextField(formData, "grantId");
-  if (!grantId) {
+  const fields = exactTextFields(formData, ["grantId", "revisionId"]);
+  if (!fields) {
     return state("error", "The preview request is invalid. Reload and try again.");
   }
 
   try {
     const outcome = await revokeArticlePreview(
       dependencies.actor,
-      grantId,
+      fields.grantId,
       dependencies,
     );
     if (outcome.outcome === "revoked") {
-      return state("success", "Preview link revoked.");
+      return state(
+        "success",
+        "Preview link revoked.",
+        undefined,
+        await managedAvailability(fields.revisionId, dependencies),
+      );
     }
     return outcome.code === "GRANT_NOT_FOUND"
-      ? state("error", "That preview is already unavailable.")
+      ? state(
+          "error",
+          "That preview was already unavailable. The current status is shown above.",
+          undefined,
+          await managedAvailability(fields.revisionId, dependencies),
+        )
       : state("error", "Your session can no longer revoke previews. Sign in again.");
   } catch {
     return unavailableArticlePreviewAction();

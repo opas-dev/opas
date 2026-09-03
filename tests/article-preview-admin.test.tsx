@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   runCreateArticlePreviewAction,
+  runReadArticlePreviewStatusAction,
   runRevokeArticlePreviewAction,
   type ArticlePreviewActionDependencies,
 } from "@/app/admin/content/article-preview-action-runtime";
@@ -83,6 +84,12 @@ function repositoryHarness() {
     async findActiveGrant(request) {
       return active?.grantId === request.grantId &&
         active.workspaceId === request.workspaceId &&
+        active.revisionId === request.revisionId
+        ? active
+        : null;
+    },
+    async findManagedGrant(request) {
+      return active?.workspaceId === request.actor.workspaceId &&
         active.revisionId === request.revisionId
         ? active
         : null;
@@ -162,6 +169,68 @@ test("preview creation returns one exact fragment link with external-host disclo
   assert.equal(result.link.revisionId, "revision_preview_4");
   assert.deepEqual(result.link.externalImageHosts, ["images.example.test"]);
   assert.equal(JSON.stringify(harness.rotations).includes(url.hash.slice(1)), false);
+  assert.deepEqual(result.preview, {
+    availability: "active",
+    grant: {
+      expiresAt: "2026-09-10T12:00:00.000Z",
+      grantId: result.link.grantId,
+      revisionId: "revision_preview_4",
+    },
+  });
+});
+
+test("preview status returns only safe metadata for the exact managed revision", async () => {
+  const harness = repositoryHarness();
+  const create = new FormData();
+  create.set("revisionId", "revision_preview_4");
+  const issued = await runCreateArticlePreviewAction(
+    create,
+    dependencies(harness.repository),
+  );
+  assert.ok(issued.link);
+
+  const status = new FormData();
+  status.set("revisionId", "revision_preview_4");
+  const active = await runReadArticlePreviewStatusAction(
+    status,
+    dependencies(harness.repository),
+  );
+  assert.deepEqual(active, {
+    preview: {
+      availability: "active",
+      grant: {
+        expiresAt: "2026-09-10T12:00:00.000Z",
+        grantId: issued.link.grantId,
+        revisionId: "revision_preview_4",
+      },
+    },
+    status: "success",
+  });
+  assert.equal(JSON.stringify(active).includes(new URL(issued.link.url).hash.slice(1)), false);
+
+  const otherRevision = new FormData();
+  otherRevision.set("revisionId", "revision_preview_5");
+  assert.deepEqual(
+    await runReadArticlePreviewStatusAction(
+      otherRevision,
+      dependencies(harness.repository),
+    ),
+    { preview: { availability: "inactive" }, status: "success" },
+  );
+
+  const invalid = new FormData();
+  invalid.set("revisionId", "revision_preview_4");
+  invalid.set("workspaceId", actor.workspaceId);
+  assert.deepEqual(
+    await runReadArticlePreviewStatusAction(
+      invalid,
+      dependencies(harness.repository),
+    ),
+    {
+      message: "The preview status request is invalid. Reload and try again.",
+      status: "error",
+    },
+  );
 });
 
 test("invalid forms and a paused authoring fence return no preview link", async () => {
@@ -225,13 +294,57 @@ test("revocation remains available while preview creation is paused", async () =
 
   const revoke = new FormData();
   revoke.set("grantId", issued.link.grantId);
+  revoke.set("revisionId", issued.link.revisionId);
   assert.deepEqual(
     await runRevokeArticlePreviewAction(revoke, dependencies(harness.repository)),
-    { message: "Preview link revoked.", status: "success" },
+    {
+      message: "Preview link revoked.",
+      preview: { availability: "inactive" },
+      status: "success",
+    },
   );
   assert.deepEqual(
     await runRevokeArticlePreviewAction(revoke, dependencies(harness.repository)),
-    { message: "That preview is already unavailable.", status: "error" },
+    {
+      message: "That preview was already unavailable. The current status is shown above.",
+      preview: { availability: "inactive" },
+      status: "error",
+    },
+  );
+});
+
+test("revoking a stale grant reports the concurrently rotated active link", async () => {
+  const harness = repositoryHarness();
+  const create = new FormData();
+  create.set("revisionId", "revision_preview_4");
+  const first = await runCreateArticlePreviewAction(
+    create,
+    dependencies(harness.repository),
+  );
+  assert.ok(first.link);
+  const second = await runCreateArticlePreviewAction(create, {
+    ...dependencies(harness.repository),
+    randomBytes: fixedBytes(1),
+  });
+  assert.ok(second.link);
+
+  const revoke = new FormData();
+  revoke.set("grantId", first.link.grantId);
+  revoke.set("revisionId", first.link.revisionId);
+  assert.deepEqual(
+    await runRevokeArticlePreviewAction(revoke, dependencies(harness.repository)),
+    {
+      message: "That preview was already unavailable. The current status is shown above.",
+      preview: {
+        availability: "active",
+        grant: {
+          expiresAt: "2026-09-10T12:00:00.000Z",
+          grantId: second.link.grantId,
+          revisionId: "revision_preview_4",
+        },
+      },
+      status: "error",
+    },
   );
 });
 
@@ -246,6 +359,7 @@ test("a post-issue failure revokes the unshared grant and returns no bearer", as
   );
   assert.deepEqual(result, {
     message: "Another preview replaced this link. Create a fresh link to share.",
+    preview: { availability: "inactive" },
     status: "error",
   });
   assert.equal(harness.hasActiveGrant(), false);
@@ -259,6 +373,10 @@ test("the sharing UI explains rotation, expiry, and remote image privacy", () =>
   const controls = renderToStaticMarkup(
     <ArticlePreviewControls
       createPreview={createPreview}
+      initialStatus={{
+        preview: { availability: "inactive" },
+        status: "success",
+      }}
       revisionId="revision_preview_4"
       revisionNumber={4}
       revokePreview={revokePreview}
@@ -267,6 +385,32 @@ test("the sharing UI explains rotation, expiry, and remote image privacy", () =>
   assert.match(controls, /Share revision 4/u);
   assert.match(controls, /expires after seven days/u);
   assert.match(controls, /immediately replaces the previous one/u);
+  assert.match(controls, /No active preview link for this revision/u);
+
+  const activeControls = renderToStaticMarkup(
+    <ArticlePreviewControls
+      createPreview={createPreview}
+      initialStatus={{
+        preview: {
+          availability: "active",
+          grant: {
+            expiresAt: "2026-09-10T12:00:00.000Z",
+            grantId: "grant_preview",
+            revisionId: "revision_preview_4",
+          },
+        },
+        status: "success",
+      }}
+      revisionId="revision_preview_4"
+      revisionNumber={4}
+      revokePreview={revokePreview}
+    />,
+  );
+  assert.match(activeControls, /Active link/u);
+  assert.match(activeControls, /Revoke link/u);
+  assert.match(activeControls, /Rotate link/u);
+  assert.match(activeControls, /Its address is hidden after creation/u);
+  assert.doesNotMatch(activeControls, /signed-canary|eyJhbGciOi/u);
 
   const link = renderToStaticMarkup(
     <ArticlePreviewLink
@@ -294,6 +438,7 @@ test("management entry points require preview capability and keep links transien
     "utf8",
   );
   assert.match(actions, /requireMemberCapability\("preview:manage"/u);
+  assert.match(actions, /readArticlePreviewStatusAction/u);
 
   const controls = readFileSync(
     path.join(

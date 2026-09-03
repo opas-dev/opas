@@ -1,13 +1,18 @@
-// ABOUTME: Exposes capability-checked Server Actions for preview creation and revocation.
+// ABOUTME: Exposes capability-checked Server Actions for preview status and management.
 // ABOUTME: Resolves deployment configuration and database identity only on the server.
 "use server";
 
 import {
   runCreateArticlePreviewAction,
+  runReadArticlePreviewStatusAction,
   runRevokeArticlePreviewAction,
   unavailableArticlePreviewAction,
+  unavailableArticlePreviewStatusAction,
 } from "@/app/admin/content/article-preview-action-runtime";
-import type { ArticlePreviewActionState } from "@/app/admin/content/article-preview-contracts";
+import type {
+  ArticlePreviewActionState,
+  ArticlePreviewStatusActionState,
+} from "@/app/admin/content/article-preview-contracts";
 import { requireMemberCapability } from "@/auth/admin";
 import { getArticlePreviewRepository } from "@/auth/article-preview-database";
 import { getArticlePreviewConfiguration } from "@/auth/preview-config";
@@ -36,6 +41,20 @@ export async function createArticlePreviewAction(
     );
   } catch {
     return unavailableArticlePreviewAction();
+  }
+}
+
+export async function readArticlePreviewStatusAction(
+  formData: FormData,
+): Promise<ArticlePreviewStatusActionState> {
+  const actor = await requireMemberCapability("preview:manage", demoIds.workspace);
+  try {
+    return await runReadArticlePreviewStatusAction(
+      formData,
+      await actionDependencies(actor),
+    );
+  } catch {
+    return unavailableArticlePreviewStatusAction();
   }
 }
 

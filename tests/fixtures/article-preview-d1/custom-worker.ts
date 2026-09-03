@@ -194,8 +194,10 @@ async function createHttpPreview(environment: Environment, request: Request) {
 }
 
 async function exercise(environment: Environment) {
+  let managementTime = new Date(timestamp + 500);
   const repository = createSqliteArticlePreviewRepository(
     drizzle(environment.DB, { schema }),
+    { clock: () => managementTime },
   );
   const first = await issueAt(repository, new Date(timestamp), 1);
   if (first.outcome !== "issued") throw new Error(first.code);
@@ -240,6 +242,30 @@ async function exercise(environment: Environment) {
   const valid = resolutionResults.filter(
     (result) => result?.document !== null && result?.document !== undefined,
   );
+  managementTime = new Date(timestamp + 3_000);
+  const managedActiveId = (
+    await repository.findManagedGrant({ actor, revisionId })
+  )?.grantId ?? null;
+  const managedWrongSession =
+    (await repository.findManagedGrant({
+      actor: { ...actor, sessionId: "T".repeat(43) },
+      revisionId,
+    })) !== null;
+  const managedWrongRevision =
+    (await repository.findManagedGrant({
+      actor,
+      revisionId: "revision_d1_preview_5",
+    })) !== null;
+  await environment.DB
+    .prepare("update admin_sessions set revoked_at = ? where id = ?")
+    .bind(timestamp + 3_100, sessionId)
+    .run();
+  const managedAfterRevocation =
+    (await repository.findManagedGrant({ actor, revisionId })) !== null;
+  await environment.DB
+    .prepare("update admin_sessions set revoked_at = null where id = ?")
+    .bind(sessionId)
+    .run();
   const stored = await environment.DB
     .prepare("select * from article_preview_grants order by id")
     .all();
@@ -253,6 +279,26 @@ async function exercise(environment: Environment) {
       repository,
     }),
   ]);
+  const expiredAt = timestamp + 3_500;
+  await environment.DB
+    .prepare(
+      `insert into article_preview_grants (
+         id, workspace_id, revision_id, created_by_member_id, expires_at, created_at
+       ) values (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      "E".repeat(43),
+      workspaceId,
+      revisionId,
+      creatorId,
+      expiredAt,
+      expiredAt - 7 * 24 * 60 * 60 * 1_000,
+    )
+    .run();
+  managementTime = new Date(expiredAt + 1);
+  const managedAfterExpiry =
+    (await repository.findManagedGrant({ actor, revisionId })) !== null;
+  managementTime = new Date(timestamp + 3_000);
   const pausedTarget = await issueAt(
     repository,
     new Date(timestamp + 3_750),
@@ -317,6 +363,11 @@ async function exercise(environment: Environment) {
     collision,
     concurrentRevocations: concurrentRevocations.map(({ outcome }) => outcome),
     firstStillValidAfterCollision,
+    managedActiveId,
+    managedAfterExpiry,
+    managedAfterRevocation,
+    managedWrongRevision,
+    managedWrongSession,
     pausedCode,
     resolutionCount: valid.length,
     resolvedAssetHash: valid[0]?.asset?.hash ?? null,
