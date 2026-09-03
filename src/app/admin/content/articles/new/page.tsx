@@ -31,7 +31,7 @@ export default async function NewArticlePage() {
     <main className="min-h-screen bg-background text-foreground">
       <AdminHeader member={admin} active="content" />
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
-        <Link href="/admin/content" className="text-sm font-semibold text-primary underline-offset-4 hover:underline">
+        <Link href="/admin/content" className="inline-flex min-h-11 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline">
           ← Back to content
         </Link>
         <div className="mb-10 mt-6 max-w-3xl">

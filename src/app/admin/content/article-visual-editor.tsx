@@ -464,10 +464,34 @@ export function ArticleVisualEditor({
   stageImage,
 }: ArticleVisualEditorProps) {
   const editorRef = useRef<MDXEditorMethods>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const acceptedMarkdownRef = useRef(markdown);
   const [editorIssue, setEditorIssue] = useState<string | null>(null);
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const container = editorContainerRef.current;
+    if (!container) return;
+
+    const labelTableButtons = () => {
+      for (const button of container.querySelectorAll<HTMLButtonElement>(
+        "tbody th[rowspan][data-tool-cell] > button:not([aria-label])",
+      )) {
+        button.setAttribute("aria-label", "Add table column");
+      }
+      for (const button of container.querySelectorAll<HTMLButtonElement>(
+        "tfoot th[colspan][data-tool-cell] > button:not([aria-label])",
+      )) {
+        button.setAttribute("aria-label", "Add table row");
+      }
+    };
+
+    labelTableButtons();
+    const observer = new MutationObserver(labelTableButtons);
+    observer.observe(container, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
 
   const rememberEditorFocus = useCallback((event: FocusEvent<HTMLDivElement>) => {
     if (
@@ -630,6 +654,7 @@ export function ArticleVisualEditor({
 
   return (
     <div
+      ref={editorContainerRef}
       onFocusCapture={rememberEditorFocus}
       onPasteCapture={readOnly ? undefined : handlePaste}
       onDragOverCapture={readOnly ? undefined : handleDragOver}

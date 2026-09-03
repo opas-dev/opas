@@ -1,6 +1,7 @@
 // ABOUTME: Verifies the lossless boundary between stored article MDX and Visual editor bodies.
 // ABOUTME: Locks title ownership, supported syntax, and shared URL policy before UI integration.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -45,6 +46,17 @@ plain-text recovery code
 
 ![Settings screen](/api/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)
 `;
+
+test("labels the visual editor's table insertion controls", () => {
+  const source = readFileSync(
+    "src/app/admin/content/article-visual-editor.tsx",
+    "utf8",
+  );
+
+  assert.match(source, /"Add table column"/u);
+  assert.match(source, /"Add table row"/u);
+  assert.match(source, /new MutationObserver\(labelTableButtons\)/u);
+});
 
 test("serializes title text as one safe level-one Markdown heading", () => {
   assert.equal(

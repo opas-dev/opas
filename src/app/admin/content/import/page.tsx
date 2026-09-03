@@ -24,7 +24,7 @@ export default async function ImportContentPage() {
       <div className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6 sm:py-14">
         <Link
           href="/admin/content"
-          className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
+          className="inline-flex min-h-11 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline"
         >
           ← Back to content
         </Link>

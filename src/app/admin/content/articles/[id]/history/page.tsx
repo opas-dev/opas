@@ -71,7 +71,7 @@ export default async function ArticleHistoryPage({
     <main className="min-h-screen bg-background text-foreground">
       <AdminHeader member={admin} active="content" />
       <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
-        <Link href="/admin/content" className="text-sm font-semibold text-primary underline-offset-4 hover:underline">
+        <Link href="/admin/content" className="inline-flex min-h-11 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline">
           ← Content library
         </Link>
         <div className="mt-6 max-w-3xl">

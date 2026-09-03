@@ -117,7 +117,7 @@ export default async function ArticleRevisionPage({
       <AdminHeader member={admin} active="content" />
       <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
         <Link
-          className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
+          className="inline-flex min-h-11 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline"
           href={`/admin/content/articles/${id}/history`}
         >
           ← Article history
