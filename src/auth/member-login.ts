@@ -99,6 +99,10 @@ function boundedPassword(value: string): Readonly<{
   }
 }
 
+function isServerActionMetadata(fieldName: string): boolean {
+  return fieldName.startsWith("$ACTION_");
+}
+
 export function readMemberLoginForm(formData: FormData): MemberLoginForm {
   const emailValues = formData.getAll("email");
   const passwordValues = formData.getAll("password");
@@ -112,8 +116,10 @@ export function readMemberLoginForm(formData: FormData): MemberLoginForm {
       : "";
   const parsedPassword = boundedPassword(password);
   const parsedEmail = email.length <= 1_280 ? normalizedEmail(email) : null;
+  const credentialKeys = keys.filter((key) => !isServerActionMetadata(key));
   const hasExactFields =
-    keys.length === 2 && keys.every((key) => key === "email" || key === "password");
+    credentialKeys.length === 2 &&
+    credentialKeys.every((key) => key === "email" || key === "password");
   const valid =
     hasExactFields &&
     parsedEmail !== null &&

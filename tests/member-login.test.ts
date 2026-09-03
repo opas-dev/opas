@@ -195,6 +195,15 @@ test("login forms normalize identity and retain only bounded password input", ()
   assert.equal(oversizedEmail.valid, false);
   assert.equal(oversizedEmail.normalizedEmail, null);
   assert.notEqual(oversizedEmail.admissionEmail, rawOversizedEmail);
+
+  const serverActionForm = new FormData();
+  serverActionForm.append("$ACTION_REF_1", "");
+  serverActionForm.append("$ACTION_1:0", "");
+  serverActionForm.append("$ACTION_1:1", "");
+  serverActionForm.append("$ACTION_KEY", "");
+  serverActionForm.append("email", "member@example.com");
+  serverActionForm.append("password", validPassword);
+  assert.equal(readMemberLoginForm(serverActionForm).valid, true);
 });
 
 test("an admitted valid credential creates a CAS-bound eight-hour session", async () => {
