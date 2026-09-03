@@ -490,7 +490,10 @@ async function startPreviewServer(
             `<main id="main-content"><h1>${category.name}</h1>${
               projection ? `<a href="${articlePath}">${escapedTitle}</a>` : ""
             }</main>`,
-            { headers: { "content-type": "text/html; charset=utf-8" } },
+            {
+              headers: { "content-type": "text/html; charset=utf-8" },
+              status: projection ? 200 : 404,
+            },
           ),
         );
       }

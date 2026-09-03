@@ -127,6 +127,14 @@ test("reduces native D1 proxy configuration to the validated account and binding
   assert.equal(config.account_id, target.accountId);
   assert.equal(config.name, target.workerName);
   assert.deepEqual(config.d1_databases, target.config.d1_databases);
+  assert.deepEqual(cloudflareDataConfig(target, true).d1_databases, [
+    {
+      binding: "DB",
+      database_name: target.databaseName,
+      database_id: target.databaseId,
+      migrations_dir: "drizzle/sqlite",
+    },
+  ]);
   assert.equal("vars" in config, false);
   assert.equal("secrets" in config, false);
   assert.equal("main" in config, false);

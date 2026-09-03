@@ -549,7 +549,7 @@ export async function requireTeamAuthoringArchiveAbsent({
     assets,
   ] = await Promise.all([
     fetchSurface(fetcher, `${origin}${path}`),
-    readText(fetcher, `${origin}/${article.categorySlug}`, "ARCHIVE_CATEGORY_FAILED"),
+    fetchSurface(fetcher, `${origin}/${article.categorySlug}`),
     readText(fetcher, `${origin}/`, "ARCHIVE_HOME_FAILED"),
     readText(
       fetcher,
@@ -588,6 +588,10 @@ export async function requireTeamAuthoringArchiveAbsent({
     await responseBytes(markdown),
     "ARCHIVE_MARKDOWN_UTF8",
   );
+  const categoryBody = responseText(
+    await responseBytes(categoryPage),
+    "ARCHIVE_CATEGORY_UTF8",
+  );
   requireSurface(articlePage.status === 404, "ARCHIVE_ARTICLE_REMAINED");
   requireSurface(
     canonicalJsonLd(articleBody).length === 0,
@@ -595,7 +599,10 @@ export async function requireTeamAuthoringArchiveAbsent({
   );
   requireSurface(markdown.status === 404, "ARCHIVE_MARKDOWN_REMAINED");
   requireSurface(
-    excludesArticle(canonicalTeamAuthoringMain(categoryPage.text), article),
+    categoryPage.status === 404 ||
+      (categoryPage.status >= 200 &&
+        categoryPage.status < 300 &&
+        excludesArticle(canonicalTeamAuthoringMain(categoryBody), article)),
     "ARCHIVE_CATEGORY_ARTICLE_REMAINED",
   );
   requireSurface(

@@ -58,14 +58,16 @@ export function assertCloudflareDataEnvironment(
   }
 }
 
-export function cloudflareDataConfig(target: CloudflareTarget) {
-  const database = (target.config.d1_databases as readonly Record<
+export function cloudflareDataConfig(target: CloudflareTarget, remote = false) {
+  const sourceDatabase = (target.config.d1_databases as readonly Record<
     string,
     unknown
   >[])[0];
-  if (!database) {
+  if (!sourceDatabase) {
     throw new Error("The validated Cloudflare target has no D1 binding.");
   }
+  const database = { ...sourceDatabase };
+  if (remote) delete database.preview_database_id;
   return {
     account_id: target.accountId,
     compatibility_date: target.config.compatibility_date,
@@ -75,13 +77,13 @@ export function cloudflareDataConfig(target: CloudflareTarget) {
   };
 }
 
-function prepareDataBinding(target: CloudflareTarget) {
+function prepareDataBinding(target: CloudflareTarget, remote: boolean) {
   const directory = mkdtempSync(join(tmpdir(), "opas-d1-data-"));
   const configPath = join(directory, "wrangler.json");
   chmodSync(directory, 0o700);
   writeFileSync(
     configPath,
-    `${JSON.stringify(cloudflareDataConfig(target))}\n`,
+    `${JSON.stringify(cloudflareDataConfig(target, remote))}\n`,
     { mode: 0o600 },
   );
   return {
@@ -95,7 +97,7 @@ export async function openCloudflareDataTarget(
   remote: boolean,
 ) {
   assertCloudflareDataEnvironment(target.accountId);
-  const binding = prepareDataBinding(target);
+  const binding = prepareDataBinding(target, remote);
   try {
     const platform = await getPlatformProxy<{ DB: D1Database }>({
       configPath: binding.configPath,
