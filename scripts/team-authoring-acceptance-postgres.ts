@@ -414,6 +414,11 @@ export function openNodePostgresAcceptanceBoundary(
   origin: string,
 ): OpenPostgresAcceptanceBoundary {
   const pool = new Pool({ connectionString, max: 16 });
+  const unexpectedPoolErrors: Error[] = [];
+  let closing = false;
+  pool.on("error", (error) => {
+    if (!closing) unexpectedPoolErrors.push(error);
+  });
   const database: NodePgDatabase<typeof schema> = createPostgresDatabase(pool, { schema });
   const query: Query = async (text, values = []) =>
     (await pool.query(text, [...values])).rows as QueryRow[];
@@ -434,7 +439,12 @@ export function openNodePostgresAcceptanceBoundary(
   };
   return Object.freeze({
     boundary: createBoundary(database, query, transact, databaseName, origin),
-    close: () => pool.end(),
+    async close() {
+      const unexpectedPoolError = unexpectedPoolErrors[0];
+      closing = true;
+      await pool.end();
+      if (unexpectedPoolError) throw unexpectedPoolError;
+    },
   });
 }
 
