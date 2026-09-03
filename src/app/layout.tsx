@@ -38,7 +38,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
   const identity = publicSiteIdentity();
 
   return (
-    <html data-public-profile={identity.id} lang="en">
+    <html data-public-profile={identity.id} data-scroll-behavior="smooth" lang="en">
       <head>
         <style id="opas-runtime-theme">{themeStylesheet(theme.config)}</style>
       </head>
