@@ -103,9 +103,12 @@ test("gives the dedicated embed route one runtime frame-parent policy", async ()
     const createHeaders = nextConfig.headers;
     if (!createHeaders) assert.fail("Next.js must define route headers");
     const rules = await createHeaders();
-    const globalRule = rules.find(({ source }) => source === "/:path*");
+    const globalRule = rules.find(
+      ({ source }) => source === "/:path((?!preview$)(?!preview/).*)",
+    );
     const globalCspRule = rules.find(
-      ({ source }) => source === "/:path((?!embed$).*)",
+      ({ source }) =>
+        source === "/:path((?!embed$)(?!preview$)(?!preview/).*)",
     );
     const embedRule = rules.find(({ source }) => source === "/embed");
     assert.ok(globalRule);
