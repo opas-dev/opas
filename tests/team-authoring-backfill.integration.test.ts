@@ -16,7 +16,11 @@ import { createPostgresTeamAuthoringBackfillStore } from "@/db/postgres/team-aut
 import * as postgresSchema from "@/db/schema/postgres";
 import * as sqliteSchema from "@/db/schema/sqlite";
 import { createSqliteTeamAuthoringBackfillStore } from "@/db/sqlite/team-authoring-backfill";
-import { runTeamAuthoringBackfill } from "@/db/team-authoring-backfill";
+import {
+  createTeamAuthoringBaseline,
+  runTeamAuthoringBackfill,
+  teamAuthoringBackfillProjectionHash,
+} from "@/db/team-authoring-backfill";
 import { readPostgresAuthoringBackfillState } from "../scripts/authoring-control";
 
 const sqliteMigrationDirectory = path.join(process.cwd(), "drizzle/sqlite");
@@ -165,6 +169,236 @@ function insertSqliteAdministrator(database: Database.Database) {
     )
     .run("A".repeat(43), "a".repeat(43), fixedTime, fixedTime);
 }
+
+type RevisionAwareFixtureState =
+  | "complete"
+  | "missing-head"
+  | "missing-revision"
+  | "missing-working-claim";
+
+function revisionAwareFixture(key: string) {
+  const workspaceId = `workspace_${key}`;
+  const articleId = `article_${key}`;
+  const categoryId = `category_${key}`;
+  const memberId = `member_${key}`;
+  const revisionId = `revision_${key}`;
+  return {
+    article: {
+      articleId,
+      assetIdsAndHashes: [],
+      authorName: "OPAS",
+      categoryId,
+      categoryName: "Guides",
+      categorySlug: "guides",
+      isFaq: false,
+      mdx: `# ${key}`,
+      position: 0,
+      slug: `article-${key}`,
+      status: "draft" as const,
+      title: key,
+      workspaceId,
+    },
+    articleId,
+    categoryId,
+    memberId,
+    revisionId,
+    workspaceId,
+  };
+}
+
+async function seedSqliteCompletedRevisionAwareWorkspace(
+  database: Database.Database,
+  key: string,
+  state: RevisionAwareFixtureState,
+) {
+  const fixture = revisionAwareFixture(key);
+  const baseline = await createTeamAuthoringBaseline(fixture.article);
+  const projectionHash = await teamAuthoringBackfillProjectionHash(
+    fixture.workspaceId,
+    [],
+  );
+  database
+    .prepare(
+      `insert into workspaces (id, slug, name, created_at, updated_at)
+       values (?, ?, ?, ?, ?)`,
+    )
+    .run(fixture.workspaceId, key, key, fixedTime, fixedTime);
+  database
+    .prepare(
+      `insert into categories
+         (id, workspace_id, slug, name, description, position, created_at, updated_at)
+       values (?, ?, 'guides', 'Guides', null, 0, ?, ?)`,
+    )
+    .run(fixture.categoryId, fixture.workspaceId, fixedTime, fixedTime);
+  database
+    .prepare(
+      `insert into workspace_members (
+         id, workspace_id, normalized_email, display_name, role, status,
+         password_salt, password_digest, password_iterations,
+         created_by_member_id, created_at, updated_at
+       ) values (?, ?, ?, ?, 'administrator', 'active', ?, ?, 600000, null, ?, ?)`,
+    )
+    .run(
+      fixture.memberId,
+      fixture.workspaceId,
+      `${key}@example.test`,
+      key,
+      "A".repeat(43),
+      "a".repeat(43),
+      fixedTime,
+      fixedTime,
+    );
+  database
+    .prepare(
+      `insert into workspace_authoring_migrations
+         (workspace_id, version, article_count, projection_hash, completed_at)
+       values (?, 1, 0, ?, ?)`,
+    )
+    .run(fixture.workspaceId, projectionHash, fixedTime);
+  database
+    .prepare(
+      `insert into articles (
+         id, workspace_id, category_id, slug, title, mdx, content_hash, status,
+         is_faq, author_name, position, published_at, created_at, updated_at
+       ) values (?, ?, ?, ?, ?, ?, null, 'draft', 0, 'OPAS', 0, null, ?, ?)`,
+    )
+    .run(
+      fixture.articleId,
+      fixture.workspaceId,
+      fixture.categoryId,
+      fixture.article.slug,
+      fixture.article.title,
+      fixture.article.mdx,
+      fixedTime,
+      fixedTime,
+    );
+  database
+    .prepare(
+      `insert into article_revisions (
+         id, workspace_id, article_id, revision_number, category_id, category_slug,
+         category_name, slug, title, mdx, is_faq, author_name, position,
+         revision_hash, change_kind, created_by_member_id, created_by_system_label,
+         change_summary, created_at, restored_from_revision_id
+       ) values (?, ?, ?, 1, ?, 'guides', 'Guides', ?, ?, ?, 0, 'OPAS', 0,
+                 ?, 'manual', ?, null, null, ?, null)`,
+    )
+    .run(
+      fixture.revisionId,
+      fixture.workspaceId,
+      fixture.articleId,
+      fixture.categoryId,
+      fixture.article.slug,
+      fixture.article.title,
+      fixture.article.mdx,
+      baseline.revisionHash,
+      fixture.memberId,
+      fixedTime,
+    );
+  database
+    .prepare(
+      `insert into article_slug_claims
+         (workspace_id, normalized_slug, article_id, working_claim, article_row_claim)
+       values (?, ?, ?, 1, 1)`,
+    )
+    .run(fixture.workspaceId, fixture.article.slug, fixture.articleId);
+  database
+    .prepare(
+      `insert into article_heads (
+         article_id, workspace_id, working_revision_id, working_revision_number,
+         working_slug, published_revision_id, published_revision_number,
+         review_state, submitted_by_member_id, archived_at, archived_by_member_id
+       ) values (?, ?, ?, 1, ?, null, null, 'editing', null, null, null)`,
+    )
+    .run(
+      fixture.articleId,
+      fixture.workspaceId,
+      fixture.revisionId,
+      fixture.article.slug,
+    );
+
+  if (state === "missing-head") {
+    database.prepare("delete from article_heads where article_id = ?").run(fixture.articleId);
+  } else if (state === "missing-revision") {
+    database.pragma("foreign_keys = OFF");
+    database.prepare("delete from article_revisions where id = ?").run(fixture.revisionId);
+    database.pragma("foreign_keys = ON");
+  } else if (state === "missing-working-claim") {
+    database
+      .prepare(
+        `update article_slug_claims set working_claim = 0
+         where workspace_id = ? and normalized_slug = ?`,
+      )
+      .run(fixture.workspaceId, fixture.article.slug);
+  }
+  database
+    .prepare(
+      `update workspace_authoring_controls
+       set writes_paused = 1, generation = generation + 1, changed_at = ?
+       where workspace_id = ?`,
+    )
+    .run(fixedTime + 1, fixture.workspaceId);
+  return fixture;
+}
+
+test("SQLite installs guards after a completed empty ledger gains revision-aware content", async () => {
+  const database = new Database(":memory:");
+  database.pragma("foreign_keys = ON");
+  try {
+    applySqliteBeforeTeamAuthoring(database);
+    applySqliteTeamAuthoringSchema(database);
+    await seedSqliteCompletedRevisionAwareWorkspace(database, "complete", "complete");
+    const store = createSqliteTeamAuthoringBackfillStore(database);
+
+    assert.deepEqual(await store.assertAllWorkspacesPaused(), {
+      completedWorkspaceIds: ["workspace_complete"],
+      guardsInstalled: false,
+      pendingArticleCount: 0,
+      workspaceIds: ["workspace_complete"],
+    });
+    const result = await runTeamAuthoringBackfill(store);
+    assert.equal(result.alreadyCompleted, false);
+    assert.equal(result.articleCount, 0);
+    assert.equal(result.chunkCount, 0);
+    assert.deepEqual(
+      database.prepare("select id, change_kind from article_revisions").all(),
+      [{ change_kind: "manual", id: "revision_complete" }],
+    );
+    assert.equal((await store.assertAllWorkspacesPaused()).guardsInstalled, true);
+    assert.equal((await runTeamAuthoringBackfill(store)).alreadyCompleted, true);
+  } finally {
+    database.close();
+  }
+});
+
+test("SQLite rejects completed ledgers with incomplete revision-aware content", async () => {
+  const database = new Database(":memory:");
+  database.pragma("foreign_keys = ON");
+  try {
+    applySqliteBeforeTeamAuthoring(database);
+    applySqliteTeamAuthoringSchema(database);
+    await seedSqliteCompletedRevisionAwareWorkspace(database, "missing-head", "missing-head");
+    await seedSqliteCompletedRevisionAwareWorkspace(
+      database,
+      "missing-revision",
+      "missing-revision",
+    );
+    await seedSqliteCompletedRevisionAwareWorkspace(
+      database,
+      "missing-working-claim",
+      "missing-working-claim",
+    );
+    const store = createSqliteTeamAuthoringBackfillStore(database);
+
+    assert.equal((await store.assertAllWorkspacesPaused()).pendingArticleCount, 3);
+    await assert.rejects(
+      runTeamAuthoringBackfill(store),
+      /AUTHORING_BACKFILL_LEDGER_PARTIAL/u,
+    );
+    assert.equal((await store.assertAllWorkspacesPaused()).guardsInstalled, false);
+  } finally {
+    database.close();
+  }
+});
 
 test("SQLite backfill resumes deterministically and installs transition-safe guards", async () => {
   const database = new Database(":memory:");
@@ -618,7 +852,7 @@ test("SQLite backfill resumes deterministically and installs transition-safe gua
     pauseSqlite(database, true);
     await assert.rejects(
       runTeamAuthoringBackfill(store),
-      /AUTHORING_BACKFILL_MISSING_HEAD/u,
+      /AUTHORING_BACKFILL_LEDGER_PARTIAL/u,
     );
 
     pauseSqlite(database, false);
@@ -819,6 +1053,211 @@ function postgresRows(pool: Pool) {
   return async (source: string, parameters: readonly unknown[]) =>
     (await pool.query(source, [...parameters])).rows as readonly Record<string, unknown>[];
 }
+
+async function seedPostgresCompletedRevisionAwareWorkspace(
+  pool: Pool,
+  key: string,
+  state: RevisionAwareFixtureState,
+) {
+  const fixture = revisionAwareFixture(key);
+  const baseline = await createTeamAuthoringBaseline(fixture.article);
+  const projectionHash = await teamAuthoringBackfillProjectionHash(
+    fixture.workspaceId,
+    [],
+  );
+  await pool.query(
+    `insert into workspaces (id, slug, name, created_at, updated_at)
+     values ($1, $2, $2, $3, $3)`,
+    [fixture.workspaceId, key, new Date(fixedTime)],
+  );
+  await pool.query(
+    `insert into categories
+       (id, workspace_id, slug, name, description, position, created_at, updated_at)
+     values ($1, $2, 'guides', 'Guides', null, 0, $3, $3)`,
+    [fixture.categoryId, fixture.workspaceId, new Date(fixedTime)],
+  );
+  await pool.query(
+    `insert into workspace_members (
+       id, workspace_id, normalized_email, display_name, role, status,
+       password_salt, password_digest, password_iterations,
+       created_by_member_id, created_at, updated_at
+     ) values ($1, $2, $3, $4, 'administrator', 'active', $5, $6, 600000, null, $7, $7)`,
+    [
+      fixture.memberId,
+      fixture.workspaceId,
+      `${key}@example.test`,
+      key,
+      "A".repeat(43),
+      "a".repeat(43),
+      new Date(fixedTime),
+    ],
+  );
+  await pool.query(
+    `insert into workspace_authoring_migrations
+       (workspace_id, version, article_count, projection_hash, completed_at)
+     values ($1, 1, 0, $2, $3)`,
+    [fixture.workspaceId, projectionHash, new Date(fixedTime)],
+  );
+  await pool.query(
+    `insert into articles (
+       id, workspace_id, category_id, slug, title, mdx, content_hash, status,
+       is_faq, author_name, position, published_at, created_at, updated_at
+     ) values ($1, $2, $3, $4, $5, $6, null, 'draft', false, 'OPAS', 0, null, $7, $7)`,
+    [
+      fixture.articleId,
+      fixture.workspaceId,
+      fixture.categoryId,
+      fixture.article.slug,
+      fixture.article.title,
+      fixture.article.mdx,
+      new Date(fixedTime),
+    ],
+  );
+  await pool.query(
+    `insert into article_revisions (
+       id, workspace_id, article_id, revision_number, category_id, category_slug,
+       category_name, slug, title, mdx, is_faq, author_name, position,
+       revision_hash, change_kind, created_by_member_id, created_by_system_label,
+       change_summary, created_at, restored_from_revision_id
+     ) values ($1, $2, $3, 1, $4, 'guides', 'Guides', $5, $6, $7, false,
+               'OPAS', 0, $8, 'manual', $9, null, null, $10, null)`,
+    [
+      fixture.revisionId,
+      fixture.workspaceId,
+      fixture.articleId,
+      fixture.categoryId,
+      fixture.article.slug,
+      fixture.article.title,
+      fixture.article.mdx,
+      baseline.revisionHash,
+      fixture.memberId,
+      new Date(fixedTime),
+    ],
+  );
+  await pool.query(
+    `insert into article_slug_claims
+       (workspace_id, normalized_slug, article_id, working_claim, article_row_claim)
+     values ($1, $2, $3, true, true)`,
+    [fixture.workspaceId, fixture.article.slug, fixture.articleId],
+  );
+  await pool.query(
+    `insert into article_heads (
+       article_id, workspace_id, working_revision_id, working_revision_number,
+       working_slug, published_revision_id, published_revision_number,
+       review_state, submitted_by_member_id, archived_at, archived_by_member_id
+     ) values ($1, $2, $3, 1, $4, null, null, 'editing', null, null, null)`,
+    [
+      fixture.articleId,
+      fixture.workspaceId,
+      fixture.revisionId,
+      fixture.article.slug,
+    ],
+  );
+
+  if (state === "missing-head") {
+    await pool.query("delete from article_heads where article_id = $1", [fixture.articleId]);
+  } else if (state === "missing-revision") {
+    await pool.query("alter table article_revisions disable trigger all");
+    try {
+      await pool.query("delete from article_revisions where id = $1", [fixture.revisionId]);
+    } finally {
+      await pool.query("alter table article_revisions enable trigger all");
+    }
+  } else if (state === "missing-working-claim") {
+    await pool.query(
+      `update article_slug_claims set working_claim = false
+       where workspace_id = $1 and normalized_slug = $2`,
+      [fixture.workspaceId, fixture.article.slug],
+    );
+  }
+  await pool.query(
+    `update workspace_authoring_controls
+     set writes_paused = true, generation = generation + 1, changed_at = $1
+     where workspace_id = $2`,
+    [new Date(fixedTime + 1), fixture.workspaceId],
+  );
+  return fixture;
+}
+
+test(
+  "Postgres installs guards after a completed empty ledger gains revision-aware content",
+  { timeout: 120_000 },
+  async () => {
+    const container = await new PostgreSqlContainer("postgres:18.6-alpine").start();
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    try {
+      await applyPostgresBeforeTeamAuthoring(pool);
+      await applyPostgresTeamAuthoringSchema(pool);
+      await seedPostgresCompletedRevisionAwareWorkspace(pool, "complete", "complete");
+      const store = createPostgresTeamAuthoringBackfillStore(pool);
+
+      assert.deepEqual(await store.assertAllWorkspacesPaused(), {
+        completedWorkspaceIds: ["workspace_complete"],
+        guardsInstalled: false,
+        pendingArticleCount: 0,
+        workspaceIds: ["workspace_complete"],
+      });
+      const result = await runTeamAuthoringBackfill(store);
+      assert.equal(result.alreadyCompleted, false);
+      assert.equal(result.articleCount, 0);
+      assert.equal(result.chunkCount, 0);
+      assert.deepEqual(
+        (await pool.query("select id, change_kind from article_revisions")).rows,
+        [{ change_kind: "manual", id: "revision_complete" }],
+      );
+      assert.equal((await store.assertAllWorkspacesPaused()).guardsInstalled, true);
+      assert.equal((await runTeamAuthoringBackfill(store)).alreadyCompleted, true);
+    } finally {
+      await pool.end();
+      await container.stop();
+    }
+  },
+);
+
+test(
+  "Postgres rejects completed ledgers with incomplete revision-aware content",
+  { timeout: 120_000 },
+  async () => {
+    const container = await new PostgreSqlContainer("postgres:18.6-alpine").start();
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    try {
+      await applyPostgresBeforeTeamAuthoring(pool);
+      await applyPostgresTeamAuthoringSchema(pool);
+      await seedPostgresCompletedRevisionAwareWorkspace(pool, "missing-head", "missing-head");
+      await seedPostgresCompletedRevisionAwareWorkspace(
+        pool,
+        "missing-revision",
+        "missing-revision",
+      );
+      await seedPostgresCompletedRevisionAwareWorkspace(
+        pool,
+        "missing-working-claim",
+        "missing-working-claim",
+      );
+      const store = createPostgresTeamAuthoringBackfillStore(pool);
+
+      assert.equal((await store.assertAllWorkspacesPaused()).pendingArticleCount, 3);
+      await assert.rejects(
+        runTeamAuthoringBackfill(store),
+        /AUTHORING_BACKFILL_LEDGER_PARTIAL/u,
+      );
+      assert.equal(
+        Number(
+          (
+            await pool.query(
+              `select count(*) as count from pg_trigger
+               where tgname = 'article_heads_authoring_control_trigger' and not tgisinternal`,
+            )
+          ).rows[0].count,
+        ),
+        0,
+      );
+    } finally {
+      await pool.end();
+      await container.stop();
+    }
+  },
+);
 
 test(
   "Postgres backfill preserves microsecond timestamps and resumes deterministically",

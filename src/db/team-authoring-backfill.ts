@@ -71,6 +71,7 @@ export type TeamAuthoringBackfillStore = Readonly<{
   finalize(
     rows: readonly TeamAuthoringBackfillCompletion[],
     installGuards: boolean,
+    requireBaselineProjection: boolean,
   ): Promise<void>;
   readArticleChunk(
     cursor: TeamAuthoringBackfillCursor | null,
@@ -190,9 +191,15 @@ export async function runTeamAuthoringBackfill(
   if (initial.guardsInstalled && initial.pendingArticleCount !== 0) {
     throw new Error("AUTHORING_BACKFILL_LEDGER_PARTIAL");
   }
+  const allWorkspaceLedgersComplete =
+    initial.workspaceIds.length !== 0 &&
+    completed.size === initial.workspaceIds.length;
+  if (allWorkspaceLedgersComplete && initial.pendingArticleCount !== 0) {
+    throw new Error("AUTHORING_BACKFILL_LEDGER_PARTIAL");
+  }
   const alreadyCompleted =
     initial.guardsInstalled && completed.size === initial.workspaceIds.length;
-  const useStoredBaselines = initial.guardsInstalled;
+  const useStoredBaselines = initial.guardsInstalled || allWorkspaceLedgersComplete;
   const baselines: TeamAuthoringBaseline[] = [];
   let cursor: TeamAuthoringBackfillCursor | null = null;
   let chunkCount = 0;
@@ -251,7 +258,11 @@ export async function runTeamAuthoringBackfill(
     await store.audit(completion);
   }
   if (!alreadyCompleted) {
-    await store.finalize(completion, !initial.guardsInstalled);
+    await store.finalize(
+      completion,
+      !initial.guardsInstalled,
+      !useStoredBaselines,
+    );
   }
 
   return {

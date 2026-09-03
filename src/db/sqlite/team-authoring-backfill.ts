@@ -126,6 +126,47 @@ left join assets
 order by page.workspace_id, page.article_id, assets.hash, revision_assets.asset_id
 `;
 
+export const sqliteRevisionAwareArticleCondition = `
+exists (
+  select 1
+  from article_heads head
+  inner join article_revisions working
+    on working.workspace_id = head.workspace_id
+    and working.article_id = head.article_id
+    and working.id = head.working_revision_id
+    and working.revision_number = head.working_revision_number
+  where head.workspace_id = articles.workspace_id
+    and head.article_id = articles.id
+    and exists (
+      select 1 from article_slug_claims working_claim
+      where working_claim.workspace_id = head.workspace_id
+        and working_claim.article_id = head.article_id
+        and working_claim.normalized_slug = head.working_slug
+        and working_claim.working_claim = 1
+    )
+    and exists (
+      select 1 from article_slug_claims article_claim
+      where article_claim.workspace_id = articles.workspace_id
+        and article_claim.article_id = articles.id
+        and article_claim.normalized_slug = articles.slug
+        and article_claim.article_row_claim = 1
+    )
+    and (
+      (
+        head.published_revision_id is null
+        and head.published_revision_number is null
+      )
+      or exists (
+        select 1 from article_revisions published
+        where published.workspace_id = head.workspace_id
+          and published.article_id = head.article_id
+          and published.id = head.published_revision_id
+          and published.revision_number = head.published_revision_number
+      )
+    )
+)
+`;
+
 export const sqliteInsertTeamAuthoringRevisionSql = `
 insert into article_revisions (
   id,
@@ -261,7 +302,11 @@ function inspect(database: Database.Database): TeamAuthoringBackfillInspection {
          migrations.version as completed_version,
          case when migrations.version is null then (
            select count(*) from articles where articles.workspace_id = workspaces.id
-         ) else 0 end as pending_article_count
+         ) else (
+           select count(*) from articles
+           where articles.workspace_id = workspaces.id
+             and not (${sqliteRevisionAwareArticleCondition})
+         ) end as pending_article_count
        from workspaces
        left join workspace_authoring_controls controls
          on controls.workspace_id = workspaces.id
@@ -408,12 +453,13 @@ function verifyAudit(
       throw new Error("AUTHORING_BACKFILL_LEDGER_MISMATCH");
     }
   }
-  if ((database.prepare("select count(*) as count from article_heads").get() as {
+  if ((database.prepare(
+    `select count(*) as count from articles
+     where not (${sqliteRevisionAwareArticleCondition})`,
+  ).get() as {
     count: number;
-  }).count !== (database.prepare("select count(*) as count from articles").get() as {
-    count: number;
-  }).count) {
-    throw new Error("AUTHORING_BACKFILL_MISSING_HEAD");
+  }).count !== 0) {
+    throw new Error("AUTHORING_BACKFILL_ARTICLE_INCOMPLETE");
   }
   if ((database.pragma("foreign_key_check") as unknown[]).length !== 0) {
     throw new Error("AUTHORING_BACKFILL_FOREIGN_KEY_FAILED");
@@ -850,7 +896,7 @@ export function createSqliteTeamAuthoringBackfillStore(
         verifyAudit(database, rows, false);
       })();
     },
-    async finalize(rows, installGuards) {
+    async finalize(rows, installGuards, requireBaselineProjection) {
       database.transaction(() => {
         database
           .prepare("insert into team_authoring_pause_assertions (assertion) values (1)")
@@ -875,7 +921,7 @@ export function createSqliteTeamAuthoringBackfillStore(
             database.exec(statement);
           }
         }
-        verifyAudit(database, rows, installGuards);
+        verifyAudit(database, rows, requireBaselineProjection);
       })();
     },
     async readArticleChunk(cursor, limit) {

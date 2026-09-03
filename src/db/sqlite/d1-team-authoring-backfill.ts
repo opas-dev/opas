@@ -18,6 +18,7 @@ import {
   sqliteInsertTeamAuthoringSlugClaimSql,
   sqliteReadTeamAuthoringArticleChunkSql,
   sqliteReadTeamAuthoringMigrationRevisionChunkSql,
+  sqliteRevisionAwareArticleCondition,
   sqliteTeamAuthoringGuardStatements,
   sqliteTeamAuthoringSourceArticles,
   sqliteTeamAuthoringStoredBaselines,
@@ -60,7 +61,11 @@ async function inspect(
          migrations.version as completed_version,
          case when migrations.version is null then (
            select count(*) from articles where articles.workspace_id = workspaces.id
-         ) else 0 end as pending_article_count
+         ) else (
+           select count(*) from articles
+           where articles.workspace_id = workspaces.id
+             and not (${sqliteRevisionAwareArticleCondition})
+         ) end as pending_article_count
        from workspaces
        left join workspace_authoring_controls controls
          on controls.workspace_id = workspaces.id
@@ -201,10 +206,7 @@ async function verifyAudit(
       database,
       `select count(*) as count
        from articles
-       left join article_heads
-         on article_heads.article_id = articles.id
-         and article_heads.workspace_id = articles.workspace_id
-       where article_heads.article_id is null`,
+       where not (${sqliteRevisionAwareArticleCondition})`,
     ),
     prepared(database, "pragma foreign_key_check"),
   ]);
@@ -243,7 +245,7 @@ async function verifyAudit(
 
   const missingIndex = 1 + rows.length * checksPerWorkspace;
   if (resultRows<{ count: number }>(results[missingIndex])[0]?.count !== 0) {
-    throw new Error("AUTHORING_BACKFILL_MISSING_HEAD");
+    throw new Error("AUTHORING_BACKFILL_ARTICLE_INCOMPLETE");
   }
   if (resultRows(results[missingIndex + 1]).length !== 0) {
     throw new Error("AUTHORING_BACKFILL_FOREIGN_KEY_FAILED");
@@ -272,7 +274,7 @@ export function createD1TeamAuthoringBackfillStore(
     async auditCompleted(rows) {
       await verifyAudit(database, rows, false);
     },
-    async finalize(rows, installGuards) {
+    async finalize(rows, installGuards, requireBaselineProjection) {
       await database.batch([
         prepared(
           database,
@@ -300,7 +302,7 @@ export function createD1TeamAuthoringBackfillStore(
             )
           : []),
       ]);
-      await verifyAudit(database, rows, installGuards);
+      await verifyAudit(database, rows, requireBaselineProjection);
     },
     async readArticleChunk(cursor, limit) {
       const workspaceId = cursor?.workspaceId ?? null;
