@@ -516,7 +516,7 @@ test("maintenance artifacts remove and block previews while omitting their secre
     );
     assert.throws(
       () => assertMaintenanceArtifactBoundary(root),
-      /forbidden administrator reference/u,
+      /forbidden private reference/u,
     );
   } finally {
     rmSync(root, { force: true, recursive: true });

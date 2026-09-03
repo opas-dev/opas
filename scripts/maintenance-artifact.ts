@@ -77,6 +77,7 @@ export function prepareMaintenanceProject(projectPathname: string) {
     "src/app/admin",
     "src/app/api/internal",
     "src/app/preview",
+    "src/auth/preview-config.ts",
   ]) {
     rmSync(projectPath(project, path), { force: true, recursive: true });
   }
