@@ -974,28 +974,16 @@ function freezeCloudflareUploadInputs(paths: string[]) {
 }
 
 function cloudflareUploadEntry(bundle: string) {
-  const entry = join(bundle, "custom-worker.js");
-  if (
-    !existsSync(entry) ||
-    lstatSync(entry).isSymbolicLink() ||
-    !lstatSync(entry).isFile()
-  ) {
-    throw new Error("Cloudflare dry-run did not emit custom-worker.js.");
-  }
-
-  const unexpectedJavascript = filesBelow(bundle)
+  const javascript = filesBelow(bundle)
     .map((path) => relative(bundle, path))
-    .filter(
-      (path) =>
-        /\.(?:c|m)?js$/u.test(path) && path !== "custom-worker.js",
-    );
-  if (unexpectedJavascript.length > 0) {
+    .filter((path) => /\.(?:c|m)?js$/u.test(path));
+  if (javascript.length !== 1 || basename(javascript[0]) !== javascript[0]) {
     throw new Error(
-      `Cloudflare dry-run emitted unsupported JavaScript modules: ${unexpectedJavascript.sort().join(", ")}.`,
+      `Cloudflare dry-run must emit one top-level JavaScript entry; found ${javascript.sort().join(", ") || "none"}.`,
     );
   }
 
-  return entry;
+  return join(bundle, javascript[0]);
 }
 
 export function cloudflareExactUploadArguments(

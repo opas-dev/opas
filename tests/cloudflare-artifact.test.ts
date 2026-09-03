@@ -723,7 +723,7 @@ if (args.includes("--dry-run")) {
   const outputIndex = args.indexOf("--outdir");
   const output = args[outputIndex + 1];
   mkdirSync(output, { recursive: true });
-  writeFileSync(join(output, "custom-worker.js"), "export default {};\n");
+  writeFileSync(join(output, "worker.js"), "export default {};\n");
   if (existsSync(join(process.cwd(), "mutate-source"))) {
     const path = ${JSON.stringify(sourceConfigPath)};
     writeFileSync(path, readFileSync(path, "utf8").replace('"enabled": true', '"enabled": false'));
@@ -771,6 +771,10 @@ if (args.includes("--dry-run")) {
         calls.filter((args) => args[2] === "versions" && args[3] === "upload")
           .length,
         1,
+      );
+      assert.equal(
+        calls.find((args) => args[2] === "versions" && args[3] === "upload")?.[4],
+        join(project, ".opas-cloudflare-dry-run", "worker.js"),
       );
     } finally {
       rmSync(commandDirectory, { force: true, recursive: true });
