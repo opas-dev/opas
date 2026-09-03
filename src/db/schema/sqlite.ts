@@ -292,6 +292,7 @@ export const categories = sqliteTable(
     name: text("name").notNull(),
     description: text("description"),
     position: integer("position").notNull().default(0),
+    version: integer("version").notNull().default(1),
     ...timestampColumns,
   },
   (table) => [
@@ -651,6 +652,7 @@ export const articleHeads = sqliteTable(
     reviewState: text("review_state", {
       enum: ["editing", "in_review", "changes_requested", "approved", "published"],
     }).notNull(),
+    submittedByMemberId: text("submitted_by_member_id"),
     archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
     archivedByMemberId: text("archived_by_member_id"),
   },
@@ -697,6 +699,10 @@ export const articleHeads = sqliteTable(
       ],
     }).onDelete("cascade"),
     foreignKey({
+      columns: [table.submittedByMemberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    foreignKey({
       columns: [table.archivedByMemberId, table.workspaceId],
       foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
     }).onDelete("cascade"),
@@ -717,6 +723,10 @@ export const articleHeads = sqliteTable(
     check(
       "article_heads_review_state_check",
       sql`${table.reviewState} in ('editing', 'in_review', 'changes_requested', 'approved', 'published')`,
+    ),
+    check(
+      "article_heads_submitter_check",
+      sql`(${table.reviewState} = 'in_review' and ${table.submittedByMemberId} is not null) or (${table.reviewState} <> 'in_review' and ${table.submittedByMemberId} is null)`,
     ),
     check(
       "article_heads_published_state_check",
@@ -1459,6 +1469,7 @@ export const themes = sqliteTable("themes", {
     .references(() => workspaces.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   config: text("config", { mode: "json" }).notNull(),
+  version: integer("version").notNull().default(1),
   ...timestampColumns,
 });
 

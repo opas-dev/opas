@@ -74,7 +74,10 @@ async function inspect(
       `select count(*) as count
        from sqlite_master
        where type = 'trigger'
-         and name = 'article_heads_authoring_control_insert_trigger'`,
+         and name in (
+           'article_heads_authoring_control_insert_trigger',
+           'categories_current_revision_delete_trigger'
+         )`,
     ),
   ]);
   const rows = resultRows<{
@@ -91,7 +94,7 @@ async function inspect(
     completedWorkspaceIds: rows
       .filter((row) => row.completed_version === teamAuthoringBackfillVersion)
       .map((row) => row.workspace_id),
-    guardsInstalled: guard?.count === 1,
+    guardsInstalled: guard?.count === 2,
     pendingArticleCount: rows.reduce(
       (count, row) => count + row.pending_article_count,
       0,

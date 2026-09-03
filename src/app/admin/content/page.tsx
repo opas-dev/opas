@@ -7,6 +7,7 @@ import { CategoryEditor } from "@/app/admin/content/category-editor";
 import { AdminHeader } from "@/app/admin/header";
 import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
+import { getCategoryAuthoringRepository } from "@/db/category-authoring-database";
 import { demoIds } from "@/db/demo";
 
 export const runtime = "nodejs";
@@ -26,8 +27,9 @@ const dateFormatter = new Intl.DateTimeFormat("en", {
 export default async function ContentAdminPage() {
   const admin = await requireMemberCapability("content:read", demoIds.workspace);
   const repository = await getRepository();
+  const categoryRepository = await getCategoryAuthoringRepository();
   const [categories, articles] = await Promise.all([
-    repository.listCategories(demoIds.workspace),
+    categoryRepository.listCategories(demoIds.workspace),
     repository.listArticles(demoIds.workspace),
   ]);
   const categoriesById = new Map(categories.map((category) => [category.id, category]));

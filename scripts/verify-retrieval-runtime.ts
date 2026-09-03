@@ -21,6 +21,9 @@ import { migrate as migratePostgres } from "drizzle-orm/node-postgres/migrator";
 import { build } from "esbuild";
 import { Pool, type FieldDef, type PoolClient, type QueryArrayResult } from "pg";
 
+import type { MemberActor } from "@/auth/member-repository";
+import type { CategoryAuthoringRepository } from "@/db/category-authoring";
+import { createPostgresCategoryAuthoringRepository } from "@/db/postgres/category-authoring-repository";
 import { createPostgresRepository } from "@/db/postgres/repository";
 import type {
   ArticleEvidenceCommit,
@@ -129,6 +132,40 @@ const createdAt = new Date("2026-08-30T00:00:00.000Z");
 const activatedAt = new Date("2026-08-30T00:00:30.000Z");
 const maximumRequestBytes = 16 * 1_024 * 1_024;
 const readinessTimeoutMs = 60_000;
+const authoringActor: MemberActor = {
+  memberId: "member_runtime_author",
+  sessionId: "R".repeat(43),
+  workspaceId,
+};
+
+async function createRuntimeAuthor(pool: Pool) {
+  const createdAt = new Date();
+  await pool.query(
+    `insert into workspace_members (
+       id, workspace_id, normalized_email, display_name, role, status,
+       password_salt, password_digest, password_iterations, created_at, updated_at
+     ) values ($1, $2, 'runtime@example.test', 'Runtime author',
+               'administrator', 'active', $3, $4, 600000, $5, $5)`,
+    [
+      authoringActor.memberId,
+      workspaceId,
+      "a".repeat(43),
+      "b".repeat(43),
+      createdAt,
+    ],
+  );
+  await pool.query(
+    `insert into admin_sessions (id, workspace_id, member_id, created_at, expires_at)
+     values ($1, $2, $3, $4, $5)`,
+    [
+      authoringActor.sessionId,
+      workspaceId,
+      authoringActor.memberId,
+      createdAt,
+      new Date(createdAt.getTime() + 7 * 60 * 60 * 1000),
+    ],
+  );
+}
 
 function embeddingMetadata(dimension: number) {
   return {
@@ -292,17 +329,33 @@ async function queryCanary(
 
 async function runRepositoryScenario(
   repository: Repository,
+  categories: CategoryAuthoringRepository,
   adapter: RepositoryScenario["adapter"],
 ) {
   const sources = baselineSources();
   await repository.checkHealth();
-  await repository.createCategory({
-    id: categoryId,
-    workspaceId,
-    slug: categorySlug,
-    name: "Runtime fixture",
-    description: null,
-    position: 0,
+  assert.deepEqual(await categories.createCategory({
+    actor: authoringActor,
+    category: {
+      id: categoryId,
+      workspaceId,
+      slug: categorySlug,
+      name: "Runtime fixture",
+      description: null,
+      position: 0,
+    },
+    expectedCategoryVersion: 0,
+  }), {
+    status: "created",
+    category: {
+      id: categoryId,
+      workspaceId,
+      slug: categorySlug,
+      name: "Runtime fixture",
+      description: null,
+      position: 0,
+      version: 1,
+    },
   });
   await repository.createEmbeddingGeneration({
     id: embeddingGenerationId,
@@ -958,8 +1011,10 @@ async function main() {
       slug: "runtime-postgres",
       name: "Runtime Postgres",
     });
+    await createRuntimeAuthor(pool);
     const postgres = await runRepositoryScenario(
       createPostgresRepository(postgresDatabase),
+      createPostgresCategoryAuthoringRepository(postgresDatabase),
       "postgres-node",
     );
     await pool.query("delete from workspaces where id = $1", [workspaceId]);
@@ -974,8 +1029,10 @@ async function main() {
       slug: "runtime-neon",
       name: "Runtime Neon",
     });
+    await createRuntimeAuthor(pool);
     const neonScenario = await runRepositoryScenario(
       createPostgresRepository(neonDatabase),
+      createPostgresCategoryAuthoringRepository(neonDatabase),
       "neon-http",
     );
     assert.deepEqual(

@@ -23,6 +23,8 @@ export type ThemePresetPreview = {
 };
 
 type ThemeEditorProps = {
+  initialThemeId: string;
+  initialThemeVersion: number;
   initialName: string;
   initialConfigJson: string;
   initialActivePreset: ThemePresetId | null;
@@ -34,6 +36,8 @@ function fieldDescriptionId(field: "name" | "config", hasError: boolean) {
 }
 
 export function ThemeEditor({
+  initialThemeId,
+  initialThemeVersion,
   initialName,
   initialConfigJson,
   initialActivePreset,
@@ -43,6 +47,8 @@ export function ThemeEditor({
     status: "idle",
     message: "",
     revision: 0,
+    themeId: initialThemeId,
+    themeVersion: initialThemeVersion,
     activePreset: initialActivePreset,
     values: {
       name: initialName,
@@ -69,6 +75,12 @@ export function ThemeEditor({
 
           <form action={formAction}>
             <input type="hidden" name="intent" value="preset" />
+            <input type="hidden" name="id" value={state.themeId} />
+            <input
+              type="hidden"
+              name="expectedThemeVersion"
+              value={state.themeVersion}
+            />
             <fieldset disabled={pending} className="grid gap-3 sm:grid-cols-2">
               <legend className="sr-only">Available theme presets</legend>
               {presets.map((preset) => {
@@ -154,6 +166,12 @@ export function ThemeEditor({
 
         <form action={formAction} className="mt-6 space-y-5">
           <input type="hidden" name="intent" value="json" />
+          <input type="hidden" name="id" value={state.themeId} />
+          <input
+            type="hidden"
+            name="expectedThemeVersion"
+            value={state.themeVersion}
+          />
           <fieldset disabled={pending} className="space-y-5">
             <legend className="sr-only">Theme JSON settings</legend>
             <div>

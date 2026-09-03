@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   parseArticleRequest,
+  parseCategoryDeleteRequest,
   parseCategoryRequest,
   parseRecordRequest,
 } from "@/app/admin/content/validation";
@@ -44,6 +45,7 @@ test("category updates require an opaque record id", () => {
   const result = parseCategoryRequest(
     formData({
       mode: "update",
+      expectedCategoryVersion: "1",
       name: "Account setup",
       slug: "account-setup",
       description: "",
@@ -74,6 +76,34 @@ test("categories cannot claim static application routes", () => {
       assert.equal(result.fieldErrors.slug, "This URL slug is reserved by the application");
     }
   }
+});
+
+test("category updates and deletes require a positive concurrency version", () => {
+  const update = parseCategoryRequest(
+    formData({
+      mode: "update",
+      id: "category_1",
+      expectedCategoryVersion: "0",
+      name: "Account setup",
+      slug: "account-setup",
+      description: "",
+      position: "0",
+    }),
+  );
+  assert.equal(update.success, false);
+  if (!update.success) {
+    assert.equal(update.fieldErrors.expectedCategoryVersion, "The category version is invalid");
+  }
+
+  assert.deepEqual(
+    parseCategoryDeleteRequest(
+      formData({ id: "category_1", expectedCategoryVersion: "7" }),
+    ),
+    {
+      success: true,
+      data: { id: "category_1", expectedCategoryVersion: 7 },
+    },
+  );
 });
 
 test("article requests normalize checkbox and publication fields", () => {

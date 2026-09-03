@@ -65,11 +65,13 @@ function applySqliteBeforeTeamAuthoring(database: Database.Database) {
 }
 
 function applySqliteTeamAuthoringSchema(database: Database.Database) {
-  const filename = migrationFiles(sqliteMigrationDirectory).find((candidate) =>
-    candidate.startsWith("0011_"),
+  const filenames = migrationFiles(sqliteMigrationDirectory).filter(
+    (candidate) => candidate.startsWith("0011_") || candidate.startsWith("0012_"),
   );
-  assert.ok(filename);
-  database.transaction(() => database.exec(sqliteMigration(filename)))();
+  assert.equal(filenames.length, 2);
+  for (const filename of filenames) {
+    database.transaction(() => database.exec(sqliteMigration(filename)))();
+  }
 }
 
 function seedSqliteArticles(database: Database.Database, articleCount: number) {
@@ -130,7 +132,12 @@ function sqlitePublicProjection(database: Database.Database) {
       .prepare("select * from article_assets order by article_id, asset_id")
       .all(),
     articles: database.prepare("select * from articles order by id").all(),
-    categories: database.prepare("select * from categories order by id").all(),
+    categories: database
+      .prepare(
+        `select id, workspace_id, slug, name, description, position, created_at, updated_at
+         from categories order by id`,
+      )
+      .all(),
   };
 }
 
@@ -801,11 +808,11 @@ async function applyPostgresBeforeTeamAuthoring(pool: Pool) {
 }
 
 async function applyPostgresTeamAuthoringSchema(pool: Pool) {
-  const filename = migrationFiles(postgresMigrationDirectory).find((candidate) =>
-    candidate.startsWith("0011_"),
+  const filenames = migrationFiles(postgresMigrationDirectory).filter(
+    (candidate) => candidate.startsWith("0011_") || candidate.startsWith("0012_"),
   );
-  assert.ok(filename);
-  await applyPostgresMigration(pool, filename);
+  assert.equal(filenames.length, 2);
+  for (const filename of filenames) await applyPostgresMigration(pool, filename);
 }
 
 function postgresRows(pool: Pool) {

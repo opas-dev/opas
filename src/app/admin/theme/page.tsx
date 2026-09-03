@@ -11,8 +11,9 @@ import {
 import { findThemePreset } from "@/app/admin/theme/validation";
 import { requireMemberCapability } from "@/auth/admin";
 import { demoIds } from "@/db/demo";
-import { getCurrentTheme } from "@/theme/current";
+import { getThemeAuthoringRepository } from "@/db/theme-authoring-database";
 import { themePresets } from "@/theme/presets";
+import { themeSchema } from "@/theme/schema";
 
 export const runtime = "nodejs";
 
@@ -36,7 +37,9 @@ function presetPreviews(): ThemePresetPreview[] {
 
 export default async function ThemeAdminPage() {
   const admin = await requireMemberCapability("workspace:configure", demoIds.workspace);
-  const theme = await getCurrentTheme();
+  const storedTheme = await (await getThemeAuthoringRepository()).getTheme(demoIds.workspace);
+  if (!storedTheme) throw new Error("The workspace theme is unavailable.");
+  const config = themeSchema.parse(storedTheme.config);
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -55,9 +58,11 @@ export default async function ThemeAdminPage() {
         </div>
 
         <ThemeEditor
-          initialName={theme.name}
-          initialConfigJson={JSON.stringify(theme.config, null, 2)}
-          initialActivePreset={findThemePreset(theme.name, theme.config)}
+          initialThemeId={storedTheme.id}
+          initialThemeVersion={storedTheme.version}
+          initialName={storedTheme.name}
+          initialConfigJson={JSON.stringify(config, null, 2)}
+          initialActivePreset={findThemePreset(storedTheme.name, config)}
           presets={presetPreviews()}
         />
       </div>

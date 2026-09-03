@@ -85,6 +85,13 @@
       "when": 1788394930443,
       "tag": "0011_silly_green_goblin",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1788402279603,
+      "tag": "0012_aromatic_vin_gonzales",
+      "breakpoints": true
     }
   ]
 }

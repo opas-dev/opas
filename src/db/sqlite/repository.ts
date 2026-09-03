@@ -1,6 +1,6 @@
 // ABOUTME: Implements the OPAS repository for injected SQLite-compatible D1 databases.
 // ABOUTME: Normalizes D1 records to the same domain contract used by Postgres deployments.
-import { and, asc, count, eq, gte, isNotNull, lt, notExists, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { AnyD1Database, DrizzleD1Database } from "drizzle-orm/d1";
@@ -12,7 +12,8 @@ import {
   prepareAssetSelection,
 } from "@/db/assets";
 import { validateArticleEvidence } from "@/db/evidence";
-import { withAuthoringErrorBoundary } from "@/db/authoring-controls";
+import { authoringAssertion, withAuthoringErrorBoundary } from "@/db/authoring-controls";
+import type { AssetAuthoringRequest } from "@/db/repository";
 import type {
   ArticleAssetSelection,
   ArticleSubmission,
@@ -48,6 +49,17 @@ type D1BackedDatabase = DrizzleD1Database<typeof schema> & {
 type SqliteDatabase =
   | D1BackedDatabase
   | BetterSQLite3Database<typeof schema>;
+
+function assetActorAssertion(request: AssetAuthoringRequest) {
+  return sql`select json_extract('[]', case when exists (
+    select 1 from workspace_members member inner join admin_sessions session
+      on session.workspace_id = member.workspace_id and session.member_id = member.id
+    where member.workspace_id = ${request.workspaceId} and member.id = ${request.memberId}
+      and member.status = 'active' and member.role in ('administrator', 'editor')
+      and session.id = ${request.sessionId} and session.revoked_at is null
+      and session.expires_at > ${request.checkedAt.getTime()}
+  ) then '$[0]' else '$[' end)`;
+}
 
 const articleFields = {
   id: articles.id,
@@ -131,6 +143,9 @@ function orphanAssetCleanup(workspaceId: string) {
     where workspace_id = ${workspaceId}
       and not exists (
         select 1 from article_assets where article_assets.asset_id = assets.id
+      )
+      and not exists (
+        select 1 from article_revision_assets where article_revision_assets.asset_id = assets.id
       )
       and not exists (
         select 1 from asset_manifest_items where asset_manifest_items.asset_id = assets.id
@@ -457,67 +472,6 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
         .execute();
     },
 
-    async createCategory(category) {
-      await executableDatabase.insert(categories).values(category).execute();
-    },
-
-    async updateCategory(category) {
-      const updated = await executableDatabase
-        .update(categories)
-        .set({
-          slug: category.slug,
-          name: category.name,
-          description: category.description,
-          position: category.position,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(categories.workspaceId, category.workspaceId),
-            eq(categories.id, category.id),
-            or(
-              eq(categories.slug, category.slug),
-              notExists(
-                executableDatabase
-                  .select({ id: articles.id })
-                  .from(articles)
-                  .where(
-                    and(
-                      eq(articles.workspaceId, category.workspaceId),
-                      eq(articles.categoryId, category.id),
-                      eq(articles.status, "published"),
-                      isNotNull(articles.contentHash),
-                    ),
-                  ),
-              ),
-            ),
-          ),
-        )
-        .returning({ id: categories.id })
-        .execute();
-      return updated.length === 1;
-    },
-
-    async deleteCategory(workspaceId, id) {
-      const deleted = await executableDatabase
-        .delete(categories)
-        .where(
-          and(
-            eq(categories.workspaceId, workspaceId),
-            eq(categories.id, id),
-            notExists(
-              executableDatabase
-                .select({ id: articles.id })
-                .from(articles)
-                .where(eq(articles.categoryId, id)),
-            ),
-          ),
-        )
-        .returning({ id: categories.id })
-        .execute();
-      return deleted.length === 1;
-    },
-
     async listArticles(workspaceId) {
       return executableDatabase
         .select(articleFields)
@@ -797,6 +751,76 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
       ]);
     },
 
+    async createAuthorizedAssetManifest(request, expiresAt) {
+      const createdAt = request.checkedAt;
+      if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= createdAt) {
+        throw new AssetValidationError("Asset manifests must expire in the future.");
+      }
+      const manifest = {
+        id: `asset_manifest_${crypto.randomUUID()}`,
+        workspaceId: request.workspaceId,
+        expiresAt,
+        createdAt,
+      };
+      await executeAtomically(database, [
+        authoringAssertion(request.workspaceId, "sqlite"),
+        assetActorAssertion(request),
+        executableDatabase.insert(assetManifests).values(manifest).getSQL(),
+      ]);
+      return manifest;
+    },
+
+    async stageAuthorizedAsset(request, manifestId, upload) {
+      const prepared = await prepareAsset(upload);
+      const insert = executableDatabase
+        .insert(assets)
+        .values({
+          id: `asset_${crypto.randomUUID()}`,
+          workspaceId: request.workspaceId,
+          ...prepared,
+        })
+        .onConflictDoNothing({ target: [assets.workspaceId, assets.hash] });
+      const attach = sql`with valid(manifest_id, asset_id, workspace_id) as (
+        select manifest.id, asset.id, manifest.workspace_id from asset_manifests manifest
+        inner join assets asset on asset.workspace_id = manifest.workspace_id
+        where manifest.id = ${manifestId} and manifest.workspace_id = ${request.workspaceId}
+          and manifest.expires_at > ${request.checkedAt.getTime()} and asset.hash = ${prepared.hash}
+          and asset.media_type = ${prepared.mediaType} and asset.byte_size = ${prepared.byteSize}
+      ), rows(manifest_id, asset_id, workspace_id) as (
+        select * from valid union all select null, null, ${request.workspaceId}
+        where not exists (select 1 from valid)
+      ) insert into asset_manifest_items (manifest_id, asset_id, workspace_id)
+        select * from rows where true on conflict do nothing`;
+      await executeAtomically(database, [
+        authoringAssertion(request.workspaceId, "sqlite"),
+        assetActorAssertion(request),
+        insert.getSQL(),
+        attach,
+      ]);
+      const asset = await this.getAsset(request.workspaceId, prepared.hash);
+      if (!asset) {
+        throw new Error("The staged asset could not be read after storage.");
+      }
+      return asset;
+    },
+
+    async discardAuthorizedAssetManifest(request, manifestId) {
+      await executeAtomically(database, [
+        authoringAssertion(request.workspaceId, "sqlite"),
+        assetActorAssertion(request),
+        ...discardManifestStatements(request.workspaceId, manifestId),
+      ]);
+    },
+
+    async cleanupAuthorizedExpiredAssets(request) {
+      await executeAtomically(database, [
+        authoringAssertion(request.workspaceId, "sqlite"),
+        assetActorAssertion(request),
+        sql`delete from asset_manifests where workspace_id = ${request.workspaceId} and expires_at <= ${request.checkedAt.getTime()}`,
+        orphanAssetCleanup(request.workspaceId),
+      ]);
+    },
+
     async activateKnowledgeImport(knowledgeImport) {
       try {
         await executeAtomically(
@@ -838,18 +862,6 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
         .execute();
 
       return theme ?? null;
-    },
-
-    async updateTheme(theme) {
-      await executableDatabase
-        .update(themes)
-        .set({
-          name: theme.name,
-          config: theme.config,
-          updatedAt: new Date(),
-        })
-        .where(eq(themes.workspaceId, theme.workspaceId))
-        .execute();
     },
 
     async getAnalytics(workspaceId) {

@@ -2,6 +2,7 @@
 // ABOUTME: Keeps deployment driver details behind one small repository contract.
 import type { EmbeddingWorkerRepository } from "@/ai/embedding-worker";
 import type { ArticleDraftRepository } from "@/db/article-drafts";
+import type { MemberActor } from "@/auth/member-repository";
 
 export type ArticleStatus = "draft" | "published";
 
@@ -58,6 +59,8 @@ export type AssetManifest = {
   createdAt: Date;
 };
 
+export type AssetAuthoringRequest = MemberActor & Readonly<{ checkedAt: Date }>;
+
 export type ArticleAssetSelection = {
   manifestId?: string;
   hashes: readonly string[];
@@ -97,12 +100,6 @@ export type Theme = {
   config: unknown;
   createdAt: Date;
   updatedAt: Date;
-};
-
-export type ThemeUpdate = {
-  workspaceId: string;
-  name: string;
-  config: unknown;
 };
 
 export type Feedback = {
@@ -436,9 +433,6 @@ export type Repository = {
   findPublishedArticle(workspaceId: string, slug: string): Promise<PublishedArticle | null>;
   listPublishedArticles(workspaceId: string): Promise<PublishedArticle[]>;
   listCategories(workspaceId: string): Promise<Category[]>;
-  createCategory(category: Category): Promise<void>;
-  updateCategory(category: Category): Promise<boolean>;
-  deleteCategory(workspaceId: string, id: string): Promise<boolean>;
   listArticles(workspaceId: string): Promise<Article[]>;
   getArticle(workspaceId: string, id: string): Promise<Article | null>;
   createArticle(
@@ -463,9 +457,24 @@ export type Repository = {
   listArticleAssetHashes(workspaceId: string, articleId: string): Promise<string[]>;
   discardAssetManifest(workspaceId: string, manifestId: string): Promise<void>;
   cleanupExpiredAssets(workspaceId: string, expiredAt: Date): Promise<void>;
+  createAuthorizedAssetManifest(
+    request: AssetAuthoringRequest,
+    expiresAt: Date,
+  ): Promise<AssetManifest>;
+  stageAuthorizedAsset(
+    request: AssetAuthoringRequest,
+    manifestId: string,
+    upload: AssetUpload,
+  ): Promise<Asset>;
+  discardAuthorizedAssetManifest(
+    request: AssetAuthoringRequest,
+    manifestId: string,
+  ): Promise<void>;
+  cleanupAuthorizedExpiredAssets(
+    request: AssetAuthoringRequest,
+  ): Promise<void>;
   activateKnowledgeImport(knowledgeImport: KnowledgeImport): Promise<void>;
   getTheme(workspaceId: string): Promise<Theme | null>;
-  updateTheme(theme: ThemeUpdate): Promise<void>;
   getAnalytics(workspaceId: string): Promise<Analytics>;
   createFeedback(feedback: Feedback): Promise<void>;
   recordView(view: ArticleView): Promise<void>;

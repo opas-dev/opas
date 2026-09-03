@@ -10,17 +10,11 @@ import {
   saveCategoryAction,
   type ContentActionState,
 } from "@/app/admin/content/actions";
-import type { Category } from "@/db/repository";
+import type { AuthoringCategory } from "@/db/category-authoring";
 
 type CategoryEditorProps = {
-  category?: Category;
+  category?: AuthoringCategory;
   articleCount?: number;
-};
-
-const initialState: ContentActionState = {
-  status: "idle",
-  message: "",
-  revision: 0,
 };
 
 function statusClasses(status: ContentActionState["status"]) {
@@ -34,6 +28,12 @@ function statusClasses(status: ContentActionState["status"]) {
 }
 
 export function CategoryEditor({ category, articleCount = 0 }: CategoryEditorProps) {
+  const initialState: ContentActionState = {
+    status: "idle",
+    message: "",
+    revision: 0,
+    recordVersion: category?.version,
+  };
   const [saveState, saveAction, saving] = useActionState(saveCategoryAction, initialState);
   const [, startSaving] = useTransition();
   const [deleteState, deleteAction, deleting] = useActionState(
@@ -72,6 +72,13 @@ export function CategoryEditor({ category, articleCount = 0 }: CategoryEditorPro
         <form onSubmit={submitCategory} className="space-y-4">
           <input type="hidden" name="mode" value={category ? "update" : "create"} />
           {category ? <input type="hidden" name="id" value={category.id} /> : null}
+          {category ? (
+            <input
+              type="hidden"
+              name="expectedCategoryVersion"
+              value={saveState.recordVersion ?? category.version}
+            />
+          ) : null}
           <fieldset disabled={saving} className="grid gap-4 sm:grid-cols-2">
             <legend className="sr-only">
               {category ? `Edit ${category.name}` : "Create a category"}
@@ -208,6 +215,11 @@ export function CategoryEditor({ category, articleCount = 0 }: CategoryEditorPro
             </p>
             <form action={deleteAction} className="flex flex-wrap items-center gap-3">
               <input type="hidden" name="id" value={category.id} />
+              <input
+                type="hidden"
+                name="expectedCategoryVersion"
+                value={saveState.recordVersion ?? category.version}
+              />
               <button
                 type="submit"
                 disabled={deleting}

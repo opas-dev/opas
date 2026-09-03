@@ -12,11 +12,15 @@ import { themeSchema, type ThemeConfig } from "@/theme/schema";
 
 const presetRequestSchema = z.strictObject({
   intent: z.literal("preset"),
+  id: z.string().trim().min(1).max(100),
+  expectedThemeVersion: z.coerce.number().int().min(1),
   preset: z.enum(themePresetIds),
 });
 
 const jsonRequestSchema = z.strictObject({
   intent: z.literal("json"),
+  id: z.string().trim().min(1).max(100),
+  expectedThemeVersion: z.coerce.number().int().min(1),
   name: z
     .string()
     .trim()
@@ -45,10 +49,14 @@ export type ThemeFieldErrors = Partial<
 export type ThemeRequest =
   | {
       kind: "preset";
+      id: string;
+      expectedThemeVersion: number;
       preset: ThemePresetId;
     }
   | {
       kind: "json";
+      id: string;
+      expectedThemeVersion: number;
       name: string;
       config: ThemeConfig;
     };
@@ -133,6 +141,8 @@ export function parseThemeRequest(formData: FormData): ThemeRequestResult {
       success: true,
       data: {
         kind: "preset",
+        id: request.data.id,
+        expectedThemeVersion: request.data.expectedThemeVersion,
         preset: request.data.preset,
       },
     };
@@ -162,6 +172,8 @@ export function parseThemeRequest(formData: FormData): ThemeRequestResult {
     success: true,
     data: {
       kind: "json",
+      id: request.data.id,
+      expectedThemeVersion: request.data.expectedThemeVersion,
       name: request.data.name,
       config: parsedTheme.data,
     },

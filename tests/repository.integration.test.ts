@@ -16,9 +16,16 @@ import { drizzle as createPostgresDatabase } from "drizzle-orm/node-postgres";
 import { migrate as migratePostgres } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 
+import type { MemberActor } from "@/auth/member-repository";
+import type {
+  CategoryAuthoringRepository,
+  CategoryValues,
+} from "@/db/category-authoring";
 import { demoContent, demoIds, demoSeededAt } from "@/db/demo";
 import { createPostgresAnswerInferenceRepository } from "@/db/postgres/answer-inference-repository";
+import { createPostgresCategoryAuthoringRepository } from "@/db/postgres/category-authoring-repository";
 import { createPostgresRepository } from "@/db/postgres/repository";
+import { createPostgresThemeAuthoringRepository } from "@/db/postgres/theme-authoring-repository";
 import { seedPostgres } from "@/db/postgres/seed";
 import type {
   AnswerInferenceReservation,
@@ -34,7 +41,10 @@ import {
   articleEvidenceInitializationStatements as sqliteArticleEvidenceInitializationStatements,
 } from "@/db/sqlite/evidence-repository";
 import { createSqliteRepository } from "@/db/sqlite/repository";
+import { createSqliteCategoryAuthoringRepository } from "@/db/sqlite/category-authoring-repository";
 import { seedD1 } from "@/db/sqlite/seed";
+import { createSqliteThemeAuthoringRepository } from "@/db/sqlite/theme-authoring-repository";
+import type { ThemeAuthoringRepository } from "@/db/theme-authoring";
 import { executeKnowledgeImport } from "@/import/execute";
 import { planKnowledgeImport } from "@/import/planner";
 
@@ -93,6 +103,7 @@ const expectedColumns = {
     "position",
     "created_at",
     "updated_at",
+    "version",
   ],
   chunk_embeddings: [
     "chunk_id",
@@ -190,7 +201,7 @@ const expectedColumns = {
     "created_at",
     "finished_at",
   ],
-  themes: ["id", "workspace_id", "name", "config", "created_at", "updated_at"],
+  themes: ["id", "workspace_id", "name", "config", "created_at", "updated_at", "version"],
   workspace_index_states: [
     "workspace_id",
     "generation",
@@ -222,6 +233,9 @@ type RuleViolation =
 type Harness = {
   name: string;
   repository: Repository;
+  categoryAuthoring: CategoryAuthoringRepository;
+  themeAuthoring: ThemeAuthoringRepository;
+  authoringActor(workspaceId: string): Promise<MemberActor>;
   seed(): Promise<void>;
   deploymentSeed?(): Promise<void>;
   createWorkspace(workspace: { id: string; slug: string; name: string }): Promise<void>;
@@ -286,6 +300,73 @@ function hashText(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function repositoryActor(workspaceId: string): MemberActor {
+  const identity = hashText(`repository-author:${workspaceId}`);
+  return {
+    memberId: `member_${identity.slice(0, 24)}`,
+    sessionId: hashText(`repository-session:${workspaceId}`).slice(0, 43),
+    workspaceId,
+  };
+}
+
+async function createCategory(harness: Harness, category: CategoryValues) {
+  const result = await harness.categoryAuthoring.createCategory({
+    actor: await harness.authoringActor(category.workspaceId),
+    category,
+    expectedCategoryVersion: 0,
+  });
+  assert.equal(result.status, "created");
+}
+
+async function updateCategory(harness: Harness, category: CategoryValues) {
+  const current = (await harness.categoryAuthoring.listCategories(category.workspaceId)).find(
+    (candidate) => candidate.id === category.id,
+  );
+  if (!current) return false;
+  const result = await harness.categoryAuthoring.updateCategory({
+    actor: await harness.authoringActor(category.workspaceId),
+    category,
+    expectedCategoryVersion: current.version,
+  });
+  return result.status === "unchanged" || result.status === "updated";
+}
+
+async function deleteCategory(
+  harness: Harness,
+  workspaceId: string,
+  categoryId: string,
+) {
+  const current = (await harness.categoryAuthoring.listCategories(workspaceId)).find(
+    (candidate) => candidate.id === categoryId,
+  );
+  if (!current) return false;
+  const result = await harness.categoryAuthoring.deleteCategory({
+    actor: await harness.authoringActor(workspaceId),
+    category: { id: categoryId, workspaceId },
+    expectedCategoryVersion: current.version,
+  });
+  return result.status === "deleted";
+}
+
+async function updateTheme(
+  harness: Harness,
+  theme: Readonly<{ config: unknown; name: string; workspaceId: string }>,
+) {
+  const current = await harness.themeAuthoring.getTheme(theme.workspaceId);
+  assert.ok(current);
+  const result = await harness.themeAuthoring.updateTheme({
+    actor: await harness.authoringActor(theme.workspaceId),
+    expectedThemeVersion: current.version,
+    theme: {
+      config: theme.config,
+      id: current.id,
+      name: theme.name,
+      workspaceId: theme.workspaceId,
+    },
+  });
+  assert.ok(result.status === "unchanged" || result.status === "updated");
+}
+
 function categorySlug(categoryId: string) {
   if (categoryId === demoIds.gettingStartedCategory) {
     return "getting-started";
@@ -346,6 +427,26 @@ async function applyPostgresMigration(pool: Pool, filename: string) {
     if (statement.trim()) {
       await pool.query(statement);
     }
+  }
+}
+
+async function applyPostgresMigrationAtomically(pool: Pool, filename: string) {
+  const migration = readFileSync(
+    path.join(process.cwd(), "drizzle/postgres", filename),
+    "utf8",
+  );
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    for (const statement of migration.split("--> statement-breakpoint")) {
+      if (statement.trim()) await client.query(statement);
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -539,7 +640,7 @@ async function exerciseKnowledgeImport(harness: Harness) {
   }
   for (const categoryId of successCategoryIds) {
     assert.equal(
-      await harness.repository.deleteCategory(demoIds.workspace, categoryId),
+      await deleteCategory(harness, demoIds.workspace, categoryId),
       true,
     );
   }
@@ -621,7 +722,7 @@ async function exerciseKnowledgeImport(harness: Harness) {
   }
   for (const category of activatedCategories) {
     assert.equal(
-      await harness.repository.deleteCategory(demoIds.workspace, category.id),
+      await deleteCategory(harness, demoIds.workspace, category.id),
       true,
     );
   }
@@ -858,7 +959,7 @@ async function exerciseSeedRerun(
 
   const theme = await harness.repository.getTheme(demoIds.workspace);
   assert.ok(theme);
-  await harness.repository.updateTheme({
+  await updateTheme(harness, {
     workspaceId: demoIds.workspace,
     name: `${label} theme edit`,
     config: theme.config,
@@ -866,7 +967,8 @@ async function exerciseSeedRerun(
 
   await deleteSeedCategoryArticles(harness, demoIds.gettingStartedCategory);
   assert.equal(
-    await harness.repository.deleteCategory(
+    await deleteCategory(
+      harness,
       demoIds.workspace,
       demoIds.gettingStartedCategory,
     ),
@@ -927,13 +1029,14 @@ async function exerciseSeedSlugConflicts(
 
   await deleteSeedCategoryArticles(harness, demoIds.gettingStartedCategory);
   assert.equal(
-    await harness.repository.deleteCategory(
+    await deleteCategory(
+      harness,
       demoIds.workspace,
       demoIds.gettingStartedCategory,
     ),
     true,
   );
-  await harness.repository.createCategory({
+  await createCategory(harness, {
     ...demoContent.categories[0],
     id: replacementCategoryId,
     name: `${label} replacement category`,
@@ -983,14 +1086,15 @@ async function exerciseSeedSlugConflicts(
 
   await harness.repository.deleteArticle(demoIds.workspace, replacementArticleId);
   assert.equal(
-    await harness.repository.deleteCategory(demoIds.workspace, replacementCategoryId),
+    await deleteCategory(harness, demoIds.workspace, replacementCategoryId),
     true,
   );
   await seed();
 
   await deleteSeedCategoryArticles(harness, demoIds.gettingStartedCategory);
   assert.equal(
-    await harness.repository.deleteCategory(
+    await deleteCategory(
+      harness,
       demoIds.workspace,
       demoIds.gettingStartedCategory,
     ),
@@ -1001,7 +1105,7 @@ async function exerciseSeedSlugConflicts(
     slug: foreignWorkspaceId,
     name: `${label} foreign workspace`,
   });
-  await harness.repository.createCategory({
+  await createCategory(harness, {
     ...demoContent.categories[0],
     workspaceId: foreignWorkspaceId,
   });
@@ -1014,7 +1118,8 @@ async function exerciseSeedSlugConflicts(
     `${harness.name} ${label} seeded an article beneath another workspace's category`,
   );
   assert.equal(
-    await harness.repository.deleteCategory(
+    await deleteCategory(
+      harness,
       foreignWorkspaceId,
       demoIds.gettingStartedCategory,
     ),
@@ -1373,7 +1478,7 @@ async function exerciseRepository(harness: Harness) {
     description: null,
     position: 1,
   };
-  await harness.repository.createCategory(contractCategory);
+  await createCategory(harness, contractCategory);
   assert.deepEqual(
     (await harness.repository.listCategories(demoIds.workspace)).map((category) => category.id),
     [
@@ -1386,7 +1491,7 @@ async function exerciseRepository(harness: Harness) {
     `${harness.name} did not order equal-position categories by id`,
   );
 
-  await harness.repository.updateCategory({
+  await updateCategory(harness, {
     ...contractCategory,
     name: "Repository contract",
     description: "Cross-dialect CRUD",
@@ -1400,7 +1505,8 @@ async function exerciseRepository(harness: Harness) {
   });
 
   assert.equal(
-    await harness.repository.deleteCategory(
+    await deleteCategory(
+      harness,
       demoIds.workspace,
       demoIds.gettingStartedCategory,
     ),
@@ -1408,7 +1514,7 @@ async function exerciseRepository(harness: Harness) {
     `${harness.name} deleted a category that still contained articles`,
   );
 
-  await harness.repository.updateCategory({
+  await updateCategory(harness, {
     ...contractCategory,
     workspaceId: "workspace_missing",
     name: "Wrong workspace",
@@ -1510,7 +1616,7 @@ async function exerciseRepository(harness: Harness) {
     `${harness.name} omitted a newly published article from the public listing`,
   );
   assert.equal(
-    await harness.repository.updateCategory({
+    await updateCategory(harness, {
       ...contractCategory,
       slug: "contract-moved",
     }),
@@ -1960,7 +2066,7 @@ async function exerciseRepository(harness: Harness) {
   );
 
   assert.equal(
-    await harness.repository.deleteCategory("workspace_missing", contractCategory.id),
+    await deleteCategory(harness, "workspace_missing", contractCategory.id),
     false,
   );
   assert.ok(
@@ -1969,7 +2075,7 @@ async function exerciseRepository(harness: Harness) {
     ),
   );
   assert.equal(
-    await harness.repository.deleteCategory(demoIds.workspace, contractCategory.id),
+    await deleteCategory(harness, demoIds.workspace, contractCategory.id),
     true,
   );
   assert.ok(
@@ -1995,7 +2101,7 @@ async function exerciseRepository(harness: Harness) {
       primary: "oklch(0.55 0.18 250)",
     },
   };
-  await harness.repository.updateTheme({
+  await updateTheme(harness, {
     workspaceId: demoIds.workspace,
     name: "Contract Theme",
     config: updatedThemeConfig,
@@ -2220,7 +2326,7 @@ async function exerciseRepository(harness: Harness) {
     name: "Analytics isolation",
   };
   await harness.createWorkspace(isolationWorkspace);
-  await harness.repository.createCategory({
+  await createCategory(harness, {
     id: "category_analytics_isolation",
     workspaceId: isolationWorkspace.id,
     slug: "analytics",
@@ -2425,7 +2531,31 @@ async function createPostgresHarness(): Promise<Harness> {
   return {
     name: "Postgres",
     repository: createPostgresRepository(database),
+    categoryAuthoring: createPostgresCategoryAuthoringRepository(database),
+    themeAuthoring: createPostgresThemeAuthoringRepository(database),
     seed: () => seedPostgres(database),
+    async authoringActor(workspaceId) {
+      const actor = repositoryActor(workspaceId);
+      const createdAt = new Date();
+      const expiresAt = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+      await pool.query(
+        `insert into workspace_members (
+           id, workspace_id, normalized_email, display_name, role, status,
+           password_salt, password_digest, password_iterations, created_at, updated_at
+         ) select $1, $2, 'repository@example.test', 'Repository author',
+                  'administrator', 'active', $3, $4, 600000, $5, $5
+           where not exists (select 1 from workspace_members where id = $1)`,
+        [actor.memberId, workspaceId, "a".repeat(43), "b".repeat(43), createdAt],
+      );
+      await pool.query(
+        `insert into admin_sessions (
+           id, workspace_id, member_id, created_at, expires_at
+         ) select $1, $2, $3, $4, $5
+           where not exists (select 1 from admin_sessions where id = $1)`,
+        [actor.sessionId, workspaceId, actor.memberId, createdAt, expiresAt],
+      );
+      return actor;
+    },
     async createWorkspace(workspace) {
       await pool.query(
         "insert into workspaces (id, slug, name) values ($1, $2, $3)",
@@ -2599,7 +2729,48 @@ async function createLocalSqliteHarness(): Promise<Harness> {
   return {
     name: "SQLite",
     repository: createSqliteRepository(database),
+    categoryAuthoring: createSqliteCategoryAuthoringRepository(database),
+    themeAuthoring: createSqliteThemeAuthoringRepository(database),
     seed: () => seedD1(database),
+    async authoringActor(workspaceId) {
+      const actor = repositoryActor(workspaceId);
+      const createdAt = Date.now();
+      const expiresAt = createdAt + 7 * 60 * 60 * 1000;
+      client
+        .prepare(
+          `insert into workspace_members (
+             id, workspace_id, normalized_email, display_name, role, status,
+             password_salt, password_digest, password_iterations, created_at, updated_at
+           ) select ?, ?, 'repository@example.test', 'Repository author',
+                    'administrator', 'active', ?, ?, 600000, ?, ?
+             where not exists (select 1 from workspace_members where id = ?)`,
+        )
+        .run(
+          actor.memberId,
+          workspaceId,
+          "a".repeat(43),
+          "b".repeat(43),
+          createdAt,
+          createdAt,
+          actor.memberId,
+        );
+      client
+        .prepare(
+          `insert into admin_sessions (
+             id, workspace_id, member_id, created_at, expires_at
+           ) select ?, ?, ?, ?, ?
+             where not exists (select 1 from admin_sessions where id = ?)`,
+        )
+        .run(
+          actor.sessionId,
+          workspaceId,
+          actor.memberId,
+          createdAt,
+          expiresAt,
+          actor.sessionId,
+        );
+      return actor;
+    },
     async createWorkspace(workspace) {
       client
         .prepare("insert into workspaces (id, slug, name) values (?, ?, ?)")
@@ -2955,6 +3126,7 @@ test("SQLite repository keeps local atomic statements in one Drizzle transaction
       workspace_id text not null
     );
     create table article_assets (asset_id text not null);
+    create table article_revision_assets (asset_id text not null);
     create table asset_manifest_items (asset_id text not null);
     insert into asset_manifests (id, workspace_id, expires_at)
       values ('manifest_local_batch', 'workspace_local_batch', 0);
@@ -3467,6 +3639,20 @@ test("Postgres authoring fence backfills, locks, and fails closed", { timeout: 1
       "Open",
     );
 
+    await pool.query(
+      `update workspace_authoring_controls
+       set writes_paused = true, generation = generation + 1
+       where not writes_paused`,
+    );
+    await applyPostgresMigrationAtomically(pool, "0011_magical_loki.sql");
+    await applyPostgresMigrationAtomically(pool, "0012_talented_lord_tyger.sql");
+    await pool.query(
+      `update workspace_authoring_controls
+       set writes_paused = false, generation = generation + 1
+       where workspace_id = $1`,
+      [freshWorkspaceId],
+    );
+
     const database = createPostgresDatabase(pool, { schema: postgresSchema });
     await seedPostgres(database);
     await pool.query(
@@ -3774,6 +3960,23 @@ test("SQLite authoring fence backfills, asserts, and rolls back", async () => {
       ).name,
       "Open",
     );
+
+    client
+      .prepare(
+        `update workspace_authoring_controls
+         set writes_paused = 1, generation = generation + 1
+         where writes_paused = 0`,
+      )
+      .run();
+    applySqliteMigration(client, "0011_silly_green_goblin.sql");
+    applySqliteMigration(client, "0012_aromatic_vin_gonzales.sql");
+    client
+      .prepare(
+        `update workspace_authoring_controls
+         set writes_paused = 0, generation = generation + 1
+         where workspace_id = ?`,
+      )
+      .run(freshWorkspaceId);
 
     const database = createSqliteDatabase(client, { schema: sqliteSchema });
     await seedD1(database);

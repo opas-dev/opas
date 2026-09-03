@@ -15,8 +15,8 @@ import {
   type AuthoringPausedFailure,
 } from "@/authoring/failures";
 import { requireMemberCapability } from "@/auth/admin";
-import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
+import { getThemeAuthoringRepository } from "@/db/theme-authoring-database";
 import { themePresets } from "@/theme/presets";
 import type { ThemeConfig } from "@/theme/schema";
 
@@ -24,6 +24,8 @@ export type ThemeActionState = {
   status: "idle" | "error" | "success";
   message: string;
   revision: number;
+  themeId: string;
+  themeVersion: number;
   activePreset: ThemePresetId | null;
   values: ThemeEditorValues;
   fieldErrors?: ThemeFieldErrors;
@@ -34,7 +36,7 @@ export async function updateThemeAction(
   previousState: ThemeActionState,
   formData: FormData,
 ): Promise<ThemeActionState> {
-  await requireMemberCapability("workspace:configure", demoIds.workspace);
+  const member = await requireMemberCapability("workspace:configure", demoIds.workspace);
   const revision = previousState.revision + 1;
   const request = parseThemeRequest(formData);
 
@@ -69,11 +71,62 @@ export async function updateThemeAction(
   };
 
   try {
-    await (await getRepository()).updateTheme({
-      workspaceId: demoIds.workspace,
-      name,
-      config,
+    const result = await (await getThemeAuthoringRepository()).updateTheme({
+      actor: {
+        memberId: member.memberId,
+        sessionId: member.sessionId,
+        workspaceId: member.workspaceId,
+      },
+      expectedThemeVersion: request.data.expectedThemeVersion,
+      theme: {
+        id: request.data.id,
+        workspaceId: demoIds.workspace,
+        name,
+        config,
+      },
     });
+    if (result.status === "conflict") {
+      return {
+        ...previousState,
+        status: "error",
+        message: "The theme changed in another tab. Reload before saving again.",
+        revision,
+        values,
+        fieldErrors: undefined,
+        code: undefined,
+      };
+    }
+    if (result.status === "rejected") {
+      return {
+        ...previousState,
+        status: "error",
+        message:
+          result.code === "ACTOR_FORBIDDEN"
+            ? "Your access changed before the theme could be saved."
+            : "The theme is no longer available. Reload and try again.",
+        revision,
+        values,
+        fieldErrors: undefined,
+        code: undefined,
+      };
+    }
+
+    revalidatePath("/", "layout");
+
+    return {
+      status: "success",
+      message:
+        result.status === "unchanged"
+          ? `${name} is already active.`
+          : preset
+            ? `${themePresetOptions[preset].name} is now active.`
+            : `${name} was saved.`,
+      revision,
+      activePreset: preset,
+      values,
+      themeId: result.theme.id,
+      themeVersion: result.theme.version,
+    };
   } catch (error) {
     const paused = getAuthoringPausedFailure(error);
     if (paused) {
@@ -108,16 +161,4 @@ export async function updateThemeAction(
       code: undefined,
     };
   }
-
-  revalidatePath("/", "layout");
-
-  return {
-    status: "success",
-    message: preset
-      ? `${themePresetOptions[preset].name} is now active.`
-      : `${name} was saved.`,
-    revision,
-    activePreset: preset,
-    values,
-  };
 }

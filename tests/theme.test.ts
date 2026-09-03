@@ -195,19 +195,30 @@ test("Tailwind maps the complete semantic namespace through runtime variables", 
 test("admin theme requests accept only known presets and strict theme JSON", () => {
   const presetRequest = new FormData();
   presetRequest.set("intent", "preset");
+  presetRequest.set("id", "theme_default");
+  presetRequest.set("expectedThemeVersion", "4");
   presetRequest.set("preset", "ocean");
   assert.deepEqual(parseThemeRequest(presetRequest), {
     success: true,
-    data: { kind: "preset", preset: "ocean" },
+    data: {
+      kind: "preset",
+      id: "theme_default",
+      expectedThemeVersion: 4,
+      preset: "ocean",
+    },
   });
 
   const unknownPreset = new FormData();
   unknownPreset.set("intent", "preset");
+  unknownPreset.set("id", "theme_default");
+  unknownPreset.set("expectedThemeVersion", "4");
   unknownPreset.set("preset", "nightfall");
   assert.equal(parseThemeRequest(unknownPreset).success, false);
 
   const jsonRequest = new FormData();
   jsonRequest.set("intent", "json");
+  jsonRequest.set("id", "theme_default");
+  jsonRequest.set("expectedThemeVersion", "4");
   jsonRequest.set("name", "  Custom support theme  ");
   jsonRequest.set("config", JSON.stringify(themePresets.grove));
   const parsedJson = parseThemeRequest(jsonRequest);
@@ -216,6 +227,8 @@ test("admin theme requests accept only known presets and strict theme JSON", () 
     assert.equal(parsedJson.data.kind, "json");
     if (parsedJson.data.kind === "json") {
       assert.equal(parsedJson.data.name, "Custom support theme");
+      assert.equal(parsedJson.data.id, "theme_default");
+      assert.equal(parsedJson.data.expectedThemeVersion, 4);
       assert.deepEqual(parsedJson.data.config, themePresets.grove);
     }
   }

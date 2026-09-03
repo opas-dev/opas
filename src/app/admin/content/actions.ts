@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { scheduleEmbeddingRecovery } from "@/ai/embedding-scheduling";
 import {
   parseArticleRequest,
+  parseCategoryDeleteRequest,
   parseCategoryRequest,
   parseRecordRequest,
   type ContentFieldErrors,
@@ -28,6 +29,7 @@ import {
   validateArticleMdx,
 } from "@/content/mdx-safety";
 import { getRepository } from "@/db";
+import { getCategoryAuthoringRepository } from "@/db/category-authoring-database";
 import { demoIds } from "@/db/demo";
 
 export type ContentActionState = {
@@ -37,6 +39,7 @@ export type ContentActionState = {
   fieldErrors?: ContentFieldErrors;
   assetManifestStatus?: ArticleAssetManifestStatus;
   code?: AuthoringPausedFailure["code"];
+  recordVersion?: number;
 };
 
 function databaseErrorDetails(error: unknown) {
@@ -64,16 +67,22 @@ function errorState(
     status: "error",
     message,
     revision: previousState.revision + 1,
+    recordVersion: previousState.recordVersion,
     fieldErrors,
     assetManifestStatus,
   };
 }
 
-function successState(previousState: ContentActionState, message: string): ContentActionState {
+function successState(
+  previousState: ContentActionState,
+  message: string,
+  recordVersion?: number,
+): ContentActionState {
   return {
     status: "success",
     message,
     revision: previousState.revision + 1,
+    ...(recordVersion === undefined ? {} : { recordVersion }),
   };
 }
 
@@ -83,7 +92,8 @@ function pausedErrorState(
 ): ContentActionState | null {
   const failure = getAuthoringPausedFailure(error);
   return failure
-    ? {
+      ? {
+        ...previousState,
         ...failure,
         status: "error",
         revision: previousState.revision + 1,
@@ -99,14 +109,14 @@ export async function saveCategoryAction(
   previousState: ContentActionState,
   formData: FormData,
 ): Promise<ContentActionState> {
-  await requireMemberCapability("category:manage", demoIds.workspace);
+  const member = await requireMemberCapability("category:manage", demoIds.workspace);
   const request = parseCategoryRequest(formData);
 
   if (!request.success) {
     return errorState(previousState, "Review the highlighted category fields.", request.fieldErrors);
   }
 
-  const repository = await getRepository();
+  const repository = await getCategoryAuthoringRepository();
   const category = {
     id:
       request.data.mode === "update"
@@ -119,25 +129,58 @@ export async function saveCategoryAction(
     position: request.data.position,
   };
 
-  if (request.data.mode === "update") {
-    const categories = await repository.listCategories(demoIds.workspace);
-    if (!categories.some((candidate) => candidate.id === category.id)) {
-      return errorState(previousState, "That category no longer exists.");
-    }
-  }
-
   try {
-    if (request.data.mode === "create") {
-      await repository.createCategory(category);
-    } else {
-      const updated = await repository.updateCategory(category);
-      if (!updated) {
-        return errorState(
-          previousState,
-          "Unpublish the category's indexed articles before changing its URL slug.",
-        );
-      }
+    const actor = {
+      memberId: member.memberId,
+      sessionId: member.sessionId,
+      workspaceId: member.workspaceId,
+    };
+    const result =
+      request.data.mode === "create"
+        ? await repository.createCategory({
+            actor,
+            category,
+            expectedCategoryVersion: 0,
+          })
+        : await repository.updateCategory({
+            actor,
+            category,
+            expectedCategoryVersion: request.data.expectedCategoryVersion,
+          });
+
+    if (result.status === "conflict") {
+      return errorState(
+        previousState,
+        result.code === "STALE_CATEGORY"
+          ? "This category changed in another tab. Reload before saving again."
+          : result.code === "CATEGORY_SLUG_CONFLICT"
+            ? "That URL slug already belongs to another category."
+            : "That category already exists.",
+      );
     }
+    if (result.status === "rejected") {
+      return errorState(
+        previousState,
+        result.code === "CATEGORY_NOT_FOUND"
+          ? "That category no longer exists."
+          : result.code === "LIVE_CATEGORY_SLUG"
+            ? "Unpublish this category's live articles before changing its URL slug."
+            : result.code === "ACTOR_FORBIDDEN"
+              ? "Your access changed before the category could be saved."
+              : "The category request is no longer valid. Reload and try again.",
+      );
+    }
+
+    revalidateContent();
+    return successState(
+      previousState,
+      request.data.mode === "create"
+        ? `${request.data.name} was created.`
+        : result.status === "unchanged"
+          ? `${request.data.name} is already up to date.`
+          : `${request.data.name} was saved.`,
+      result.category.version,
+    );
   } catch (error) {
     const paused = pausedErrorState(previousState, error);
     if (paused) return paused;
@@ -147,52 +190,47 @@ export async function saveCategoryAction(
       "The category could not be saved. Check that its URL slug is unique.",
     );
   }
-
-  revalidateContent();
-  return successState(
-    previousState,
-    request.data.mode === "create"
-      ? `${request.data.name} was created.`
-      : `${request.data.name} was saved.`,
-  );
 }
 
 export async function deleteCategoryAction(
   previousState: ContentActionState,
   formData: FormData,
 ): Promise<ContentActionState> {
-  await requireMemberCapability("category:manage", demoIds.workspace);
-  const request = parseRecordRequest(formData);
+  const member = await requireMemberCapability("category:manage", demoIds.workspace);
+  const request = parseCategoryDeleteRequest(formData);
 
   if (!request.success) {
     return errorState(previousState, "The category request is invalid.", request.fieldErrors);
   }
 
-  const repository = await getRepository();
-  const [categories, articles] = await Promise.all([
-    repository.listCategories(demoIds.workspace),
-    repository.listArticles(demoIds.workspace),
-  ]);
-  const category = categories.find((candidate) => candidate.id === request.data.id);
-
-  if (!category) {
-    return errorState(previousState, "That category no longer exists.");
-  }
-
-  const articleCount = articles.filter((article) => article.categoryId === category.id).length;
-  if (articleCount > 0) {
-    return errorState(
-      previousState,
-      `Move or delete ${articleCount} ${articleCount === 1 ? "article" : "articles"} first.`,
-    );
-  }
+  const repository = await getCategoryAuthoringRepository();
 
   try {
-    const deleted = await repository.deleteCategory(demoIds.workspace, category.id);
-    if (!deleted) {
+    const result = await repository.deleteCategory({
+      actor: {
+        memberId: member.memberId,
+        sessionId: member.sessionId,
+        workspaceId: member.workspaceId,
+      },
+      category: { id: request.data.id, workspaceId: demoIds.workspace },
+      expectedCategoryVersion: request.data.expectedCategoryVersion,
+    });
+    if (result.status === "conflict") {
       return errorState(
         previousState,
-        "The category changed or contains articles. Reload and try again.",
+        "This category changed in another tab. Reload before deleting it.",
+      );
+    }
+    if (result.status === "rejected") {
+      return errorState(
+        previousState,
+        result.code === "CATEGORY_REFERENCED"
+          ? "Move every current category reference first, including references in archived articles."
+          : result.code === "CATEGORY_NOT_FOUND"
+            ? "That category no longer exists."
+            : result.code === "ACTOR_FORBIDDEN"
+              ? "Your access changed before the category could be deleted."
+              : "The category request is no longer valid. Reload and try again.",
       );
     }
   } catch (error) {
@@ -203,7 +241,7 @@ export async function deleteCategoryAction(
   }
 
   revalidateContent();
-  return successState(previousState, `${category.name} was deleted.`);
+  return successState(previousState, "The category was deleted.");
 }
 
 export async function saveArticleAction(

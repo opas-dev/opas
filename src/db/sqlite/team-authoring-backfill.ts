@@ -188,9 +188,10 @@ insert into article_heads (
   published_revision_id,
   published_revision_number,
   review_state,
+  submitted_by_member_id,
   archived_at,
   archived_by_member_id
-) values (?, ?, ?, 1, ?, ?, ?, ?, null, null)
+) values (?, ?, ?, 1, ?, ?, ?, ?, null, null, null)
 on conflict (article_id, workspace_id) do nothing
 `;
 
@@ -288,10 +289,13 @@ function inspect(database: Database.Database): TeamAuthoringBackfillInspection {
             `select count(*) as count
              from sqlite_master
              where type = 'trigger'
-               and name = 'article_heads_authoring_control_insert_trigger'`,
+               and name in (
+                 'article_heads_authoring_control_insert_trigger',
+                 'categories_current_revision_delete_trigger'
+               )`,
           )
           .get() as { count: number }
-      ).count === 1,
+      ).count === 2,
     pendingArticleCount: rows.reduce(
       (count, row) => count + row.pending_article_count,
       0,
@@ -528,7 +532,28 @@ const draftMaterializationUpdateCondition = `new.status = 'draft'
   and (
     new.id is not old.id
     or new.workspace_id is not old.workspace_id
-    or new.category_id is not old.category_id
+    or (
+      new.category_id is not old.category_id
+      and not exists (
+        select 1
+        from article_heads head
+        inner join article_revisions working
+          on working.workspace_id = head.workspace_id
+          and working.article_id = head.article_id
+          and working.id = head.working_revision_id
+          and working.revision_number = head.working_revision_number
+        left join article_revisions published
+          on published.workspace_id = head.workspace_id
+          and published.article_id = head.article_id
+          and published.id = head.published_revision_id
+          and published.revision_number = head.published_revision_number
+        where head.workspace_id = new.workspace_id
+          and head.article_id = new.id
+          and new.category_id = coalesce(published.category_id, working.category_id)
+          and old.category_id is not working.category_id
+          and (published.id is null or old.category_id is not published.category_id)
+      )
+    )
     or new.title is not old.title
     or new.mdx is not old.mdx
     or new.content_hash is not old.content_hash
@@ -541,6 +566,11 @@ const draftMaterializationUpdateCondition = `new.status = 'draft'
   )`;
 
 export const sqliteTeamAuthoringGuardStatements: readonly string[] = [
+  `drop trigger if exists \`article_heads_authoring_control_insert_trigger\``,
+  `drop trigger if exists \`article_heads_authoring_control_update_trigger\``,
+  `drop trigger if exists \`article_heads_authoring_control_delete_trigger\``,
+  `drop trigger if exists \`article_heads_integrity_insert_trigger\``,
+  `drop trigger if exists \`article_heads_integrity_update_trigger\``,
   ...authoringControlTriggers("article_heads"),
   ...authoringControlTriggers("article_slug_claims"),
   `create trigger \`article_revisions_authoring_control_insert_trigger\`

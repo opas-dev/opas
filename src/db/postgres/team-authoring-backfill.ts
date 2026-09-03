@@ -319,8 +319,8 @@ async function insertBaseline(database: Queryable, baseline: TeamAuthoringBaseli
     `insert into article_heads
        (article_id, workspace_id, working_revision_id, working_revision_number,
         working_slug, published_revision_id, published_revision_number, review_state,
-        archived_at, archived_by_member_id)
-     values ($1, $2, $3, 1, $4, $5, $6, $7, null, null)
+        submitted_by_member_id, archived_at, archived_by_member_id)
+     values ($1, $2, $3, 1, $4, $5, $6, $7, null, null, null)
      on conflict (article_id, workspace_id) do nothing`,
     [
       article.articleId,
@@ -608,7 +608,31 @@ begin
   if TG_OP = 'UPDATE' and new."status" = 'draft' and (
     new."id" is distinct from old."id"
     or new."workspace_id" is distinct from old."workspace_id"
-    or new."category_id" is distinct from old."category_id"
+    or (
+      new."category_id" is distinct from old."category_id"
+      and not exists (
+        select 1
+        from "article_heads" head
+        inner join "article_revisions" working
+          on working."workspace_id" = head."workspace_id"
+          and working."article_id" = head."article_id"
+          and working."id" = head."working_revision_id"
+          and working."revision_number" = head."working_revision_number"
+        left join "article_revisions" published
+          on published."workspace_id" = head."workspace_id"
+          and published."article_id" = head."article_id"
+          and published."id" = head."published_revision_id"
+          and published."revision_number" = head."published_revision_number"
+        where head."workspace_id" = new."workspace_id"
+          and head."article_id" = new."id"
+          and new."category_id" = coalesce(published."category_id", working."category_id")
+          and old."category_id" is distinct from working."category_id"
+          and (
+            published."id" is null
+            or old."category_id" is distinct from published."category_id"
+          )
+      )
+    )
     or new."title" is distinct from old."title"
     or new."mdx" is distinct from old."mdx"
     or new."content_hash" is distinct from old."content_hash"

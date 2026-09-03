@@ -3,6 +3,11 @@
 DO $$
 BEGIN
 	LOCK TABLE "workspaces" IN SHARE MODE;
+	PERFORM 1
+	FROM "workspace_authoring_controls"
+	ORDER BY "workspace_id"
+	FOR UPDATE;
+
 	IF EXISTS (
 		SELECT 1
 		FROM "workspaces" AS "workspaces"
@@ -15,11 +20,6 @@ BEGIN
 			MESSAGE = 'AUTHORING_MIGRATION_REQUIRES_PAUSE',
 			ERRCODE = 'P0001';
 	END IF;
-
-	PERFORM 1
-	FROM "workspace_authoring_controls"
-	ORDER BY "workspace_id"
-	FOR UPDATE;
 END;
 $$;
 --> statement-breakpoint

@@ -177,6 +177,22 @@ function writeMigrationBundle(
   return target;
 }
 
+function beforeTeamAuthoringMigration(filename: string) {
+  return !filename.startsWith("0011_") && !filename.startsWith("0012_");
+}
+
+function teamAuthoringMigration(filename: string) {
+  return filename.startsWith("0011_") || filename.startsWith("0012_");
+}
+
+function teamAuthoringSchemaMigration(filename: string) {
+  return filename.startsWith("0011_");
+}
+
+function categoryThemeVersionMigration(filename: string) {
+  return filename.startsWith("0012_");
+}
+
 function seedSource(articleCount: number) {
   const articles = Array.from({ length: articleCount }, (_, index) => {
     const published = index % 2 === 0;
@@ -291,7 +307,11 @@ function publicProjection(persistDirectory: string) {
       "select * from article_assets order by article_id, asset_id",
     ),
     articles: query(persistDirectory, "select * from articles order by id"),
-    categories: query(persistDirectory, "select * from categories order by id"),
+    categories: query(
+      persistDirectory,
+      `select id, workspace_id, slug, name, description, position, created_at, updated_at
+       from categories order by id`,
+    ),
   };
 }
 
@@ -307,12 +327,12 @@ test(
       const beforeMigration = writeMigrationBundle(
         directory,
         "before-team-authoring.sql",
-        (filename) => !filename.startsWith("0011_"),
+        beforeTeamAuthoringMigration,
       );
       const teamMigration = writeMigrationBundle(
         directory,
         "team-authoring.sql",
-        (filename) => filename.startsWith("0011_"),
+        teamAuthoringMigration,
       );
       executeFile(persistDirectory, beforeMigration);
       executeFile(persistDirectory, teamMigration);
@@ -422,12 +442,12 @@ test(
       const beforeMigration = writeMigrationBundle(
         directory,
         "before-team-authoring.sql",
-        (filename) => !filename.startsWith("0011_"),
+        beforeTeamAuthoringMigration,
       );
       const teamMigration = writeMigrationBundle(
         directory,
         "team-authoring.sql",
-        (filename) => filename.startsWith("0011_"),
+        teamAuthoringMigration,
       );
       executeFile(persistDirectory, beforeMigration);
       executeSql(
@@ -473,6 +493,155 @@ test(
 );
 
 test(
+  "native D1 category and theme DDL is atomic for unpaused and missing controls",
+  { timeout: 120_000 },
+  () => {
+    const directory = mkdtempSync(
+      path.join(tmpdir(), "opas-category-theme-d1-precondition-"),
+    );
+    const persistDirectory = path.join(directory, "state");
+    let succeeded = false;
+    try {
+      const beforeMigration = writeMigrationBundle(
+        directory,
+        "before-team-authoring.sql",
+        beforeTeamAuthoringMigration,
+      );
+      const schemaMigration = writeMigrationBundle(
+        directory,
+        "team-authoring-schema.sql",
+        teamAuthoringSchemaMigration,
+      );
+      const versionMigration = writeMigrationBundle(
+        directory,
+        "category-theme-version.sql",
+        categoryThemeVersionMigration,
+      );
+      executeFile(persistDirectory, beforeMigration);
+      executeSql(
+        persistDirectory,
+        "insert into workspaces (id, slug, name) values ('unsafe', 'unsafe', 'Unsafe')",
+      );
+      executeSql(
+        persistDirectory,
+        `update workspace_authoring_controls
+         set writes_paused = 1, generation = generation + 1
+         where workspace_id = 'unsafe'`,
+      );
+      executeFile(persistDirectory, schemaMigration);
+
+      executeSql(
+        persistDirectory,
+        `update workspace_authoring_controls
+         set writes_paused = 0, generation = generation + 1
+         where workspace_id = 'unsafe'`,
+      );
+      const unpaused = executeFile(persistDirectory, versionMigration, {
+        allowFailure: true,
+      });
+      assert.notEqual(unpaused.status, 0);
+      assert.deepEqual(
+        query(
+          persistDirectory,
+          `select count(*) as count from pragma_table_info('categories')
+           where name = 'version'`,
+        ),
+        [{ count: 0 }],
+      );
+      assert.deepEqual(
+        query(
+          persistDirectory,
+          `select count(*) as count from pragma_table_info('article_heads')
+           where name = 'submitted_by_member_id'`,
+        ),
+        [{ count: 0 }],
+      );
+
+      executeSql(
+        persistDirectory,
+        `update workspace_authoring_controls
+         set writes_paused = 1, generation = generation + 1
+         where workspace_id = 'unsafe';
+         insert into workspaces (id, slug, name)
+         values ('missing', 'missing', 'Missing');
+         delete from workspace_authoring_controls where workspace_id = 'missing';`,
+      );
+      const missing = executeFile(persistDirectory, versionMigration, {
+        allowFailure: true,
+      });
+      assert.notEqual(missing.status, 0);
+      assert.deepEqual(
+        query(
+          persistDirectory,
+          `select count(*) as count from pragma_table_info('themes')
+           where name = 'version'`,
+        ),
+        [{ count: 0 }],
+      );
+      assert.deepEqual(
+        query(
+          persistDirectory,
+          `select count(*) as count from pragma_table_info('article_heads')
+           where name = 'submitted_by_member_id'`,
+        ),
+        [{ count: 0 }],
+      );
+
+      executeSql(
+        persistDirectory,
+        `insert into workspace_authoring_controls (
+           workspace_id, writes_paused, generation, changed_at
+         ) values ('missing', 1, 0, ${fixedTime})`,
+      );
+      executeFile(persistDirectory, versionMigration);
+      assert.deepEqual(
+        query(
+          persistDirectory,
+          `select count(*) as count from pragma_table_info('categories')
+           where name = 'version'`,
+        ),
+        [{ count: 1 }],
+      );
+      assert.deepEqual(
+        query(
+          persistDirectory,
+          `select count(*) as count from pragma_table_info('themes')
+           where name = 'version'`,
+        ),
+        [{ count: 1 }],
+      );
+      assert.deepEqual(
+        query(
+          persistDirectory,
+          `select count(*) as count from pragma_table_info('article_heads')
+           where name = 'submitted_by_member_id'`,
+        ),
+        [{ count: 1 }],
+      );
+      assert.deepEqual(
+        query(
+          persistDirectory,
+          `select count(*) as count from sqlite_master
+           where type = 'trigger' and name in (
+             'article_heads_authoring_control_insert_trigger',
+             'article_heads_authoring_control_update_trigger',
+             'article_heads_authoring_control_delete_trigger',
+             'article_heads_integrity_insert_trigger',
+             'article_heads_integrity_update_trigger'
+           )`,
+        ),
+        [{ count: 5 }],
+      );
+      assert.deepEqual(query(persistDirectory, "pragma foreign_key_check"), []);
+      succeeded = true;
+    } finally {
+      if (succeeded) rmSync(directory, { force: true, recursive: true });
+      else console.error(`Native D1 category/theme fixture retained at ${directory}`);
+    }
+  },
+);
+
+test(
   "native Wrangler-local D1 resumes and audits the application backfill",
   { timeout: 120_000 },
   async () => {
@@ -484,12 +653,12 @@ test(
       const beforeMigration = writeMigrationBundle(
         directory,
         "before-team-authoring.sql",
-        (filename) => !filename.startsWith("0011_"),
+        beforeTeamAuthoringMigration,
       );
       const teamMigration = writeMigrationBundle(
         directory,
         "team-authoring.sql",
-        (filename) => filename.startsWith("0011_"),
+        teamAuthoringMigration,
       );
       const seed = path.join(directory, "seed.sql");
       writeFileSync(seed, seedSource(26));
@@ -593,6 +762,45 @@ test(
         [{ count: 26 }],
       );
       assert.deepEqual(query(persistDirectory, "pragma foreign_key_check"), []);
+
+      executeSql(
+        persistDirectory,
+        `update workspace_authoring_controls set writes_paused = 0
+         where workspace_id = 'workspace_d1';
+         delete from article_heads
+         where workspace_id = 'workspace_d1' and article_id = 'article_000';
+         update workspace_authoring_controls set writes_paused = 1
+         where workspace_id = 'workspace_d1';`,
+      );
+      const completedLedgerHeadInsert = executeSql(
+        persistDirectory,
+        `insert into article_heads (
+           article_id, workspace_id, working_revision_id, working_revision_number,
+           working_slug, published_revision_id, published_revision_number,
+           review_state, submitted_by_member_id, archived_at, archived_by_member_id
+         ) values (
+           'article_000', 'workspace_d1', '${baselineZero.revisionId}', 1,
+           'article-0', '${baselineZero.revisionId}', 1, 'published', null, null, null
+         )`,
+        { allowFailure: true },
+      );
+      assert.notEqual(completedLedgerHeadInsert.status, 0);
+      assert.match(completedLedgerHeadInsert.output, /AUTHORING_PAUSED/u);
+      executeSql(
+        persistDirectory,
+        `update workspace_authoring_controls set writes_paused = 0
+         where workspace_id = 'workspace_d1';
+         insert into article_heads (
+           article_id, workspace_id, working_revision_id, working_revision_number,
+           working_slug, published_revision_id, published_revision_number,
+           review_state, submitted_by_member_id, archived_at, archived_by_member_id
+         ) values (
+           'article_000', 'workspace_d1', '${baselineZero.revisionId}', 1,
+           'article-0', '${baselineZero.revisionId}', 1, 'published', null, null, null
+         );
+         update workspace_authoring_controls set writes_paused = 1
+         where workspace_id = 'workspace_d1';`,
+      );
 
       const immutable = executeSql(
         persistDirectory,

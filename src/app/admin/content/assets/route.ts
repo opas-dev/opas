@@ -19,7 +19,7 @@ function errorDetails(error: unknown) {
 }
 
 export async function POST(request: Request) {
-  await requireMemberCapability("draft:edit", demoIds.workspace);
+  const member = await requireMemberCapability("draft:edit", demoIds.workspace);
 
   let stageRequest: Awaited<ReturnType<typeof readAssetStageRequest>>;
   try {
@@ -33,14 +33,15 @@ export async function POST(request: Request) {
 
   const repository = await getRepository();
   const now = new Date();
+  const actor = { memberId: member.memberId, sessionId: member.sessionId, workspaceId: member.workspaceId, checkedAt: now };
   let createdManifestId: string | undefined;
 
   try {
-    await repository.cleanupExpiredAssets(demoIds.workspace, now);
+    await repository.cleanupAuthorizedExpiredAssets(actor);
     const manifest = stageRequest.manifestId
       ? null
-      : await repository.createAssetManifest(
-          demoIds.workspace,
+      : await repository.createAuthorizedAssetManifest(
+          actor,
           new Date(now.getTime() + assetManifestLifetimeMilliseconds),
         );
     createdManifestId = manifest?.id;
@@ -49,8 +50,8 @@ export async function POST(request: Request) {
       throw new Error("An asset manifest was not created.");
     }
 
-    const asset = await repository.stageAsset(
-      demoIds.workspace,
+    const asset = await repository.stageAuthorizedAsset(
+      actor,
       manifestId,
       stageRequest.upload,
     );
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
 
     if (createdManifestId) {
       try {
-        await repository.discardAssetManifest(demoIds.workspace, createdManifestId);
+        await repository.discardAuthorizedAssetManifest(actor, createdManifestId);
       } catch (cleanupError) {
         const cleanupPaused = authoringPausedResponse(cleanupError);
         if (cleanupPaused) return cleanupPaused;
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  await requireMemberCapability("draft:edit", demoIds.workspace);
+  const member = await requireMemberCapability("draft:edit", demoIds.workspace);
 
   let manifestId: string;
   try {
@@ -116,7 +117,10 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    await (await getRepository()).discardAssetManifest(demoIds.workspace, manifestId);
+    await (await getRepository()).discardAuthorizedAssetManifest(
+      { memberId: member.memberId, sessionId: member.sessionId, workspaceId: member.workspaceId, checkedAt: new Date() },
+      manifestId,
+    );
     return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const paused = authoringPausedResponse(error);

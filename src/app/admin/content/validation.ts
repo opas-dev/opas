@@ -45,9 +45,19 @@ const categoryFields = {
     .max(10_000, "Position must be 10,000 or lower"),
 };
 
+const categoryVersionSchema = z.coerce
+  .number()
+  .int("The category version is invalid")
+  .min(1, "The category version is invalid");
+
 const categoryRequestSchema = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("create"), ...categoryFields }),
-  z.strictObject({ mode: z.literal("update"), id: identifierSchema, ...categoryFields }),
+  z.strictObject({
+    mode: z.literal("update"),
+    id: identifierSchema,
+    expectedCategoryVersion: categoryVersionSchema,
+    ...categoryFields,
+  }),
 ]);
 
 const articleFields = {
@@ -92,6 +102,10 @@ const articleRequestSchema = z
   });
 
 const recordRequestSchema = z.strictObject({ id: identifierSchema });
+const categoryDeleteRequestSchema = z.strictObject({
+  id: identifierSchema,
+  expectedCategoryVersion: categoryVersionSchema,
+});
 
 export type CategoryRequest = z.infer<typeof categoryRequestSchema>;
 export type ArticleRequest = z.infer<typeof articleRequestSchema>;
@@ -100,6 +114,7 @@ export type ContentFieldErrors = Partial<
   Record<
     | "form"
     | "id"
+    | "expectedCategoryVersion"
     | "name"
     | "slug"
     | "description"
@@ -148,6 +163,7 @@ function requestErrors(error: z.ZodError): ContentFieldErrors {
 
 const contentFieldNames = {
   id: true,
+  expectedCategoryVersion: true,
   name: true,
   slug: true,
   description: true,
@@ -180,6 +196,10 @@ export function parseCategoryRequest(formData: FormData) {
 
 export function parseArticleRequest(formData: FormData) {
   return parseRequest(articleRequestSchema, formData);
+}
+
+export function parseCategoryDeleteRequest(formData: FormData) {
+  return parseRequest(categoryDeleteRequestSchema, formData);
 }
 
 export function parseRecordRequest(formData: FormData) {
