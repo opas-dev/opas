@@ -43,7 +43,7 @@ export default async function AnalyticsAdminPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <AdminHeader email={admin.email} active="analytics" />
+      <AdminHeader member={admin} active="analytics" />
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
         <div className="max-w-3xl">
           <p className="m-0 text-sm font-semibold text-primary">Reader signals</p>

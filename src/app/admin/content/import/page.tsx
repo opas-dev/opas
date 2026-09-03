@@ -20,7 +20,7 @@ export default async function ImportContentPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <AdminHeader email={admin.email} active="content" />
+      <AdminHeader member={admin} active="content" />
       <div className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6 sm:py-14">
         <Link
           href="/admin/content"

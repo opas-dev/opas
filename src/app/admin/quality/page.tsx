@@ -96,7 +96,7 @@ export default async function QualityAdminPage({
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <AdminHeader email={admin.email} active="quality" />
+      <AdminHeader member={admin} active="quality" />
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
         <div className="flex flex-col justify-between gap-6 border-b border-border pb-8 lg:flex-row lg:items-end">
           <div className="max-w-3xl">

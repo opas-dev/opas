@@ -40,7 +40,7 @@ export default async function ThemeAdminPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <AdminHeader email={admin.email} active="theme" />
+      <AdminHeader member={admin} active="theme" />
 
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
         <div className="mb-10 max-w-3xl">

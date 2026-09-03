@@ -288,6 +288,8 @@ test("every protected entry point requests its exact capability", () => {
     "src/app/admin/quality/replay/route.ts": ["quality:manage"],
     "src/app/admin/quality/review/route.ts": ["quality:manage"],
     "src/app/admin/quality/run/route.ts": ["quality:manage"],
+    "src/app/admin/team/actions.ts": ["member:manage", "member:manage"],
+    "src/app/admin/team/page.tsx": ["member:manage"],
     "src/app/admin/theme/actions.ts": ["workspace:configure"],
     "src/app/admin/theme/page.tsx": ["workspace:configure"],
   } satisfies Record<string, readonly Capability[]>;

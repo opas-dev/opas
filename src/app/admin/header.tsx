@@ -1,22 +1,46 @@
 // ABOUTME: Renders the shared authenticated navigation for OPAS administration pages.
-// ABOUTME: Keeps content, analytics, theme, public-site, and sign-out destinations consistent.
+// ABOUTME: Shows current member identity and only the navigation their active role can use.
 import Link from "next/link";
 
 import { logoutAdmin } from "@/app/admin/actions";
+import { hasCapability, type Capability, type TeamRole } from "@/auth/capabilities";
+import type { ActiveMemberSession } from "@/auth/member-repository";
 
 type AdminHeaderProps = {
-  email: string;
-  active: "content" | "analytics" | "quality" | "theme";
+  active: "content" | "analytics" | "quality" | "team" | "theme";
+  member: Pick<ActiveMemberSession, "displayName" | "email" | "role">;
 };
 
 const navigation = [
   { id: "content", href: "/admin/content", label: "Content" },
   { id: "analytics", href: "/admin/analytics", label: "Analytics" },
   { id: "quality", href: "/admin/quality", label: "Quality" },
-  { id: "theme", href: "/admin/theme", label: "Theme" },
-] as const;
+  {
+    capability: "workspace:configure",
+    id: "theme",
+    href: "/admin/theme",
+    label: "Theme",
+  },
+  {
+    capability: "member:manage",
+    id: "team",
+    href: "/admin/team",
+    label: "Team",
+  },
+] as const satisfies readonly {
+  capability?: Capability;
+  href: string;
+  id: AdminHeaderProps["active"];
+  label: string;
+}[];
 
-export function AdminHeader({ email, active }: AdminHeaderProps) {
+const roleLabels: Record<TeamRole, string> = {
+  administrator: "Administrator",
+  editor: "Editor",
+  reviewer: "Reviewer",
+};
+
+export function AdminHeader({ member, active }: AdminHeaderProps) {
   return (
     <header className="border-b border-border bg-surface">
       <div className="mx-auto flex min-h-16 w-full max-w-6xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
@@ -25,12 +49,18 @@ export function AdminHeader({ email, active }: AdminHeaderProps) {
             O
           </span>
           <span className="min-w-0">
-            <span className="block text-sm font-semibold">OPAS Admin</span>
-            <span className="block max-w-44 truncate text-xs text-muted sm:max-w-none">{email}</span>
+            <span className="block max-w-52 truncate text-sm font-semibold">
+              {member.displayName}
+            </span>
+            <span className="block max-w-52 truncate text-xs text-muted">
+              {roleLabels[member.role]} · {member.email}
+            </span>
           </span>
         </Link>
         <nav aria-label="Administrator" className="ml-auto flex flex-wrap items-center justify-end gap-1">
-          {navigation.map((item) => (
+          {navigation.filter(
+            (item) => !("capability" in item) || hasCapability(member.role, item.capability),
+          ).map((item) => (
             <Link
               key={item.id}
               href={item.href}
