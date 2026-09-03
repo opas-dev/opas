@@ -42,11 +42,12 @@ const maintainedOrigin =
   "https://opas-mvp-timo-bejans-projects.vercel.app";
 const maintainedProjectLink =
   '{"projectId":"prj_QRjweVxLSmxPL8JBbfaiLW8wl7Aj","orgId":"team_92dzVY5C6gOfuw6u6wVfh4w7","projectName":"opas-mvp"}\n';
-const acceptanceProject = "opas-v02-acceptance-01a0430f";
+const acceptanceProject = "opas-acceptance-01a0430f";
 const acceptanceOrigin =
   `https://${acceptanceProject}-timo-bejans-projects.vercel.app`;
 const adminPassword = "admin-password-do-not-package";
 const adminSessionSecret = "session-secret-do-not-package".repeat(2);
+const previewSigningSecret = "preview-secret-do-not-package".repeat(2);
 const pooledUrl =
   "postgresql://opas:database-password@ep-demo-pooler.eu-central-1.aws.neon.tech/opas?sslmode=require";
 const directUrl =
@@ -59,6 +60,7 @@ function environmentFile(overrides: Record<string, string> = {}) {
     ADMIN_EMAIL: "Admin@opas.dev",
     ADMIN_PASSWORD: adminPassword,
     ADMIN_SESSION_SECRET: adminSessionSecret,
+    OPAS_PREVIEW_SIGNING_SECRET: previewSigningSecret,
     DATABASE_URL: "postgresql://local:local-password@localhost/local",
     NEON_DATABASE_URL: pooledUrl,
     NEON_DIRECT_DATABASE_URL: directUrl,
@@ -380,9 +382,9 @@ test("accepts only explicitly enabled disposable project names and their exact V
 
     for (const projectName of [
       "opas-mvp",
-      "opas-v02-acceptance-",
-      "opas-v02-acceptance-Invalid",
-      "unrelated-opas-v02-acceptance-test",
+      "opas-acceptance-",
+      "opas-acceptance-Invalid",
+      "unrelated-opas-acceptance-test",
     ]) {
       writeFileSync(
         join(workspace, ".vercel", "project.json"),
@@ -499,9 +501,10 @@ test("passes only validated runtime values and keeps the direct URL out of the b
     assert.equal(configuration.environment.NEON_DATABASE_URL, pooledUrl);
     assert.equal(configuration.neonIdentityHash, neonIdentityHash);
     assert.equal(configuration.environment.NEON_DIRECT_DATABASE_URL, undefined);
-    assert.equal(configuration.environment.ADMIN_EMAIL, "admin@opas.dev");
-    assert.equal(configuration.environment.ADMIN_PASSWORD, adminPassword);
+    assert.equal(configuration.environment.ADMIN_EMAIL, undefined);
+    assert.equal(configuration.environment.ADMIN_PASSWORD, undefined);
     assert.equal(configuration.environment.ADMIN_SESSION_SECRET, adminSessionSecret);
+    assert.equal(configuration.environment.OPAS_PREVIEW_SIGNING_SECRET, previewSigningSecret);
     assert.equal(configuration.environment.AWS_SECRET_ACCESS_KEY, undefined);
     assert.equal(configuration.environment.DATABASE_URL, undefined);
     assert.equal(configuration.environment.GITHUB_TOKEN, undefined);
@@ -512,11 +515,12 @@ test("passes only validated runtime values and keeps the direct URL out of the b
     assert.equal(configuration.environment.NPM_CONFIG_USERCONFIG, undefined);
     assert.equal(configuration.environment.OPAS_GENERATION_API_KEY, undefined);
     assert.equal(configuration.environment.VERCEL_TOKEN, "process-vercel-token");
-    assert.equal(configuration.secretValues.includes("admin@opas.dev"), true);
+    assert.equal(configuration.secretValues.includes("Admin@opas.dev"), true);
 
     for (const value of [
       adminPassword,
       adminSessionSecret,
+      previewSigningSecret,
       pooledUrl,
       directUrl,
       "database-password",

@@ -40,14 +40,20 @@ pnpm install --frozen-lockfile
 
 ## Docker quickstart
 
-Copy the single environment template and set `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET`, and a separate 32-byte `CRON_SECRET`; the cleanup sidecar requires the cron secret to enforce physical retention. Keep `OPAS_SITE_URL` aligned with the public port; the template already uses `http://localhost:3000`. The assistant needs the three non-secret generation endpoint, model, and retention-disclosure fields and, when required, `OPAS_GENERATION_API_KEY`. It also needs the six strict `OPAS_ANSWER_*` concurrency, rolling-budget, token-price, input-limit, and lease settings shown in the template. Prices are integer microdollars per one million provider-reported tokens; copy the selected provider's current prices rather than guessing them. Cross-provider fallback is disabled by default. Enabling it requires the complete `OPAS_GENERATION_FALLBACK_*` provider contract, both fallback token prices, an opposite provider, and a lease of at least 65 seconds; the browser disclosure names both vendors and models. Without a complete valid generation and admission contract, `/api/answers` returns unavailable while articles and search keep working. Answer analytics default to 30 days and can be shortened or disabled; explicit handoff contact/context has its own 30-day default. Configure support handoff with either `cloudflare-rest-email` or a fixed HTTPS `webhook`; leaving `OPAS_HANDOFF_PROVIDER` blank keeps the form fail-closed without affecting answers. Embedding provider settings remain optional: answers use lexical published-evidence retrieval until a matching embedding generation becomes active.
+Copy the single environment template and set the runtime-only `ADMIN_SESSION_SECRET`, a separate `OPAS_PREVIEW_SIGNING_SECRET`, and a separate 32-byte `CRON_SECRET`; the cleanup sidecar requires the cron secret to enforce physical retention. `ADMIN_EMAIL` and `ADMIN_PASSWORD` are consumed only by the explicit first-member bootstrap command. Keep `OPAS_SITE_URL` aligned with the public port; the template already uses `http://localhost:3000`. The assistant needs the three non-secret generation endpoint, model, and retention-disclosure fields and, when required, `OPAS_GENERATION_API_KEY`. It also needs the six strict `OPAS_ANSWER_*` concurrency, rolling-budget, token-price, input-limit, and lease settings shown in the template. Prices are integer microdollars per one million provider-reported tokens; copy the selected provider's current prices rather than guessing them. Cross-provider fallback is disabled by default. Enabling it requires the complete `OPAS_GENERATION_FALLBACK_*` provider contract, both fallback token prices, an opposite provider, and a lease of at least 65 seconds; the browser disclosure names both vendors and models. Without a complete valid generation and admission contract, `/api/answers` returns unavailable while articles and search keep working. Answer analytics default to 30 days and can be shortened or disabled; explicit handoff contact/context has its own 30-day default. Configure support handoff with either `cloudflare-rest-email` or a fixed HTTPS `webhook`; leaving `OPAS_HANDOFF_PROVIDER` blank keeps the form fail-closed without affecting answers. Embedding provider settings remain optional: answers use lexical published-evidence retrieval until a matching embedding generation becomes active.
 
 ```sh
 cp .env.example .env
 docker compose up --build
 ```
 
-The container waits for Postgres, applies migrations, inserts missing demo records, and starts as a non-root user. Existing records are not overwritten on restart.
+The container waits for Postgres, applies migrations, and starts as a non-root user. Seed reconciliation and evidence initialization are explicit, so a restart cannot silently mutate content. On a clean database, bootstrap the named administrator before running them:
+
+```sh
+pnpm operator:identity -- bootstrap --target postgres --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo"
+node --env-file=.env --import tsx scripts/prepare-postgres.ts seed
+node --env-file=.env --import tsx scripts/prepare-postgres.ts initialize-evidence
+```
 
 Verify the public and database-backed routes from another terminal:
 
@@ -59,14 +65,19 @@ The public site is at [localhost:3000](http://localhost:3000) and administration
 
 ## Cloudflare quickstart
 
-Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and the `demo.opas.dev` custom domain. Its workers.dev endpoint remains enabled as a fallback. A fork can set its own explicit account ID and matching `opas-*` names for a workers.dev deployment. Copy `.env.example` to the gitignored `.env`, set the administrator credentials and verified `OPAS_HANDOFF_TO_EMAIL` destination, then run:
+Cloudflare Workers and D1 are the primary OPAS production target. The checked-in release target uses `@opennextjs/cloudflare` and is pinned to the DevPlant account, the `opas-mvp` Worker and D1 database, and the `demo.opas.dev` custom domain. Its workers.dev endpoint remains enabled as a fallback. A fork can set its own explicit account ID and matching `opas-*` names for a workers.dev deployment. Copy `.env.example` to the gitignored `.env`, set the operator-only bootstrap credentials, runtime signing secrets, and verified `OPAS_HANDOFF_TO_EMAIL` destination, then run the explicit infrastructure, build, migration, identity, seed, and deployment steps:
 
 ```sh
 pnpm exec wrangler login
 pnpm cf:bootstrap
+pnpm cf:build
+pnpm cf:migrate
+pnpm operator:identity -- bootstrap --target cloudflare --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo" --remote --config wrangler.jsonc
+pnpm cf:seed
+pnpm cf:deploy
 ```
 
-Before activating answers, create the checked-in `opas-answers` AI Gateway in the same Cloudflare account. The bootstrap validates the scoped names, account, answer variables, and optional topic-policy syntax; it creates or finds the exact D1 database, applies migrations, inserts missing demo records, deploys with encrypted Worker secrets, and runs the HTTP smoke suite. Use `pnpm cf:deploy` for subsequent application-only releases.
+Before activating answers, create the checked-in `opas-answers` AI Gateway in the same Cloudflare account. Bootstrap validates the scoped names, account, answer variables, and optional topic-policy syntax, then creates or finds only the exact D1 database. The later commands are deliberately separate; deployment uploads the validated runtime-secret set but never migrates, seeds, or initializes evidence.
 
 See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for configuration, migration, verification, and rollback details.
 
@@ -74,14 +85,17 @@ See [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md) for configuration, mi
 
 Vercel and Neon are a live portability target, not OPAS production. “Production” in the commands below is only Vercel's environment name; promotion changes the Vercel project alias and does not move Cloudflare traffic or attach an OPAS domain.
 
-Create one Neon branch, copy `.env.example` to `.env`, and put its direct connection string and real administrator values there. Link the checkout to Vercel and configure the Vercel Production-environment variables listed in [docs/deploy-vercel.md](docs/deploy-vercel.md). Then pin the project to Node 22, build before migrating, prepare Neon transactionally, and upload the staged artifact:
+Create one Neon branch, copy `.env.example` to `.env`, and put its direct connection string plus operator-only bootstrap credentials there. Link the checkout to Vercel and configure only the runtime variables listed in [docs/deploy-vercel.md](docs/deploy-vercel.md). Then pin the project to Node 22, build before migrating, bootstrap the named administrator, reconcile seed data and evidence explicitly, and upload the staged artifact:
 
 ```sh
 vercel link
 vercel pull --environment=production --yes
 vercel project update opas-mvp --framework nextjs --node-version 22.x --yes
 pnpm vercel:build https://opas-mvp-timo-bejans-projects.vercel.app
-pnpm neon:prepare
+pnpm neon:migrate
+pnpm operator:identity -- bootstrap --target neon --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo"
+pnpm neon:seed
+pnpm neon:evidence
 pnpm vercel:deploy https://opas-mvp-timo-bejans-projects.vercel.app
 ```
 
@@ -93,7 +107,9 @@ Run the app against the Postgres URL in `.env`:
 
 ```sh
 docker compose up -d --wait db
-node --env-file=.env --import tsx scripts/prepare-postgres.ts
+node --env-file=.env --import tsx scripts/prepare-postgres.ts migrate
+node --env-file=.env --import tsx scripts/prepare-postgres.ts seed
+node --env-file=.env --import tsx scripts/prepare-postgres.ts initialize-evidence
 pnpm dev
 ```
 

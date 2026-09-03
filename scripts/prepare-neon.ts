@@ -1,5 +1,5 @@
-// ABOUTME: Prepares a Neon deployment by applying Postgres migrations and missing demo records.
-// ABOUTME: Initializes missing evidence through a direct connection without printing its string.
+// ABOUTME: Runs one explicit Neon database maintenance operation through a direct connection.
+// ABOUTME: Keeps migrations, seed data, and evidence initialization independently invokable.
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -58,7 +58,10 @@ function safeErrorMessage(error: unknown, connectionString: string) {
   return `${error.name}: ${message}`;
 }
 
-async function main() {
+export async function runNeonDatabaseCommand(command: string | undefined) {
+  if (!(["migrate", "seed", "initialize-evidence"] as const).includes(command as never)) {
+    throw new Error("Usage: prepare-neon.ts <migrate|seed|initialize-evidence>");
+  }
   let connectionString = "";
 
   try {
@@ -68,18 +71,22 @@ async function main() {
     try {
       const database = drizzle(pool, { schema });
 
-      await migrate(database, {
-        migrationsFolder: resolve(process.cwd(), "drizzle/postgres"),
-      });
-      await seedPostgres(database);
-      const evidence = await initializeAllMissingArticleEvidence({
-        ...(process.env.OPAS_SITE_URL === undefined
-          ? {}
-          : { configuredSiteUrl: process.env.OPAS_SITE_URL }),
-        repository: createPostgresRepository(database),
-        workspaceId: demoIds.workspace,
-      });
-      console.info("Prepared the OPAS Neon database.", { evidence });
+      if (command === "migrate") {
+        await migrate(database, { migrationsFolder: resolve(process.cwd(), "drizzle/postgres") });
+        console.info("Applied OPAS Neon migrations.");
+      } else if (command === "seed") {
+        await seedPostgres(database);
+        console.info("Seeded the OPAS Neon database.");
+      } else {
+        const evidence = await initializeAllMissingArticleEvidence({
+          ...(process.env.OPAS_SITE_URL === undefined
+            ? {}
+            : { configuredSiteUrl: process.env.OPAS_SITE_URL }),
+          repository: createPostgresRepository(database),
+          workspaceId: demoIds.workspace,
+        });
+        console.info("Initialized missing OPAS Neon article evidence.", { evidence });
+      }
     } finally {
       await pool.end();
     }
@@ -93,4 +100,4 @@ const invokedModule = process.argv[1]
   ? pathToFileURL(resolve(process.argv[1])).href
   : undefined;
 
-if (import.meta.url === invokedModule) void main();
+if (import.meta.url === invokedModule) void runNeonDatabaseCommand(process.argv[2]);

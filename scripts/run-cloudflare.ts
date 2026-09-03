@@ -1,6 +1,8 @@
 // ABOUTME: Exposes secret-isolated Cloudflare build, preview, and deployment commands.
 // ABOUTME: Validates every remote target before an OpenNext, migration, or seed invocation.
-import { resolve } from "node:path";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -8,6 +10,7 @@ import {
   cloudflareCommandEnvironment,
   prepareCloudflareTargetSnapshot,
   readCloudflareTarget,
+  validateCloudflareSecrets,
   verifyCloudflareDatabaseTarget,
 } from "./bootstrap-cloudflare";
 import {
@@ -65,10 +68,30 @@ async function main(args: string[]) {
   }
   if (command === "deploy" || command === "preview") {
     if (command === "deploy") await verifyCloudflareDatabaseTarget(target);
-    await buildAndRunCloudflareCommand(command, targetArgs, {
-      environment,
-      expectedTarget: target,
-    });
+    if (command === "preview") {
+      await buildAndRunCloudflareCommand(command, targetArgs, {
+        environment,
+        expectedTarget: target,
+      });
+      return;
+    }
+    const secrets = validateCloudflareSecrets(
+      process.env,
+      target.config.vars as Record<string, unknown>,
+    );
+    const directory = mkdtempSync(join(tmpdir(), "opas-cloudflare-secrets-"));
+    const path = join(directory, "secrets.json");
+    chmodSync(directory, 0o700);
+    try {
+      writeFileSync(path, JSON.stringify(secrets), { mode: 0o600 });
+      await buildAndRunCloudflareCommand(
+        command,
+        [...targetArgs, "--secrets-file", path],
+        { environment, expectedSecrets: secrets, expectedTarget: target },
+      );
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
     return;
   }
   if (command === "migrate") {

@@ -1,17 +1,13 @@
-// ABOUTME: Creates and deploys guarded OPAS Workers with matching D1 databases.
+// ABOUTME: Creates guarded OPAS D1 infrastructure without migrating data or deploying Workers.
 // ABOUTME: Restricts generic and CROFusion demos to their exact DevPlant resources.
 import {
-  chmodSync,
   existsSync,
   lstatSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
@@ -26,11 +22,7 @@ import { createHandoffWriteAdmission } from "../src/outcomes/admission";
 import { createConversationAnalyticsPolicy } from "../src/outcomes/records";
 import { embedParentOrigins } from "../src/embed/config";
 import {
-  cloudflareBuildEnvironment,
-  prepareCloudflareBuild,
   prepareCloudflareProject,
-  registerCloudflareCleanup,
-  runBuiltCloudflareCommand,
   sanitizedCloudflareEnvironment,
 } from "./cloudflare-artifact";
 import { runCloudflareProcess } from "./cloudflare-process";
@@ -148,9 +140,8 @@ function requireOpasResource(value: unknown, field: string) {
 }
 
 const cloudflareAdminSecretNames = [
-  "ADMIN_EMAIL",
-  "ADMIN_PASSWORD",
   "ADMIN_SESSION_SECRET",
+  "OPAS_PREVIEW_SIGNING_SECRET",
 ] as const;
 const cloudflareEmailSecretNames = ["OPAS_HANDOFF_TO_EMAIL"] as const;
 const cloudflareWebhookSecretNames = [
@@ -744,20 +735,14 @@ export function validateCloudflareSecrets(
   environment: Readonly<Record<string, string | undefined>> = process.env,
   vars: JsonObject = {},
 ) {
-  const email = (environment.ADMIN_EMAIL ?? "").trim().toLowerCase();
-  const password = environment.ADMIN_PASSWORD ?? "";
   const sessionSecret = environment.ADMIN_SESSION_SECRET ?? "";
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error("ADMIN_EMAIL must contain a valid email address.");
-  }
-
-  if (password.length < 8) {
-    throw new Error("ADMIN_PASSWORD must contain at least 8 characters.");
-  }
+  const previewSigningSecret = environment.OPAS_PREVIEW_SIGNING_SECRET ?? "";
 
   if (new TextEncoder().encode(sessionSecret).byteLength < 32) {
     throw new Error("ADMIN_SESSION_SECRET must contain at least 32 bytes.");
+  }
+  if (new TextEncoder().encode(previewSigningSecret).byteLength < 32) {
+    throw new Error("OPAS_PREVIEW_SIGNING_SECRET must contain at least 32 bytes.");
   }
 
   const provider = vars.OPAS_HANDOFF_PROVIDER ?? "cloudflare-email";
@@ -837,9 +822,8 @@ export function validateCloudflareSecrets(
   }
 
   return {
-    ADMIN_EMAIL: email,
-    ADMIN_PASSWORD: password,
     ADMIN_SESSION_SECRET: sessionSecret,
+    OPAS_PREVIEW_SIGNING_SECRET: previewSigningSecret,
     ...handoffSecrets,
     ...(fallbackEnabled
       ? {
@@ -1030,16 +1014,6 @@ function parseConfigPath(args: string[]) {
 async function main() {
   const target = readCloudflareTarget(parseConfigPath(process.argv.slice(2)));
   const environment = cloudflareCommandEnvironment(target.accountId);
-  const deploymentSecrets = validateCloudflareSecrets(
-    process.env,
-    target.config.vars as JsonObject,
-  );
-  const seedPath = resolve(process.cwd(), cloudflareSeedFile(target));
-  const migrationsPath = resolve(dirname(target.configPath), "drizzle/sqlite");
-
-  if (!existsSync(seedPath) || !existsSync(migrationsPath)) {
-    throw new Error("Cloudflare migrations and seed SQL must exist before bootstrap.");
-  }
 
   await capture(
     "pnpm",
@@ -1047,94 +1021,8 @@ async function main() {
     environment,
   );
   console.info(`Authenticated for guarded target ${target.workerName}.`);
-
-  const build = await prepareCloudflareBuild(["--config", target.configPath], {
-    environment,
-    expectedTarget: target,
-  });
-
-  try {
-    await resolveD1Database(target);
-    const secretDirectory = mkdtempSync(join(tmpdir(), "opas-cloudflare-"));
-    const secretPath = join(secretDirectory, "secrets.json");
-    chmodSync(secretDirectory, 0o700);
-    const cleanupSecrets = () =>
-      rmSync(secretDirectory, { force: true, recursive: true });
-    const unregisterSecretCleanup = registerCloudflareCleanup(cleanupSecrets);
-
-    try {
-      writeFileSync(secretPath, JSON.stringify(deploymentSecrets), { mode: 0o600 });
-      await runBuiltCloudflareCommand(
-        "deploy",
-        [
-          "--config",
-          target.configPath,
-          "--dry-run",
-          "--secrets-file",
-          secretPath,
-        ],
-        build,
-        {
-          environment,
-          expectedSecrets: deploymentSecrets,
-          expectedTarget: target,
-        },
-      );
-
-      const dataSnapshot = prepareCloudflareTargetSnapshot(target);
-      try {
-        await run("pnpm", [
-          "exec",
-          "wrangler",
-          "d1",
-          "migrations",
-          "apply",
-          target.databaseName,
-          "--remote",
-          "--config",
-          dataSnapshot.target.configPath,
-        ], environment);
-        await run("pnpm", [
-          "exec",
-          "wrangler",
-          "d1",
-          "execute",
-          target.databaseName,
-          "--remote",
-          "--file",
-          resolve(dataSnapshot.directory, cloudflareSeedFile(target)),
-          "--yes",
-          "--config",
-          dataSnapshot.target.configPath,
-        ], environment);
-      } finally {
-        dataSnapshot.dispose();
-      }
-
-      await runBuiltCloudflareCommand(
-        "deploy",
-        ["--config", target.configPath, "--secrets-file", secretPath],
-        build,
-        {
-          environment,
-          expectedSecrets: deploymentSecrets,
-          expectedTarget: target,
-        },
-      );
-    } finally {
-      unregisterSecretCleanup();
-      cleanupSecrets();
-    }
-  } finally {
-    build.dispose();
-  }
-
-  await run(
-    "bash",
-    [resolve(process.cwd(), "scripts/smoke.sh"), target.siteOrigin],
-    cloudflareBuildEnvironment(process.cwd(), environment),
-  );
-  console.info(`\nCloudflare bootstrap complete: ${target.siteOrigin}`);
+  await resolveD1Database(target);
+  console.info(`Cloudflare infrastructure ready for ${target.workerName}.`);
 }
 
 const invokedModule = process.argv[1]

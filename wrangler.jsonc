@@ -24,9 +24,8 @@
   },
   "secrets": {
     "required": [
-      "ADMIN_EMAIL",
-      "ADMIN_PASSWORD",
       "ADMIN_SESSION_SECRET",
+      "OPAS_PREVIEW_SIGNING_SECRET",
       "OPAS_HANDOFF_TO_EMAIL"
     ]
   },

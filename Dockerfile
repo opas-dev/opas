@@ -1,5 +1,5 @@
 # ABOUTME: Builds a portable standalone OPAS image for Postgres-backed deployments.
-# ABOUTME: Runs migrations and deterministic seed data before starting the non-root server.
+# ABOUTME: Applies migrations before starting the non-root server; data initialization stays explicit.
 FROM node:22.23.2-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -42,7 +42,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/run-analytics-cleanup.mjs
 USER nextjs
 EXPOSE 3000
 
-CMD ["sh", "-c", "node prepare-postgres.cjs && node server.js"]
+CMD ["sh", "-c", "node prepare-postgres.cjs migrate && node server.js"]
 
 FROM node:22.23.2-alpine AS maintenance
 WORKDIR /app

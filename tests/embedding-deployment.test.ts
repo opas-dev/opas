@@ -99,7 +99,14 @@ test("Docker runs the authenticated recovery client independently from the app",
     /OPAS_GENERATION_FALLBACK_ENABLED:\s*\$\{OPAS_GENERATION_FALLBACK_ENABLED:-false\}/u,
   );
   assert.match(dockerfile, /scripts\/run-embedding-recovery\.mjs/u);
-  assert.match(dockerfile, /node prepare-postgres\.cjs && node server\.js/u);
+  assert.match(
+    dockerfile,
+    /node prepare-postgres\.cjs migrate && node server\.js/u,
+  );
+  assert.doesNotMatch(
+    dockerfile.match(/^CMD .*$/gmu)?.at(-2) ?? "",
+    /seed|evidence/u,
+  );
   assert.match(preparation, /initializeAllMissingArticleEvidence/u);
 });
 
@@ -119,7 +126,9 @@ test("the environment template documents secret and provider settings without va
   const template = readFileSync(".env.example", "utf8");
 
   for (const name of [
+    "ADMIN_SESSION_SECRET",
     "CRON_SECRET",
+    "OPAS_PREVIEW_SIGNING_SECRET",
     "OPAS_ANSWER_TOPIC_GUARDRAILS",
     "OPAS_EMBEDDING_API_KEY",
     "OPAS_EMBEDDING_DIMENSION",

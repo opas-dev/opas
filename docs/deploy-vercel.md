@@ -12,9 +12,8 @@ Set these Production environment variables in the Vercel project:
 OPAS_DATABASE_DRIVER=neon
 NEON_DATABASE_URL=<Neon serverless connection string>
 OPAS_SITE_URL=https://opas-mvp-timo-bejans-projects.vercel.app
-ADMIN_EMAIL=<admin email>
-ADMIN_PASSWORD=<at least 8 characters>
 ADMIN_SESSION_SECRET=<at least 32 random bytes>
+OPAS_PREVIEW_SIGNING_SECRET=<separate random value of at least 32 bytes>
 CRON_SECRET=<separate random value of at least 32 bytes>
 OPAS_GENERATION_ENDPOINT=<absolute OpenAI-compatible /chat/completions endpoint>
 OPAS_GENERATION_MODEL=<provider model name>
@@ -47,7 +46,7 @@ OPAS_ANSWER_TOPIC_GUARDRAILS=<optional compact JSON; omit until a policy is appr
 
 `OPAS_SITE_URL` must be the stable Vercel compatibility origin above, with no path, query, or fragment. Set it before the build. Do not use a generated deployment URL or the Cloudflare production URL: OPAS uses this value for canonical metadata, sitemap entries, JSON-LD, Markdown links, and llms documents.
 
-Keep `NEON_DATABASE_URL` as the pooled serverless runtime connection. The guarded build and `pnpm neon:prepare` derive the same branch's direct hostname in memory by removing Neon’s exact `-pooler.` label, require official `ep-*.<region>.<provider>.neon.tech` authorities, reject connection-target query overrides, validate the endpoint, port, credentials, and database as one identity, and never print or persist the direct value. The URL may carry only Neon’s `sslmode` and `channel_binding` parameters. An explicit matching `NEON_DIRECT_DATABASE_URL` in local `.env` is accepted but optional; never add it to Vercel.
+Keep `NEON_DATABASE_URL` as the pooled serverless runtime connection. The guarded build and explicit `pnpm neon:migrate`, `pnpm neon:seed`, and `pnpm neon:evidence` commands derive the same branch's direct hostname in memory by removing Neon’s exact `-pooler.` label, validate the complete database identity, and never print or persist the direct value. An explicit matching `NEON_DIRECT_DATABASE_URL` in local `.env` is accepted but optional; never add it to Vercel.
 
 Answer generation requires the endpoint, model, and retention disclosure. The endpoint must be an absolute HTTP or HTTPS URL without embedded credentials, query, or fragment, and it must stream OpenAI-compatible server-sent events. Model and disclosure values must be non-empty and control-free, with respective UTF-8 limits of 256 and 1,024 bytes. The API key is optional for a trusted credential-free endpoint; a non-empty value may contain at most 16,384 UTF-8 bytes and no line break, and is sent only as a bearer credential. The retention disclosure is returned to and rendered by the browser, so it must be an accurate operator-authored statement rather than a secret or placeholder. OPAS sends provider requests with `cache: no-store`, discards non-success response bodies unread, and does not place prompts, evidence, credentials, responses, or provider messages in application logs. Provider-side storage and training remain governed by the selected provider and must agree with the disclosure. Redacted answer conversations default to 30 days, may be configured shorter or disabled, and never store requester IP, raw user agent, or cookies. A user-submitted support handoff stores its explicit contact and bounded context separately for `OPAS_HANDOFF_RETENTION_DAYS`, which defaults to 30 days and accepts 1 through 365.
 
@@ -69,11 +68,11 @@ Vercel sends `CRON_SECRET` to both private scheduled routes as a bearer credenti
 
 ## Disposable acceptance target
 
-An isolated compatibility run may use a linked Vercel project whose name begins with `opas-v02-acceptance-`. The project must have no custom domains, and its canonical origin must be the exact team-scoped automatic `https://<project>-timo-bejans-projects.vercel.app` origin. Opt in explicitly for both commands:
+An isolated compatibility run may use a linked Vercel project whose name begins with `opas-acceptance-`. The project must have no custom domains, and its canonical origin must be the exact team-scoped automatic `https://<project>-timo-bejans-projects.vercel.app` origin. Opt in explicitly for both commands:
 
 ```sh
-pnpm vercel:build --acceptance https://opas-v02-acceptance-<run>-timo-bejans-projects.vercel.app
-pnpm vercel:deploy --acceptance https://opas-v02-acceptance-<run>-timo-bejans-projects.vercel.app
+pnpm vercel:build --acceptance https://opas-acceptance-<run>-timo-bejans-projects.vercel.app
+pnpm vercel:deploy --acceptance https://opas-acceptance-<run>-timo-bejans-projects.vercel.app
 ```
 
 Without `--acceptance`, the wrappers remain pinned to the maintained `opas-mvp` identity and stable origin. Acceptance mode rejects every other project-name prefix and origin, preserves the isolated build and secret scans, and deploys with `--skip-domain`; it never promotes outside the disposable project or attaches an OPAS custom domain, although Vercel may assign that project's automatic team-scoped alias. Delete the disposable project and its matching database after recording verification evidence.
@@ -89,9 +88,8 @@ vercel project update opas-mvp --framework nextjs --node-version 22.x --yes
 vercel env add OPAS_DATABASE_DRIVER production
 vercel env add NEON_DATABASE_URL production
 vercel env add OPAS_SITE_URL production
-vercel env add ADMIN_EMAIL production
-vercel env add ADMIN_PASSWORD production
 vercel env add ADMIN_SESSION_SECRET production
+vercel env add OPAS_PREVIEW_SIGNING_SECRET production
 vercel env add CRON_SECRET production
 vercel env add OPAS_GENERATION_ENDPOINT production
 vercel env add OPAS_GENERATION_MODEL production
@@ -127,21 +125,24 @@ vercel project protection disable opas-mvp --sso
 curl --fail --silent --show-error https://opas-mvp-timo-bejans-projects.vercel.app/api/health
 ```
 
-## Build, migrate, and seed
+## Build, migrate, bootstrap, and seed
 
-Keep the pooled `NEON_DATABASE_URL` and actual administrator values in the gitignored root `.env`. The wrapper derives a direct URL in memory or validates an optional explicit `NEON_DIRECT_DATABASE_URL`; either way, only the pooled URL enters the isolated build environment. Build the staged Vercel Production-environment artifact before changing Neon:
+Keep the pooled `NEON_DATABASE_URL` and operator-only bootstrap values in the gitignored root `.env`. The wrapper derives a direct URL in memory or validates an optional explicit `NEON_DIRECT_DATABASE_URL`; either way, only the pooled URL and runtime signing secrets enter the isolated build environment. Build the staged Vercel Production-environment artifact before changing Neon:
 
 ```sh
 pnpm vercel:build https://opas-mvp-timo-bejans-projects.vercel.app
 ```
 
-Then run the transactional migration and missing-only seed against the direct connection. The command rejects every ambient `PG*`, Node TLS, OpenSSL, or certificate-store override before opening the validated URL. It constructs the effective host, port, credentials, database, verified TLS, and channel-binding settings explicitly rather than letting `pg` reinterpret the URL through ambient defaults:
+Then run the transactional migration, bootstrap the first named administrator, reconcile the missing seed records, and initialize evidence against the same database. The database commands reject every ambient `PG*`, Node TLS, OpenSSL, or certificate-store override before opening the validated URL. They construct the effective host, port, credentials, database, verified TLS, and channel-binding settings explicitly rather than letting `pg` reinterpret the URL through ambient defaults:
 
 ```sh
-pnpm neon:prepare
+pnpm neon:migrate
+pnpm operator:identity -- bootstrap --target neon --workspace demo --display-name "OPAS administrator" --create-workspace-id workspace_demo --create-workspace-slug demo --create-workspace-name "OPAS Demo"
+pnpm neon:seed
+pnpm neon:evidence
 ```
 
-The command applies `drizzle/postgres` migrations over a direct PostgreSQL connection and inserts missing demo records. It does not replace records already edited by an administrator. Run it once before the first deployment and again after pulling any commit that adds a migration.
+The commands separately apply migrations, create the one named bootstrap administrator, insert missing demo records, and initialize missing article evidence. Build and deploy never invoke bootstrap, seed, or evidence initialization. Run them in the order shown before acceptance testing.
 
 Every migration must be expand-first and remain compatible with both the current deployment and the staged artifact. Building first removes compile failures from the post-migration window, but an upload can still fail while the current deployment continues using the migrated schema.
 

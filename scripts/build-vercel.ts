@@ -1,5 +1,5 @@
 // ABOUTME: Builds the Vercel compatibility artifact in an environment-file-free project copy.
-// ABOUTME: Validates local Neon/admin inputs and rejects dotenv files or secret bytes in output.
+// ABOUTME: Validates local Neon/runtime-secret inputs and rejects dotenv files or secret bytes in output.
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -55,7 +55,7 @@ const maintainedVercelProject = {
   projectIdHash:
     "dc514d45f08806eb1b4fbe5f0b1b6fe536ff9b247f35443f42a5afaf1fb99e89",
 } as const;
-const acceptanceVercelProjectPrefix = "opas-v02-acceptance-";
+const acceptanceVercelProjectPrefix = "opas-acceptance-";
 
 const excludedProjectEntries = new Set([
   ".git",
@@ -332,22 +332,18 @@ function definedEnvironment(environment: Environment): Record<string, string> {
   return defined;
 }
 
-function requireAdminConfiguration(environment: Readonly<Record<string, string>>) {
-  const email = (environment.ADMIN_EMAIL ?? "").trim().toLowerCase();
-  const password = environment.ADMIN_PASSWORD ?? "";
+function requireRuntimeSecrets(environment: Readonly<Record<string, string>>) {
   const sessionSecret = environment.ADMIN_SESSION_SECRET ?? "";
+  const previewSigningSecret = environment.OPAS_PREVIEW_SIGNING_SECRET ?? "";
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
-    throw new Error("ADMIN_EMAIL must contain a valid email address.");
-  }
-  if (password.length < 8) {
-    throw new Error("ADMIN_PASSWORD must contain at least 8 characters.");
-  }
   if (new TextEncoder().encode(sessionSecret).byteLength < 32) {
     throw new Error("ADMIN_SESSION_SECRET must contain at least 32 bytes.");
   }
+  if (new TextEncoder().encode(previewSigningSecret).byteLength < 32) {
+    throw new Error("OPAS_PREVIEW_SIGNING_SECRET must contain at least 32 bytes.");
+  }
 
-  return { email, password, sessionSecret };
+  return { previewSigningSecret, sessionSecret };
 }
 
 function secretParts(value: string) {
@@ -421,9 +417,9 @@ export function vercelBuildConfiguration(
   }
   const local = readEnvironmentFile(join(workspace, ".env"));
   const combined = { ...local, ...definedEnvironment(environment) };
-  const admin = options.maintenance
+  const runtimeSecrets = options.maintenance
     ? undefined
-    : requireAdminConfiguration(combined);
+    : requireRuntimeSecrets(combined);
   const neon = requireNeonConnectionStrings(combined);
   const neonIdentityHash = sha256(neon.pooled);
   const sanitized: Environment = {};
@@ -447,18 +443,12 @@ export function vercelBuildConfiguration(
     combined.OPAS_EMBED_PARENT_ORIGINS,
   ).join(",");
   sanitized.NEON_DATABASE_URL = neon.pooled;
-  if (admin) {
-    sanitized.ADMIN_EMAIL = admin.email;
-    sanitized.ADMIN_PASSWORD = admin.password;
-    sanitized.ADMIN_SESSION_SECRET = admin.sessionSecret;
+  if (runtimeSecrets) {
+    sanitized.ADMIN_SESSION_SECRET = runtimeSecrets.sessionSecret;
+    sanitized.OPAS_PREVIEW_SIGNING_SECRET = runtimeSecrets.previewSigningSecret;
   }
 
   const secretValues = new Set(collectSecretValues(local, environment));
-  if (admin) {
-    for (const value of secretParts(admin.email)) {
-      secretValues.add(value);
-    }
-  }
 
   return {
     environment: sanitized,

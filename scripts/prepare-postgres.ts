@@ -1,5 +1,5 @@
-// ABOUTME: Prepares a Postgres deployment by applying migrations and deterministic seed data.
-// ABOUTME: Initializes missing article evidence before the standalone server accepts traffic.
+// ABOUTME: Runs one explicit Postgres database maintenance operation for a deployment.
+// ABOUTME: Keeps migrations, seed data, and evidence initialization independently invokable.
 import { resolve } from "node:path";
 
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -10,27 +10,34 @@ import { closePostgres, getPostgresDatabase } from "../src/db/postgres/client";
 import { createPostgresRepository } from "../src/db/postgres/repository";
 import { seedPostgres } from "../src/db/postgres/seed";
 
-async function main() {
+export async function runPostgresDatabaseCommand(command: string | undefined) {
+  if (!(["migrate", "seed", "initialize-evidence"] as const).includes(command as never)) {
+    throw new Error("Usage: prepare-postgres.ts <migrate|seed|initialize-evidence>");
+  }
   try {
     const database = getPostgresDatabase();
-    await migrate(database, {
-      migrationsFolder: resolve(process.cwd(), "drizzle/postgres"),
-    });
-    await seedPostgres(database);
-    const evidence = await initializeAllMissingArticleEvidence({
-      ...(process.env.OPAS_SITE_URL === undefined
-        ? {}
-        : { configuredSiteUrl: process.env.OPAS_SITE_URL }),
-      repository: createPostgresRepository(database),
-      workspaceId: demoIds.workspace,
-    });
-    console.info("Prepared the OPAS Postgres database.", { evidence });
+    if (command === "migrate") {
+      await migrate(database, { migrationsFolder: resolve(process.cwd(), "drizzle/postgres") });
+      console.info("Applied OPAS Postgres migrations.");
+    } else if (command === "seed") {
+      await seedPostgres(database);
+      console.info("Seeded the OPAS Postgres database.");
+    } else {
+      const evidence = await initializeAllMissingArticleEvidence({
+        ...(process.env.OPAS_SITE_URL === undefined
+          ? {}
+          : { configuredSiteUrl: process.env.OPAS_SITE_URL }),
+        repository: createPostgresRepository(database),
+        workspaceId: demoIds.workspace,
+      });
+      console.info("Initialized missing OPAS article evidence.", { evidence });
+    }
   } finally {
     await closePostgres();
   }
 }
 
-main().catch((error: unknown) => {
+runPostgresDatabaseCommand(process.argv[2]).catch((error: unknown) => {
   console.error(error);
   process.exitCode = 1;
 });

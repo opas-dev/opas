@@ -376,9 +376,8 @@ test("requires the scheduled custom Worker and fixed Workers AI binding", () => 
 
 test("requires one fixed support email binding and a secret-only destination", () => {
   const secretVariableCases = [
-    "ADMIN_EMAIL",
-    "ADMIN_PASSWORD",
     "ADMIN_SESSION_SECRET",
+    "OPAS_PREVIEW_SIGNING_SECRET",
     "OPAS_HANDOFF_TO_EMAIL",
   ].map((name) =>
     Object.assign(validConfig(), {
@@ -423,9 +422,8 @@ test("requires one fixed support email binding and a secret-only destination", (
 test("accepts only an encrypted authenticated webhook without email bindings", () => {
   const config = webhookConfig();
   assert.deepEqual(validateCloudflareConfig(config).secretNames, [
-    "ADMIN_EMAIL",
-    "ADMIN_PASSWORD",
     "ADMIN_SESSION_SECRET",
+    "OPAS_PREVIEW_SIGNING_SECRET",
     "OPAS_HANDOFF_WEBHOOK_URL",
     "OPAS_HANDOFF_WEBHOOK_TOKEN",
   ]);
@@ -482,9 +480,8 @@ test("requires the exact secret names for base and fallback deployments", () => 
 
 test("validates the support destination with the encrypted deployment secrets", () => {
   const environment = {
-    ADMIN_EMAIL: "admin@opas.dev",
-    ADMIN_PASSWORD: "password",
     ADMIN_SESSION_SECRET: "s".repeat(32),
+    OPAS_PREVIEW_SIGNING_SECRET: "p".repeat(32),
     OPAS_HANDOFF_TO_EMAIL: "support@example.com",
   };
   assert.deepEqual(validateCloudflareSecrets(environment), environment);
@@ -514,9 +511,8 @@ test("validates the support destination with the encrypted deployment secrets", 
 test("validates authenticated webhook values as encrypted deployment secrets", () => {
   const config = webhookConfig();
   const environment = {
-    ADMIN_EMAIL: "admin@opas.dev",
-    ADMIN_PASSWORD: "password",
     ADMIN_SESSION_SECRET: "s".repeat(32),
+    OPAS_PREVIEW_SIGNING_SECRET: "p".repeat(32),
     OPAS_HANDOFF_WEBHOOK_TOKEN: "w".repeat(32),
     OPAS_HANDOFF_WEBHOOK_URL: "https://hooks.example.com/opas",
   };
@@ -556,18 +552,16 @@ test("keeps opt-in Cloudflare fallback credentials in encrypted secrets", () => 
   );
 
   const environment = {
-    ADMIN_EMAIL: "admin@opas.dev",
-    ADMIN_PASSWORD: "password",
     ADMIN_SESSION_SECRET: "s".repeat(32),
+    OPAS_PREVIEW_SIGNING_SECRET: "p".repeat(32),
     OPAS_GENERATION_FALLBACK_API_KEY: "fallback-private-key",
     OPAS_GENERATION_FALLBACK_ENDPOINT:
       "https://fallback.example.com/v1/chat/completions",
     OPAS_HANDOFF_TO_EMAIL: "support@example.com",
   };
   assert.deepEqual(validateCloudflareSecrets(environment, config.vars), {
-    ADMIN_EMAIL: "admin@opas.dev",
-    ADMIN_PASSWORD: "password",
     ADMIN_SESSION_SECRET: "s".repeat(32),
+    OPAS_PREVIEW_SIGNING_SECRET: "p".repeat(32),
     OPAS_GENERATION_FALLBACK_API_KEY: "fallback-private-key",
     OPAS_GENERATION_FALLBACK_ENDPOINT:
       "https://fallback.example.com/v1/chat/completions",
