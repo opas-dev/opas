@@ -1,6 +1,7 @@
 // ABOUTME: Reproduces one retained answer from its redacted evidence under administrator auth.
 // ABOUTME: Keeps workspace selection and retention scope on the server and returns no raw failures.
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
+import { demoIds } from "@/db/demo";
 import {
   consumeQualityRequestAllowance,
   runActiveRetainedConversationReplay,
@@ -12,7 +13,7 @@ export const maxDuration = 60;
 
 export async function POST(request: Request) {
   return handleQualityReplayRequest(request, {
-    authorize: requireAdmin,
+    authorize: () => requireMemberCapability("quality:manage", demoIds.workspace),
     consumeAllowance: consumeQualityRequestAllowance,
     run: runActiveRetainedConversationReplay,
   });

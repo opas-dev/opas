@@ -20,7 +20,7 @@ import {
   getAuthoringPausedFailure,
   type AuthoringPausedFailure,
 } from "@/authoring/failures";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import { referencedArticleAssetHashes } from "@/content/article-assets";
 import { prepareArticleEvidence } from "@/content/article-evidence";
 import {
@@ -99,7 +99,7 @@ export async function saveCategoryAction(
   previousState: ContentActionState,
   formData: FormData,
 ): Promise<ContentActionState> {
-  await requireAdmin();
+  await requireMemberCapability("category:manage", demoIds.workspace);
   const request = parseCategoryRequest(formData);
 
   if (!request.success) {
@@ -161,7 +161,7 @@ export async function deleteCategoryAction(
   previousState: ContentActionState,
   formData: FormData,
 ): Promise<ContentActionState> {
-  await requireAdmin();
+  await requireMemberCapability("category:manage", demoIds.workspace);
   const request = parseRecordRequest(formData);
 
   if (!request.success) {
@@ -210,7 +210,7 @@ export async function saveArticleAction(
   previousState: ContentActionState,
   formData: FormData,
 ): Promise<ContentActionState> {
-  await requireAdmin();
+  await requireMemberCapability("draft:edit", demoIds.workspace);
   const request = parseArticleRequest(formData);
 
   if (!request.success) {
@@ -321,7 +321,7 @@ export async function deleteArticleAction(
   previousState: ContentActionState,
   formData: FormData,
 ): Promise<ContentActionState> {
-  await requireAdmin();
+  await requireMemberCapability("article:retire", demoIds.workspace);
   const request = parseRecordRequest(formData);
 
   if (!request.success) {

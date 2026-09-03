@@ -2,11 +2,12 @@
 // ABOUTME: Performs an authoritative session check before choosing the admin destination.
 import { redirect } from "next/navigation";
 
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
+import { demoIds } from "@/db/demo";
 
 export const runtime = "nodejs";
 
 export default async function AdminPage() {
-  await requireAdmin();
+  await requireMemberCapability("content:read", demoIds.workspace);
   redirect("/admin/content");
 }

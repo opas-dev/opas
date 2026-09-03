@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 
 import { ArticleEditor } from "@/app/admin/content/article-editor";
 import { AdminHeader } from "@/app/admin/header";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
 
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 export default async function NewArticlePage() {
-  const admin = await requireAdmin();
+  const admin = await requireMemberCapability("draft:edit", demoIds.workspace);
   const categories = await (await getRepository()).listCategories(demoIds.workspace);
 
   if (categories.length === 0) {

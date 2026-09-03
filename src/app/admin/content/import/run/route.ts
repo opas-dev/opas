@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { scheduleEmbeddingRecovery } from "@/ai/embedding-scheduling";
 import { authoringPausedResponse } from "@/authoring/failures";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
 import { archiveLimits, ArchiveValidationError } from "@/import/archive";
@@ -30,7 +30,7 @@ function errorDetails(error: unknown) {
 }
 
 export async function POST(request: Request) {
-  await requireAdmin();
+  await requireMemberCapability("import:run", demoIds.workspace);
 
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null) {

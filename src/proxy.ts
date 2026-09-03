@@ -9,9 +9,9 @@ import { createEmbedContentSecurityPolicy } from "@/security/headers";
 
 export async function proxy(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/admin")) {
-    const { getAdminConfig } = await import("@/auth/config");
-    const { sessionSecret } = getAdminConfig();
-    return authorizeAdminRoute(request, sessionSecret);
+    const { getAdminSessionConfig } = await import("@/auth/config");
+    const { deploymentId, sessionSecret } = getAdminSessionConfig();
+    return authorizeAdminRoute(request, sessionSecret, deploymentId);
   }
 
   const response = NextResponse.next();

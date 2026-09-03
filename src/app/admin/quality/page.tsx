@@ -12,7 +12,8 @@ import {
   SavedQuestionImport,
 } from "@/app/admin/quality/quality-controls";
 import { ContentGaps } from "@/app/admin/quality/content-gaps";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
+import { demoIds } from "@/db/demo";
 import {
   compareQualityRuns,
   conversationLatencySummary,
@@ -64,7 +65,7 @@ export default async function QualityAdminPage({
 }: {
   searchParams: QualitySearchParams;
 }) {
-  const admin = await requireAdmin();
+  const admin = await requireMemberCapability("content:read", demoIds.workspace);
   const [data, parameters] = await Promise.all([
     loadActiveQualityConsoleData(),
     searchParams,

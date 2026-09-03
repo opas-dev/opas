@@ -14,7 +14,7 @@ import {
   getAuthoringPausedFailure,
   type AuthoringPausedFailure,
 } from "@/authoring/failures";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
 import { themePresets } from "@/theme/presets";
@@ -34,7 +34,7 @@ export async function updateThemeAction(
   previousState: ThemeActionState,
   formData: FormData,
 ): Promise<ThemeActionState> {
-  await requireAdmin();
+  await requireMemberCapability("workspace:configure", demoIds.workspace);
   const revision = previousState.revision + 1;
   const request = parseThemeRequest(formData);
 

@@ -67,7 +67,10 @@ test("labels retained replay and lexical preflight without overstating generated
     readFile(new URL("../src/quality/console.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /await requireAdmin\(\)/u);
+  assert.match(
+    page,
+    /await requireMemberCapability\("content:read", demoIds\.workspace\)/u,
+  );
   assert.match(page, /Retained replay never[\s\S]*current knowledge index/u);
   assert.match(page, /<RetainedEvidenceReplay/u);
   assert.match(page, /Retained redacted excerpt/u);
@@ -98,10 +101,16 @@ test("labels retained replay and lexical preflight without overstating generated
   assert.match(controls, /\/admin\/quality\/import/u);
   assert.match(controls, /256 KiB and 100 questions/u);
   assert.match(controls, /active\s+workspace is assigned by the server/u);
-  assert.match(importRoute, /authorize: requireAdmin/u);
+  assert.match(
+    importRoute,
+    /authorize: \(\) => requireMemberCapability\("quality:manage", demoIds\.workspace\)/u,
+  );
   assert.match(importRoute, /importQuestionSet: importActiveSavedQuestionSet/u);
   assert.doesNotMatch(importRoute, /workspaceId/u);
-  assert.match(replayRoute, /authorize: requireAdmin/u);
+  assert.match(
+    replayRoute,
+    /authorize: \(\) => requireMemberCapability\("quality:manage", demoIds\.workspace\)/u,
+  );
   assert.match(replayRoute, /run: runActiveRetainedConversationReplay/u);
   assert.doesNotMatch(replayRoute, /workspaceId/u);
   assert.match(controls, /qualityReviewImportSchema/u);
@@ -112,7 +121,10 @@ test("labels retained replay and lexical preflight without overstating generated
   assert.match(controls, /Claim \{claim\.ordinal \+ 1\} entailed/u);
   assert.match(controls, /Claim \{claim\.ordinal \+ 1\} citation-covered/u);
   assert.match(controls, /required/u);
-  assert.match(reviewRoute, /authorize: requireAdmin/u);
+  assert.match(
+    reviewRoute,
+    /authorize: \(\) => requireMemberCapability\("quality:manage", demoIds\.workspace\)/u,
+  );
   assert.match(reviewRoute, /importReview: importActiveQualityReview/u);
   assert.doesNotMatch(reviewRoute, /workspaceId/u);
   assert.match(controls, /Lexical preflight retrieval/u);

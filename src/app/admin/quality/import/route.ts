@@ -1,6 +1,7 @@
 // ABOUTME: Imports one authenticated saved-question fixture for the active workspace.
 // ABOUTME: Keeps workspace identity, evidence validation, and persistence on the server.
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
+import { demoIds } from "@/db/demo";
 import {
   consumeQualityRequestAllowance,
   importActiveSavedQuestionSet,
@@ -11,7 +12,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   return handleQuestionSetImportRequest(request, {
-    authorize: requireAdmin,
+    authorize: () => requireMemberCapability("quality:manage", demoIds.workspace),
     consumeAllowance: consumeQualityRequestAllowance,
     importQuestionSet: importActiveSavedQuestionSet,
   });

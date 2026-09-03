@@ -1,5 +1,5 @@
-// ABOUTME: Presents the single-administrator sign-in surface for OPAS management routes.
-// ABOUTME: Uses the runtime theme tokens while keeping the credential task focused and direct.
+// ABOUTME: Presents the named-member sign-in surface for OPAS management routes.
+// ABOUTME: Uses runtime theme tokens while keeping the credential task focused and direct.
 import type { Metadata } from "next";
 
 import { AdminLoginForm } from "@/app/admin/login/form";
@@ -34,7 +34,7 @@ export default function AdminLoginPage() {
           Sign in to manage your help center
         </h1>
         <p className="mt-3 max-w-[42ch] text-sm leading-6 text-muted text-pretty">
-          Use the administrator credentials configured for this deployment.
+          Use the email and password from your OPAS team account.
         </p>
 
         <AdminLoginForm />

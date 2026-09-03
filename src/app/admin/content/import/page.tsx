@@ -5,7 +5,8 @@ import Link from "next/link";
 
 import { ImportPanel } from "@/app/admin/content/import/import-panel";
 import { AdminHeader } from "@/app/admin/header";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
+import { demoIds } from "@/db/demo";
 
 export const runtime = "nodejs";
 
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
 };
 
 export default async function ImportContentPage() {
-  const admin = await requireAdmin();
+  const admin = await requireMemberCapability("import:run", demoIds.workspace);
 
   return (
     <main className="min-h-screen bg-background text-foreground">

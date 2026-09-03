@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { AdminHeader } from "@/app/admin/header";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
 
@@ -26,7 +26,7 @@ function helpfulRate(helpfulCount: number, feedbackCount: number) {
 }
 
 export default async function AnalyticsAdminPage() {
-  const admin = await requireAdmin();
+  const admin = await requireMemberCapability("content:read", demoIds.workspace);
   const repository = await getRepository();
   const analytics = await repository.getAnalytics(demoIds.workspace);
   const { articles } = analytics;

@@ -1,6 +1,7 @@
 // ABOUTME: Imports authenticated human scoring for a completed active-workspace evaluation.
 // ABOUTME: Keeps run identity, aggregate recomputation, and persistence on the server.
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
+import { demoIds } from "@/db/demo";
 import {
   consumeQualityRequestAllowance,
   importActiveQualityReview,
@@ -11,7 +12,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   return handleQualityReviewRequest(request, {
-    authorize: requireAdmin,
+    authorize: () => requireMemberCapability("quality:manage", demoIds.workspace),
     consumeAllowance: consumeQualityRequestAllowance,
     importReview: importActiveQualityReview,
   });

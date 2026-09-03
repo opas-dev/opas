@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 
 import { ArticleEditor } from "@/app/admin/content/article-editor";
 import { AdminHeader } from "@/app/admin/header";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
 
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 export default async function EditArticlePage({ params }: PageProps<"/admin/content/articles/[id]">) {
-  const admin = await requireAdmin();
+  const admin = await requireMemberCapability("content:read", demoIds.workspace);
   const { id } = await params;
   const repository = await getRepository();
   const [article, categories] = await Promise.all([

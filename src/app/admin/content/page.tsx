@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { CategoryEditor } from "@/app/admin/content/category-editor";
 import { AdminHeader } from "@/app/admin/header";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
 
@@ -24,7 +24,7 @@ const dateFormatter = new Intl.DateTimeFormat("en", {
 });
 
 export default async function ContentAdminPage() {
-  const admin = await requireAdmin();
+  const admin = await requireMemberCapability("content:read", demoIds.workspace);
   const repository = await getRepository();
   const [categories, articles] = await Promise.all([
     repository.listCategories(demoIds.workspace),

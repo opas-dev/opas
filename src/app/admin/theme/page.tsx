@@ -9,7 +9,8 @@ import {
   themePresetOptions,
 } from "@/app/admin/theme/options";
 import { findThemePreset } from "@/app/admin/theme/validation";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
+import { demoIds } from "@/db/demo";
 import { getCurrentTheme } from "@/theme/current";
 import { themePresets } from "@/theme/presets";
 
@@ -34,7 +35,7 @@ function presetPreviews(): ThemePresetPreview[] {
 }
 
 export default async function ThemeAdminPage() {
-  const admin = await requireAdmin();
+  const admin = await requireMemberCapability("workspace:configure", demoIds.workspace);
   const theme = await getCurrentTheme();
 
   return (

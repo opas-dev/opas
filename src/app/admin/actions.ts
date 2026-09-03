@@ -4,10 +4,11 @@
 
 import { redirect } from "next/navigation";
 
-import { endAdminSession, requireAdmin } from "@/auth/admin";
+import { endAdminSession, requireMemberCapability } from "@/auth/admin";
+import { demoIds } from "@/db/demo";
 
 export async function logoutAdmin() {
-  await requireAdmin();
-  await endAdminSession();
+  const member = await requireMemberCapability("content:read", demoIds.workspace);
+  await endAdminSession(member);
   redirect("/admin/login");
 }

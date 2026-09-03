@@ -7,7 +7,7 @@ import {
   readAssetStageRequest,
 } from "@/assets/requests";
 import { authoringPausedResponse } from "@/authoring/failures";
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import { AssetValidationError } from "@/db/assets";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
@@ -19,7 +19,7 @@ function errorDetails(error: unknown) {
 }
 
 export async function POST(request: Request) {
-  await requireAdmin();
+  await requireMemberCapability("draft:edit", demoIds.workspace);
 
   let stageRequest: Awaited<ReturnType<typeof readAssetStageRequest>>;
   try {
@@ -103,7 +103,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  await requireAdmin();
+  await requireMemberCapability("draft:edit", demoIds.workspace);
 
   let manifestId: string;
   try {

@@ -1,16 +1,17 @@
 // ABOUTME: Compiles authenticated article previews without blocking the Server Action mutation queue.
 // ABOUTME: Applies the same MDX safety boundary used by storage and public rendering.
-import { requireAdmin } from "@/auth/admin";
+import { requireMemberCapability } from "@/auth/admin";
 import {
   ArticleMdxValidationError,
   validateArticleMdx,
 } from "@/content/mdx-safety";
 import { articleMdxCompiler } from "@/content/runtime-mdx-plugins";
+import { demoIds } from "@/db/demo";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  await requireAdmin();
+  await requireMemberCapability("draft:edit", demoIds.workspace);
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > 120_000) {

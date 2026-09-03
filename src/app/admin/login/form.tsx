@@ -1,5 +1,5 @@
-// ABOUTME: Captures administrator credentials with accessible validation and pending feedback.
-// ABOUTME: Keeps authentication interaction isolated in the smallest client-side boundary.
+// ABOUTME: Captures named-member credentials with accessible validation and pending feedback.
+// ABOUTME: Keeps the sign-in interaction isolated in the smallest client-side boundary.
 "use client";
 
 import { useActionState } from "react";
@@ -40,7 +40,7 @@ export function AdminLoginForm() {
           className="min-h-12 w-full rounded-md border border-border-strong bg-background px-3 text-foreground outline-none transition-colors hover:border-foreground focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
           disabled={pending}
           id="password"
-          maxLength={1024}
+          maxLength={2048}
           name="password"
           required
           type="password"
