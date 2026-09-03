@@ -1794,6 +1794,7 @@ export function createPostgresEvidenceRepository(
           set active_embedding_generation_id = ${embeddingGenerationId},
               updated_at = ${activatedAt}
           where state.workspace_id = ${workspaceId}
+            and state.active_embedding_generation_id is distinct from ${embeddingGenerationId}
             and exists (
               select 1
               from embedding_generations as target

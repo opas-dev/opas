@@ -824,10 +824,24 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
     true,
   );
 
+  const activatedIndexState = await repository.getIndexingState(demoIds.workspace);
   assert.equal(
-    (await repository.getIndexingState(demoIds.workspace))
-      ?.activeEmbeddingGenerationId,
+    activatedIndexState?.activeEmbeddingGenerationId,
     "embedding_generation_pilot",
+  );
+  assert.equal(
+    await repository.activateEmbeddingGeneration({
+      workspaceId: demoIds.workspace,
+      embeddingGenerationId: "embedding_generation_pilot",
+      activatedAt: new Date(retryAt.getTime() + 2_100),
+      metadata: embeddingMetadata,
+    }),
+    true,
+  );
+  assert.equal(
+    (await repository.getIndexingState(demoIds.workspace))?.updatedAt.getTime(),
+    activatedIndexState?.updatedAt.getTime(),
+    `${label} changed the public index state during an idle activation`,
   );
   assert.deepEqual(
     (await repository.listActiveChunkEmbeddings(demoIds.workspace)).map(

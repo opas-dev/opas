@@ -1713,6 +1713,10 @@ export function createSqliteEvidenceRepository(
           set active_embedding_generation_id = ${embeddingGenerationId},
               updated_at = ${activatedTimestamp}
           where state.workspace_id = ${workspaceId}
+            and (
+              state.active_embedding_generation_id is null
+              or state.active_embedding_generation_id <> ${embeddingGenerationId}
+            )
             and exists (
               select 1
               from embedding_generations as target
