@@ -1,7 +1,7 @@
 // ABOUTME: Serves workspace image assets at immutable content-addressed public URLs.
 // ABOUTME: Validates exact SHA-256 paths and preserves each trusted stored media type.
 import { isAssetHash } from "@/assets/identity";
-import { storedAssetResponse } from "@/assets/responses";
+import { publishedAssetResponse } from "@/assets/responses";
 import { getRepository } from "@/db";
 import { demoIds } from "@/db/demo";
 
@@ -28,5 +28,5 @@ export async function GET(
     });
   }
 
-  return storedAssetResponse(request, asset, "public, max-age=31536000, immutable");
+  return publishedAssetResponse(request, asset);
 }

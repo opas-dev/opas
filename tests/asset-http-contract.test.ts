@@ -10,9 +10,28 @@ import {
   readAssetDiscardRequest,
   readAssetStageRequest,
 } from "../src/assets/requests";
+import { publishedAssetResponse } from "../src/assets/responses";
 
 const manifestId = "asset_manifest_123e4567-e89b-42d3-a456-426614174000";
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+test("prevents revocable published assets from entering browser or CDN caches", () => {
+  const response = publishedAssetResponse(
+    new Request(`https://opas.dev/api/assets/${"a".repeat(64)}`),
+    {
+      byteSize: png.byteLength,
+      content: png,
+      createdAt: new Date("2026-09-03T00:00:00.000Z"),
+      hash: "a".repeat(64),
+      mediaType: "image/png",
+      workspaceId: "workspace_demo",
+    },
+  );
+
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("cdn-cache-control"), "no-store");
+  assert.equal(response.headers.get("vercel-cdn-cache-control"), "no-store");
+});
 
 function stageRequest(formData: FormData, contentLength?: number) {
   const request = new Request("https://opas.dev/admin/content/assets", {

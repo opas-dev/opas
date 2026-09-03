@@ -2,6 +2,13 @@
 // ABOUTME: Shares ETag, MIME, and cache headers across public and authenticated delivery.
 import type { Asset } from "@/db/repository";
 
+export function publishedAssetResponse(request: Request, asset: Asset) {
+  const response = storedAssetResponse(request, asset, "no-store");
+  response.headers.set("CDN-Cache-Control", "no-store");
+  response.headers.set("Vercel-CDN-Cache-Control", "no-store");
+  return response;
+}
+
 export function storedAssetResponse(
   request: Request,
   asset: Asset,
