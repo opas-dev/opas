@@ -18,6 +18,11 @@ const workspaceId = "workspace_demo";
 const sourceHash = "a".repeat(64);
 const articleHash = "b".repeat(64);
 const completedAt = new Date("2026-08-30T10:00:00.000Z");
+const qualityActor = Object.freeze({
+  memberId: "member_quality_reviewer",
+  sessionId: "session_quality_reviewer",
+  workspaceId,
+});
 
 function results() {
   return createQualityEvaluationResults([
@@ -131,10 +136,15 @@ test("imports manual answer and claim judgments with recomputed class scores", a
         assert.equal(id, "run_release_one");
         return run();
       },
-      async updateEvaluationRunResults(update) {
+      async updateAuthorizedEvaluationRunResults(request, update) {
+        assert.equal(request.memberId, qualityActor.memberId);
+        assert.equal(request.sessionId, qualityActor.sessionId);
+        assert.equal(request.workspaceId, qualityActor.workspaceId);
+        assert.equal(request.checkedAt.toISOString(), "2026-08-30T11:00:00.000Z");
         updates.push(update);
       },
     },
+    qualityActor,
     () => new Date("2026-08-30T11:00:00.000Z"),
   );
 
@@ -170,7 +180,7 @@ test("rejects incomplete, mismatched, stale-schema, and non-completed reviews", 
     async getEvaluationRun() {
       return currentRun;
     },
-    async updateEvaluationRunResults() {
+    async updateAuthorizedEvaluationRunResults() {
       updateCalls += 1;
     },
   };
@@ -202,7 +212,7 @@ test("rejects incomplete, mismatched, stale-schema, and non-completed reviews", 
   ];
   for (const payload of invalid) {
     await assert.rejects(
-      importQualityReview(workspaceId, payload, repository),
+      importQualityReview(workspaceId, payload, repository, qualityActor),
       (error: unknown) =>
         error instanceof QualityReviewImportError &&
         error.code === "invalid-request",
@@ -210,7 +220,7 @@ test("rejects incomplete, mismatched, stale-schema, and non-completed reviews", 
   }
   currentRun = run({ status: "running" });
   await assert.rejects(
-    importQualityReview(workspaceId, reviewPayload(), repository),
+    importQualityReview(workspaceId, reviewPayload(), repository, qualityActor),
     (error: unknown) =>
       error instanceof QualityReviewImportError && error.code === "not-ready",
   );
@@ -221,10 +231,11 @@ test("review HTTP authorizes first and accepts only same-origin bounded JSON", a
   const origin = "https://quality.example.test";
   let imports = 0;
   const dependencies = {
-    authorize: async () => {},
-    async importReview(value: unknown) {
+    authorize: async () => qualityActor,
+    async importReview(value: unknown, actor: typeof qualityActor) {
       imports += 1;
       assert.deepEqual(value, reviewPayload());
+      assert.deepEqual(actor, qualityActor);
       return { questionCount: 1, runId: "run_release_one" };
     },
   };

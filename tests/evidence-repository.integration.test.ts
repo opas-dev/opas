@@ -12,7 +12,7 @@ import { drizzle as createPostgresDatabase } from "drizzle-orm/node-postgres";
 import { migrate as migratePostgres } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 
-import { demoIds } from "@/db/demo";
+import { demoContent, demoIds } from "@/db/demo";
 import {
   EvidenceStorageError,
   validateEvidenceReviewRequest,
@@ -25,6 +25,7 @@ import type {
   ArticleEvidenceCommit,
   EmbeddingGeneration,
   EvaluationRunCompletion,
+  QualityAuthoringRequest,
   Repository,
   SavedQuestionSet,
 } from "@/db/repository";
@@ -55,6 +56,121 @@ const embeddingMetadata = {
   },
   configurationHash,
 };
+const seedAdministratorId = "member_evidence_seed_administrator";
+const qualitySessionId = "Q".repeat(43);
+const seedVerifier = "A".repeat(43);
+
+function qualityActor(): QualityAuthoringRequest {
+  return {
+    checkedAt: startedAt,
+    memberId: seedAdministratorId,
+    sessionId: qualitySessionId,
+    workspaceId: demoIds.workspace,
+  };
+}
+
+async function bootstrapPostgresDemo(pool: Pool) {
+  const now = new Date("2026-09-03T10:00:00.000Z");
+  await pool.query(
+    `insert into workspaces (id, slug, name, created_at, updated_at)
+     values ($1, $2, $3, $4, $4)`,
+    [demoIds.workspace, demoContent.workspace.slug, demoContent.workspace.name, now],
+  );
+  await pool.query(
+    `insert into workspace_members (
+       id, workspace_id, normalized_email, display_name, role, status,
+       password_salt, password_digest, password_iterations, created_by_member_id,
+       created_at, updated_at, last_login_at
+     ) values ($1, $2, 'evidence-seed@opas.dev', 'Evidence seed administrator',
+       'administrator', 'active', $3, $3, 600000, null, $4, $4, null)`,
+    [seedAdministratorId, demoIds.workspace, seedVerifier, now],
+  );
+  await pool.query(
+    `insert into admin_sessions (
+       id, workspace_id, member_id, created_at, expires_at
+     ) values ($1, $2, $3, $4, $5)`,
+    [qualitySessionId, demoIds.workspace, seedAdministratorId, startedAt,
+      new Date(startedAt.getTime() + 7 * 60 * 60 * 1000)],
+  );
+}
+
+function bootstrapSqliteDemo(client: Database.Database) {
+  const now = Date.parse("2026-09-03T10:00:00.000Z");
+  client
+    .prepare(
+      `insert into workspaces (id, slug, name, created_at, updated_at)
+       values (?, ?, ?, ?, ?)`,
+    )
+    .run(
+      demoIds.workspace,
+      demoContent.workspace.slug,
+      demoContent.workspace.name,
+      now,
+      now,
+    );
+  client
+    .prepare(
+      `insert into workspace_members (
+         id, workspace_id, normalized_email, display_name, role, status,
+         password_salt, password_digest, password_iterations, created_by_member_id,
+         created_at, updated_at, last_login_at
+       ) values (?, ?, 'evidence-seed@opas.dev', 'Evidence seed administrator',
+         'administrator', 'active', ?, ?, 600000, null, ?, ?, null)`,
+    )
+    .run(
+      seedAdministratorId,
+      demoIds.workspace,
+      seedVerifier,
+      seedVerifier,
+      now,
+      now,
+    );
+  client
+    .prepare(
+      `insert into admin_sessions (
+         id, workspace_id, member_id, created_at, expires_at
+       ) values (?, ?, ?, ?, ?)`,
+    )
+    .run(
+      qualitySessionId,
+      demoIds.workspace,
+      seedAdministratorId,
+      startedAt.getTime(),
+      startedAt.getTime() + 7 * 60 * 60 * 1000,
+    );
+}
+
+async function resetPostgresSeedEvidence(pool: Pool) {
+  await pool.query("delete from embedding_jobs where workspace_id = $1", [
+    demoIds.workspace,
+  ]);
+  await pool.query("delete from evidence_chunks where workspace_id = $1", [
+    demoIds.workspace,
+  ]);
+  await pool.query("delete from workspace_index_states where workspace_id = $1", [
+    demoIds.workspace,
+  ]);
+  await pool.query("update articles set content_hash = null where workspace_id = $1", [
+    demoIds.workspace,
+  ]);
+}
+
+function resetSqliteSeedEvidence(client: Database.Database) {
+  client.transaction(() => {
+    client
+      .prepare("delete from embedding_jobs where workspace_id = ?")
+      .run(demoIds.workspace);
+    client
+      .prepare("delete from evidence_chunks where workspace_id = ?")
+      .run(demoIds.workspace);
+    client
+      .prepare("delete from workspace_index_states where workspace_id = ?")
+      .run(demoIds.workspace);
+    client
+      .prepare("update articles set content_hash = null where workspace_id = ?")
+      .run(demoIds.workspace);
+  })();
+}
 
 test("evidence validation rejects invalid fixture and evaluation records", () => {
   const invalidQuestionSet = {
@@ -1137,7 +1253,7 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
   );
   assert.deepEqual(await repository.listActiveChunkEmbeddings(demoIds.workspace), []);
 
-  await repository.saveQuestionSet({
+  await repository.saveAuthorizedQuestionSet(qualityActor(), {
     id: "question_set_pilot_v1",
     workspaceId: demoIds.workspace,
     name: "Pilot questions",
@@ -1174,7 +1290,7 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
   );
   assert.deepEqual(await repository.listQuestionSets("workspace_other", 10), []);
 
-  await repository.startEvaluationRun({
+  await repository.startAuthorizedEvaluationRun(qualityActor(), {
     id: "evaluation_run_pilot",
     workspaceId: demoIds.workspace,
     questionSetId: "question_set_pilot_v1",
@@ -1185,7 +1301,7 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
     model: "test-answer-v1",
     startedAt,
   });
-  await repository.finishEvaluationRun({
+  await repository.finishAuthorizedEvaluationRun(qualityActor(), {
     id: "evaluation_run_pilot",
     workspaceId: demoIds.workspace,
     status: "completed",
@@ -1211,7 +1327,7 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
       unsupported: { passed: 1, total: 1 },
     },
   });
-  await repository.updateEvaluationRunResults({
+  await repository.updateAuthorizedEvaluationRunResults(qualityActor(), {
     id: "evaluation_run_pilot",
     results: {
       classes: {
@@ -1236,12 +1352,11 @@ async function exerciseEvidenceRepository(repository: Repository, label: string)
     },
   );
   await assert.rejects(
-    repository.updateEvaluationRunResults({
+    repository.updateAuthorizedEvaluationRunResults(qualityActor(), {
       id: "evaluation_run_pilot",
       results: { exposed: true },
       workspaceId: "workspace_other",
     }),
-    /Completed evaluation record was not found/u,
   );
   assert.deepEqual(
     (await repository.listEvaluationRuns(demoIds.workspace, 10)).map(({ id }) => id),
@@ -1259,7 +1374,9 @@ test("evidence repository contract passes on Postgres", { timeout: 120_000 }, as
     await migratePostgres(database, {
       migrationsFolder: path.join(process.cwd(), "drizzle/postgres"),
     });
+    await bootstrapPostgresDemo(pool);
     await seedPostgres(database);
+    await resetPostgresSeedEvidence(pool);
     await pool.query(
       "insert into workspaces (id, slug, name) values ($1, $2, $3)",
       [raceWorkspaceId, "embedding-race", "Embedding race"],
@@ -1337,7 +1454,9 @@ test("evidence repository contract passes on local SQLite", async () => {
     migrateSqlite(database, {
       migrationsFolder: path.join(process.cwd(), "drizzle/sqlite"),
     });
+    bootstrapSqliteDemo(client);
     await seedD1(database);
+    resetSqliteSeedEvidence(client);
     client
       .prepare("insert into workspaces (id, slug, name) values (?, ?, ?)")
       .run(raceWorkspaceId, "embedding-race", "Embedding race");

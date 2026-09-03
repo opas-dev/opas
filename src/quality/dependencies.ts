@@ -2,6 +2,8 @@
 // ABOUTME: Binds every administrator operation to the single active demo workspace on the server.
 import "server-only";
 
+import type { MemberActor } from "@/auth/member-repository";
+
 import {
   createConfiguredAnswerRuntime,
   createConfiguredRetainedAnswerRuntime,
@@ -32,6 +34,7 @@ import {
   runSavedQuestionSet,
   type QualityAnalyticsAccess,
   type QualityRuntimeDependencies,
+  type SavedQualityRuntimeDependencies,
 } from "@/quality/runtime";
 
 export const consumeQualityRequestAllowance = createAnswerRequestGate(
@@ -95,6 +98,15 @@ async function qualityRuntimeDependencies(): Promise<QualityRuntimeDependencies>
   });
 }
 
+async function savedQualityRuntimeDependencies(
+  actor: MemberActor,
+): Promise<SavedQualityRuntimeDependencies> {
+  return Object.freeze({
+    ...(await qualityRuntimeDependencies()),
+    actor,
+  });
+}
+
 export async function loadActiveQualityConsoleData(now = new Date()) {
   const dependencies = await qualityRuntimeDependencies();
   const analytics = await qualityAnalyticsAccess(now);
@@ -127,28 +139,39 @@ export async function loadActiveQualityConsoleData(now = new Date()) {
   });
 }
 
-export async function runActiveSavedQuestionSet(questionSetId: string) {
+export async function runActiveSavedQuestionSet(
+  questionSetId: string,
+  actor: MemberActor,
+) {
   return runSavedQuestionSet(
     demoIds.workspace,
     questionSetId,
-    await qualityRuntimeDependencies(),
+    await savedQualityRuntimeDependencies(actor),
   );
 }
 
-export async function importActiveSavedQuestionSet(value: unknown) {
+export async function importActiveSavedQuestionSet(
+  value: unknown,
+  actor: MemberActor,
+) {
   const repository = await getRepository();
   return importSavedQuestionSet(
     demoIds.workspace,
     value,
     repository,
+    actor,
   );
 }
 
-export async function importActiveQualityReview(value: unknown) {
+export async function importActiveQualityReview(
+  value: unknown,
+  actor: MemberActor,
+) {
   return importQualityReview(
     demoIds.workspace,
     value,
     await getRepository(),
+    actor,
   );
 }
 

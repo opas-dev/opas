@@ -9,23 +9,16 @@ import { articleEventRetentionStart } from "@/analytics/records";
 import {
   AssetValidationError,
   prepareAsset,
-  prepareAssetSelection,
 } from "@/db/assets";
-import { validateArticleEvidence } from "@/db/evidence";
 import { authoringAssertion, withAuthoringErrorBoundary } from "@/db/authoring-controls";
 import type { AssetAuthoringRequest } from "@/db/repository";
-import type {
-  ArticleAssetSelection,
-  ArticleSubmission,
-  Repository,
-} from "@/db/repository";
+import type { Repository } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
 import { createPostgresAnswerInferenceRepository } from "@/db/postgres/answer-inference-repository";
 import { createPostgresArticleDraftRepository } from "@/db/postgres/article-draft-repository";
 import { createPostgresKnowledgeImportRepository } from "@/db/postgres/knowledge-import-repository";
+import { createPostgresQualityAuthoringRepository } from "@/db/postgres/quality-authoring-repository";
 import {
-  articleEvidenceCommitStatements,
-  articleEvidenceInvalidationStatements,
   createPostgresEvidenceRepository,
 } from "@/db/postgres/evidence-repository";
 import {
@@ -151,98 +144,6 @@ function discardManifestStatements(workspaceId: string, manifestId: string) {
   ];
 }
 
-function articleAttachmentStatements(
-  article: ArticleSubmission,
-  selection: ArticleAssetSelection,
-  checkedAt: Date,
-) {
-  const { manifestId, hashes } = prepareAssetSelection(selection);
-  const serializedHashes = JSON.stringify(hashes);
-  const attachedAssets = sql`
-    with requested(hash) as (
-      select distinct value
-      from jsonb_array_elements_text(${serializedHashes}::jsonb)
-    ),
-    allowed(asset_id, hash) as (
-      select assets.id, assets.hash
-      from assets
-      inner join requested on requested.hash = assets.hash
-      where assets.workspace_id = ${article.workspaceId}
-        and (
-          exists (
-            select 1
-            from article_assets
-            where article_assets.article_id = ${article.id}
-              and article_assets.workspace_id = ${article.workspaceId}
-              and article_assets.asset_id = assets.id
-          )
-          or exists (
-            select 1
-            from asset_manifests
-            inner join asset_manifest_items
-              on asset_manifest_items.manifest_id = asset_manifests.id
-             and asset_manifest_items.workspace_id = asset_manifests.workspace_id
-            where asset_manifests.id = ${manifestId ?? null}
-              and asset_manifests.workspace_id = ${article.workspaceId}
-              and asset_manifests.expires_at > ${checkedAt}
-              and asset_manifest_items.asset_id = assets.id
-          )
-        )
-    ),
-    attachment_rows(article_id, asset_id, workspace_id) as (
-      select ${article.id}, allowed.asset_id, ${article.workspaceId}
-      from allowed
-      union all
-      select ${article.id}, null::text, ${article.workspaceId}
-      where not exists (
-        select 1 from articles
-        where articles.id = ${article.id}
-          and articles.workspace_id = ${article.workspaceId}
-      )
-        or (select count(*) from requested) <> (select count(*) from allowed)
-        or (
-          ${manifestId ?? null}::text is not null
-          and not exists (
-            select 1 from asset_manifests
-            where asset_manifests.id = ${manifestId ?? null}
-              and asset_manifests.workspace_id = ${article.workspaceId}
-              and asset_manifests.expires_at > ${checkedAt}
-          )
-        )
-    )
-    insert into article_assets (article_id, asset_id, workspace_id)
-    select article_id, asset_id, workspace_id from attachment_rows
-    on conflict do nothing
-  `;
-  const removedAssets = sql`
-    with requested(hash) as (
-      select distinct value
-      from jsonb_array_elements_text(${serializedHashes}::jsonb)
-    )
-    delete from article_assets
-    where article_id = ${article.id}
-      and workspace_id = ${article.workspaceId}
-      and not exists (
-        select 1
-        from assets
-        inner join requested on requested.hash = assets.hash
-        where assets.id = article_assets.asset_id
-          and assets.workspace_id = article_assets.workspace_id
-      )
-  `;
-
-  return [
-    attachedAssets,
-    removedAssets,
-    ...(manifestId
-      ? [
-          sql`delete from asset_manifests where id = ${manifestId} and workspace_id = ${article.workspaceId}`,
-        ]
-      : []),
-    orphanAssetCleanup(article.workspaceId),
-  ];
-}
-
 export function createPostgresRepository(
   database: PostgresDatabase,
   knowledgeImportClock: () => Date = () => new Date(),
@@ -252,6 +153,7 @@ export function createPostgresRepository(
     ...createPostgresArticleDraftRepository(database),
     ...createPostgresEvidenceRepository(database),
     ...createPostgresKnowledgeImportRepository(database, knowledgeImportClock),
+    ...createPostgresQualityAuthoringRepository(database),
     async checkHealth() {
       await database.execute(sql`select 1`);
     },
@@ -341,174 +243,6 @@ export function createPostgresRepository(
       return article ?? null;
     },
 
-    async createArticle(article, assetSelection, evidence) {
-      const changedAt = new Date();
-      const manifestId = assetSelection?.manifestId;
-      const insert = database
-        .insert(articles)
-        .values({
-          ...article,
-          contentHash: evidence?.articleContentHash ?? null,
-          position: article.position ?? 0,
-        });
-
-      try {
-        validateArticleEvidence(article, evidence);
-        await executeAtomically(database, [
-          insert.getSQL(),
-          ...(assetSelection
-            ? articleAttachmentStatements(article, assetSelection, changedAt)
-            : []),
-          ...(evidence
-            ? articleEvidenceCommitStatements(database, [evidence], changedAt)
-            : []),
-        ]);
-      } catch (error) {
-        if (manifestId) {
-          try {
-            await executeAtomically(
-              database,
-              discardManifestStatements(article.workspaceId, manifestId),
-            );
-          } catch (cleanupError) {
-            throw new AggregateError(
-              [error, cleanupError],
-              "The article save and staged asset cleanup both failed.",
-            );
-          }
-        }
-        throw error;
-      }
-    },
-
-    async updateArticle(article, assetSelection, evidence) {
-      const changedAt = new Date();
-      const manifestId = assetSelection?.manifestId;
-      const update = database
-        .update(articles)
-        .set({
-          categoryId: article.categoryId,
-          slug: article.slug,
-          title: article.title,
-          mdx: article.mdx,
-          contentHash: evidence?.articleContentHash ?? null,
-          status: article.status,
-          isFaq: article.isFaq,
-          authorName: article.authorName,
-          position: article.position,
-          publishedAt: article.publishedAt,
-          updatedAt: changedAt,
-        })
-        .where(
-          and(eq(articles.workspaceId, article.workspaceId), eq(articles.id, article.id)),
-        );
-
-      try {
-        validateArticleEvidence(article, evidence);
-        await executeAtomically(database, [
-          ...(!evidence
-            ? articleEvidenceInvalidationStatements(
-                database,
-                article.workspaceId,
-                [article.id],
-                changedAt,
-              )
-            : []),
-          update.getSQL(),
-          ...(assetSelection
-            ? articleAttachmentStatements(article, assetSelection, changedAt)
-            : []),
-          ...(evidence
-            ? articleEvidenceCommitStatements(database, [evidence], changedAt)
-            : []),
-        ]);
-      } catch (error) {
-        if (manifestId) {
-          try {
-            await executeAtomically(
-              database,
-              discardManifestStatements(article.workspaceId, manifestId),
-            );
-          } catch (cleanupError) {
-            throw new AggregateError(
-              [error, cleanupError],
-              "The article save and staged asset cleanup both failed.",
-            );
-          }
-        }
-        throw error;
-      }
-    },
-
-    async deleteArticle(workspaceId, id) {
-      const deletedAt = new Date();
-      await executeAtomically(database, [
-        ...articleEvidenceInvalidationStatements(
-          database,
-          workspaceId,
-          [id],
-          deletedAt,
-        ),
-        sql`delete from articles where workspace_id = ${workspaceId} and id = ${id}`,
-        orphanAssetCleanup(workspaceId),
-      ]);
-    },
-
-    async createAssetManifest(workspaceId, expiresAt) {
-      const createdAt = new Date();
-      if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= createdAt) {
-        throw new AssetValidationError("Asset manifests must expire in the future.");
-      }
-
-      const manifest = {
-        id: `asset_manifest_${crypto.randomUUID()}`,
-        workspaceId,
-        expiresAt,
-        createdAt,
-      };
-      await database.insert(assetManifests).values(manifest);
-      return manifest;
-    },
-
-    async stageAsset(workspaceId, manifestId, upload) {
-      const prepared = await prepareAsset(upload);
-      const assetId = `asset_${crypto.randomUUID()}`;
-      const checkedAt = new Date();
-      const insert = database
-        .insert(assets)
-        .values({ id: assetId, workspaceId, ...prepared })
-        .onConflictDoNothing({ target: [assets.workspaceId, assets.hash] });
-      const attach = sql`
-        with valid(manifest_id, asset_id, workspace_id) as (
-          select asset_manifests.id, assets.id, asset_manifests.workspace_id
-          from asset_manifests
-          inner join assets on assets.workspace_id = asset_manifests.workspace_id
-          where asset_manifests.id = ${manifestId}
-            and asset_manifests.workspace_id = ${workspaceId}
-            and asset_manifests.expires_at > ${checkedAt}
-            and assets.hash = ${prepared.hash}
-            and assets.media_type = ${prepared.mediaType}
-            and assets.byte_size = ${prepared.byteSize}
-        ),
-        manifest_rows(manifest_id, asset_id, workspace_id) as (
-          select manifest_id, asset_id, workspace_id from valid
-          union all
-          select null::text, null::text, ${workspaceId}
-          where not exists (select 1 from valid)
-        )
-        insert into asset_manifest_items (manifest_id, asset_id, workspace_id)
-        select manifest_id, asset_id, workspace_id from manifest_rows
-        on conflict do nothing
-      `;
-
-      await executeAtomically(database, [insert.getSQL(), attach]);
-      const asset = await this.getAsset(workspaceId, prepared.hash);
-      if (!asset) {
-        throw new Error("The staged asset could not be read after storage.");
-      }
-      return asset;
-    },
-
     async getAsset(workspaceId, hash) {
       const [asset] = await database
         .select({
@@ -576,20 +310,6 @@ export function createPostgresRepository(
         )
         .orderBy(asc(assets.hash));
       return rows.map(({ hash }) => hash);
-    },
-
-    async discardAssetManifest(workspaceId, manifestId) {
-      await executeAtomically(
-        database,
-        discardManifestStatements(workspaceId, manifestId),
-      );
-    },
-
-    async cleanupExpiredAssets(workspaceId, expiredAt) {
-      await executeAtomically(database, [
-        sql`delete from asset_manifests where workspace_id = ${workspaceId} and expires_at <= ${expiredAt}`,
-        orphanAssetCleanup(workspaceId),
-      ]);
     },
 
     async createAuthorizedAssetManifest(request, expiresAt) {

@@ -55,6 +55,26 @@ type SeedSource = {
 
 type SourceIdsByQuestion = Record<string, readonly string[]>;
 
+type RetrievalVerificationRepository = Pick<
+  Repository,
+  | "activateEmbeddingGeneration"
+  | "archiveArticle"
+  | "checkHealth"
+  | "claimEmbeddingJob"
+  | "commitArticleEvidence"
+  | "completeEmbeddingJob"
+  | "createDraftArticle"
+  | "createEmbeddingGeneration"
+  | "emergencyPublishArticle"
+  | "getIndexingState"
+  | "listActiveChunkEmbeddings"
+  | "listEvidenceChunks"
+  | "revalidateEvidenceCandidates"
+  | "saveChunkEmbeddings"
+  | "saveDraftArticle"
+  | "unpublishArticle"
+>;
+
 type LifecycleReport = {
   baseline: {
     updateBefore: readonly string[];
@@ -136,6 +156,10 @@ const authoringActor: MemberActor = {
   memberId: "member_runtime_author",
   sessionId: "R".repeat(43),
   workspaceId,
+};
+const draftActor = {
+  memberId: authoringActor.memberId,
+  sessionId: authoringActor.sessionId,
 };
 
 async function createRuntimeAuthor(pool: Pool) {
@@ -234,6 +258,21 @@ function articleSubmission(
   };
 }
 
+function draftArticle(source: SeedSource, position: number) {
+  const article = articleSubmission(source, position, "draft");
+  return {
+    authorName: article.authorName,
+    categoryId: article.categoryId,
+    id: article.id,
+    isFaq: article.isFaq,
+    mdx: article.mdx,
+    position: article.position ?? position,
+    slug: article.slug,
+    title: article.title,
+    workspaceId: article.workspaceId,
+  };
+}
+
 function evidenceCommit(
   source: SeedSource,
   position: number,
@@ -268,8 +307,57 @@ function evidenceCommit(
   };
 }
 
-function repositoryRetrievalSource(repository: Repository) {
+function repositoryRetrievalSource(repository: RetrievalVerificationRepository) {
   return createRepositoryEvidenceSource(repository);
+}
+
+async function publishFixtureRevision(
+  repository: RetrievalVerificationRepository,
+  source: SeedSource,
+  position: number,
+  jobSuffix: string,
+  current?: Readonly<{ revisionId: string; revisionNumber: number }>,
+) {
+  const saved = current
+    ? await repository.saveDraftArticle({
+        actor: draftActor,
+        article: draftArticle(source, position),
+        assets: { hashes: [] },
+        changeKind: "manual",
+        changeSummary: "Retrieval lifecycle verification",
+        expectedWorkingRevisionNumber: current.revisionNumber,
+      })
+    : await repository.createDraftArticle({
+        actor: draftActor,
+        article: draftArticle(source, position),
+        assets: { hashes: [] },
+        changeKind: "manual",
+        changeSummary: "Retrieval fixture creation",
+      });
+  assert.equal(saved.status, "saved");
+  if (saved.status !== "saved") {
+    throw new Error(`Could not save retrieval fixture ${source.articleId}`);
+  }
+  const published = await repository.emergencyPublishArticle({
+    actor: draftActor,
+    articleId: source.articleId,
+    expectedReviewState: "editing",
+    expectedWorkingRevisionNumber: saved.revisionNumber,
+    reason: "disposable retrieval verification fixture",
+    revisionId: saved.revisionId,
+    workspaceId,
+  });
+  assert.equal(published.status, "transitioned");
+  if (published.status !== "transitioned") {
+    throw new Error(`Could not publish retrieval fixture ${source.articleId}`);
+  }
+  await repository.commitArticleEvidence(
+    evidenceCommit(source, position, jobSuffix),
+  );
+  return {
+    revisionId: saved.revisionId,
+    revisionNumber: saved.revisionNumber,
+  };
 }
 
 async function sourceIdsForQuestions(
@@ -328,7 +416,7 @@ async function queryCanary(
 }
 
 async function runRepositoryScenario(
-  repository: Repository,
+  repository: RetrievalVerificationRepository,
   categories: CategoryAuthoringRepository,
   adapter: RepositoryScenario["adapter"],
 ) {
@@ -369,12 +457,17 @@ async function runRepositoryScenario(
     activatedAt: null,
     retiredAt: null,
   });
+  const revisions = new Map<string, Readonly<{ revisionId: string; revisionNumber: number }>>();
   for (let position = 0; position < sources.length; position += 1) {
     const source = sources[position] as SeedSource;
-    await repository.createArticle(
-      articleSubmission(source, position),
-      undefined,
-      evidenceCommit(source, position),
+    revisions.set(
+      source.articleId,
+      await publishFixtureRevision(
+        repository,
+        source,
+        position,
+        "baseline",
+      ),
     );
   }
   await repository.saveChunkEmbeddings({
@@ -463,10 +556,15 @@ async function runRepositoryScenario(
     retrievalRuntimeCanaries.updateAfter,
     sources[0]?.vector.length ?? 0,
   );
-  await repository.updateArticle(
-    articleSubmission(currentUpdate, updatePosition),
-    undefined,
-    evidenceCommit(currentUpdate, updatePosition, "updated"),
+  revisions.set(
+    currentUpdate.articleId,
+    await publishFixtureRevision(
+      repository,
+      currentUpdate,
+      updatePosition,
+      "updated",
+      revisions.get(currentUpdate.articleId),
+    ),
   );
   lifecycle.afterUpdate = {
     updateBefore: await queryCanary(
@@ -487,21 +585,37 @@ async function runRepositoryScenario(
     ({ id }) => id === retrievalRuntimeCanaries.unpublish.id,
   );
   const unpublishSource = sources[unpublishPosition] as SeedSource;
-  await repository.updateArticle(
-    articleSubmission(unpublishSource, unpublishPosition, "draft"),
-    undefined,
-    null,
-  );
+  const unpublishRevision = revisions.get(unpublishSource.articleId);
+  assert.ok(unpublishRevision);
+  const unpublished = await repository.unpublishArticle({
+    actor: draftActor,
+    articleId: unpublishSource.articleId,
+    expectedReviewState: "published",
+    expectedWorkingRevisionNumber: unpublishRevision.revisionNumber,
+    note: "Retrieval lifecycle verification",
+    revisionId: unpublishRevision.revisionId,
+    workspaceId,
+  });
+  assert.equal(unpublished.status, "transitioned");
   lifecycle.afterUnpublish = await queryCanary(
     retrieve,
     retrievalRuntimeCanaries.unpublish.query,
   );
   assert.deepEqual(lifecycle.afterUnpublish, []);
 
-  await repository.deleteArticle(
+  const removedRevision = revisions.get(retrievalRuntimeCanaries.remove.articleId);
+  assert.ok(removedRevision);
+  const archived = await repository.archiveArticle({
+    actor: draftActor,
+    articleId: retrievalRuntimeCanaries.remove.articleId,
+    expectedPublicStatus: "published",
+    expectedReviewState: "published",
+    expectedWorkingRevisionNumber: removedRevision.revisionNumber,
+    note: "Retrieval lifecycle verification",
+    revisionId: removedRevision.revisionId,
     workspaceId,
-    retrievalRuntimeCanaries.remove.articleId,
-  );
+  });
+  assert.equal(archived.status, "transitioned");
   lifecycle.afterDelete = await queryCanary(
     retrieve,
     retrievalRuntimeCanaries.remove.query,

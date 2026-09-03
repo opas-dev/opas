@@ -9,6 +9,7 @@ import {
   type AnswerHistoryMessage,
 } from "@/answers/answer";
 import type { GenerationUsage } from "@/ai/generation";
+import type { MemberActor } from "@/auth/member-repository";
 import type {
   EvaluationRun,
   Repository,
@@ -53,7 +54,7 @@ const retainedRedactionMarker = /\[REDACTED\]/giu;
 
 export type QualityRepository = Pick<
   Repository,
-  | "finishEvaluationRun"
+  | "finishAuthorizedEvaluationRun"
   | "getIndexingState"
   | "getQuestionSet"
   | "listActiveChunkEmbeddings"
@@ -61,7 +62,7 @@ export type QualityRepository = Pick<
   | "listEvidenceChunks"
   | "listQuestionSets"
   | "revalidateEvidenceCandidates"
-  | "startEvaluationRun"
+  | "startAuthorizedEvaluationRun"
 >;
 
 export type QualityConsoleData = Readonly<{
@@ -113,6 +114,9 @@ export type QualityRuntimeDependencies = Readonly<{
   repository: QualityRepository;
   timeoutMilliseconds?: number;
 }>;
+
+export type SavedQualityRuntimeDependencies = QualityRuntimeDependencies &
+  Readonly<{ actor: MemberActor }>;
 
 export type QualityRetainedReplayDependencies = Readonly<{
   createAnswerRuntime: (
@@ -827,7 +831,7 @@ async function evaluateSavedQuestion(
 export async function runSavedQuestionSet(
   workspaceId: string,
   questionSetId: unknown,
-  dependencies: QualityRuntimeDependencies,
+  dependencies: SavedQualityRuntimeDependencies,
 ) {
   if (!validIdentifier(workspaceId) || !validIdentifier(questionSetId)) {
     throw new QualityConsoleError("invalid-request");
@@ -874,17 +878,20 @@ export async function runSavedQuestionSet(
   try {
     const runtime = await withinDeadline(dependencies.createAnswerRuntime());
     await withinDeadline(
-      dependencies.repository.startEvaluationRun({
-        embeddingGenerationId: indexingState.activeEmbeddingGenerationId,
-        id,
-        indexGeneration: indexingState.generation,
-        model: runtime.metadata.model,
-        provider: runtime.metadata.provider,
-        questionSetId: questionSet.id,
-        retrievalMode: "production-answer-runtime",
-        startedAt,
-        workspaceId,
-      }),
+      dependencies.repository.startAuthorizedEvaluationRun(
+        { ...dependencies.actor, checkedAt: startedAt },
+        {
+          embeddingGenerationId: indexingState.activeEmbeddingGenerationId,
+          id,
+          indexGeneration: indexingState.generation,
+          model: runtime.metadata.model,
+          provider: runtime.metadata.provider,
+          questionSetId: questionSet.id,
+          retrievalMode: "production-answer-runtime",
+          startedAt,
+          workspaceId,
+        },
+      ),
     );
     runStarted = true;
     const questions = new Array<QualityQuestionResult | undefined>(
@@ -940,13 +947,16 @@ export async function runSavedQuestionSet(
     const completedAt = now();
     const results = createQualityEvaluationResults(completedQuestions);
     await withinDeadline(
-      dependencies.repository.finishEvaluationRun({
-        completedAt,
-        id,
-        results,
-        status: "completed",
-        workspaceId,
-      }),
+      dependencies.repository.finishAuthorizedEvaluationRun(
+        { ...dependencies.actor, checkedAt: completedAt },
+        {
+          completedAt,
+          id,
+          results,
+          status: "completed",
+          workspaceId,
+        },
+      ),
     );
     return Object.freeze({ id, results });
   } catch (error) {
@@ -955,16 +965,20 @@ export async function runSavedQuestionSet(
     if (failure instanceof AuthoringPausedError) throw failure;
     if (runStarted) {
       try {
-        await dependencies.repository.finishEvaluationRun({
-          completedAt: now(),
-          id,
-          results: Object.freeze({
-            code: "unavailable",
-            schema: "opas.quality-evaluation-error.v1",
-          }),
-          status: "failed",
-          workspaceId,
-        });
+        const completedAt = now();
+        await dependencies.repository.finishAuthorizedEvaluationRun(
+          { ...dependencies.actor, checkedAt: completedAt },
+          {
+            completedAt,
+            id,
+            results: Object.freeze({
+              code: "unavailable",
+              schema: "opas.quality-evaluation-error.v1",
+            }),
+            status: "failed",
+            workspaceId,
+          },
+        );
       } catch (completionError) {
         const completionFailure = normalizeAuthoringError(completionError);
         if (completionFailure instanceof AuthoringPausedError) {

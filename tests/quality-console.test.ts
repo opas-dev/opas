@@ -38,6 +38,11 @@ import {
 
 const workspaceId = "workspace_demo";
 const otherWorkspaceId = "workspace_other";
+const qualityActor = Object.freeze({
+  memberId: "member_quality_reviewer",
+  sessionId: "session_quality_reviewer",
+  workspaceId,
+});
 const recordedAt = new Date("2026-08-30T10:00:00.000Z");
 const expiresAt = new Date("2026-09-29T10:00:00.000Z");
 const sourceHash = "a".repeat(64);
@@ -320,7 +325,7 @@ function answerRuntime(
 
 function qualityRepository(overrides: Partial<QualityRepository> = {}): QualityRepository {
   return {
-    async finishEvaluationRun() {},
+    async finishAuthorizedEvaluationRun() {},
     async getIndexingState(requestWorkspaceId) {
       return requestWorkspaceId === workspaceId
         ? {
@@ -353,7 +358,7 @@ function qualityRepository(overrides: Partial<QualityRepository> = {}): QualityR
         ? request.candidates
         : [];
     },
-    async startEvaluationRun() {},
+    async startAuthorizedEvaluationRun() {},
     ...overrides,
   };
 }
@@ -999,6 +1004,7 @@ test("runs saved sets through production answer generation with current provenan
   let answerRuntimeCalls = 0;
   const ticks = [0, 125, 200];
   const response = await runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
     costRates: [
       {
         inputMicrodollarsPerMillionTokens: "1000000",
@@ -1015,10 +1021,12 @@ test("runs saved sets through production answer generation with current provenan
     now: () => recordedAt,
     randomId: () => "run_release_one",
     repository: qualityRepository({
-      async finishEvaluationRun(completion) {
+      async finishAuthorizedEvaluationRun(request, completion) {
+        assert.deepEqual(request, { ...qualityActor, checkedAt: recordedAt });
         finished.push(completion);
       },
-      async startEvaluationRun(run) {
+      async startAuthorizedEvaluationRun(request, run) {
+        assert.deepEqual(request, { ...qualityActor, checkedAt: recordedAt });
         started.push(run);
       },
     }),
@@ -1052,6 +1060,7 @@ test("runs saved sets through production answer generation with current provenan
 
   await assert.rejects(
     runSavedQuestionSet(otherWorkspaceId, "question_set_one", {
+    actor: qualityActor,
       createAnswerRuntime: async () => {
         return answerRuntime();
       },
@@ -1066,12 +1075,13 @@ test("preserves paused evaluation writes instead of redacting them as unavailabl
   let completionCalls = 0;
   await assert.rejects(
     runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
       createAnswerRuntime: async () => answerRuntime(),
       repository: qualityRepository({
-        async startEvaluationRun() {
+        async startAuthorizedEvaluationRun() {
           throw new AuthoringPausedError();
         },
-        async finishEvaluationRun() {
+        async finishAuthorizedEvaluationRun() {
           completionCalls += 1;
         },
       }),
@@ -1083,9 +1093,10 @@ test("preserves paused evaluation writes instead of redacting them as unavailabl
 
   await assert.rejects(
     runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
       createAnswerRuntime: async () => answerRuntime(),
       repository: qualityRepository({
-        async finishEvaluationRun() {
+        async finishAuthorizedEvaluationRun() {
           throw new AuthoringPausedError();
         },
       }),
@@ -1097,6 +1108,7 @@ test("preserves paused evaluation writes instead of redacting them as unavailabl
 
 test("attributes saved answers and cost to the provider that actually completed", async () => {
   const response = await runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
     costRates: [
       {
         inputMicrodollarsPerMillionTokens: "1000000",
@@ -1138,6 +1150,7 @@ test("attributes saved answers and cost to the provider that actually completed"
 
 test("scores the runtime abstention rather than the retrieved source IDs", async () => {
   const response = await runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
     createAnswerRuntime: async () => answerRuntime({ abstain: true }),
     repository: qualityRepository({
       async getQuestionSet() {
@@ -1165,6 +1178,7 @@ test("scores the runtime abstention rather than the retrieved source IDs", async
 
 test("accounts for generated abstention tokens and cost", async () => {
   const response = await runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
     costRates: [
       {
         inputMicrodollarsPerMillionTokens: "1000000",
@@ -1221,6 +1235,7 @@ test("bounds saved-set generation concurrency and fails before the route deadlin
   let activeGenerations = 0;
   let maximumActiveGenerations = 0;
   await runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
     createAnswerRuntime: async () =>
       answerRuntime({
         async pause() {
@@ -1248,11 +1263,12 @@ test("bounds saved-set generation concurrency and fails before the route deadlin
   const startedAt = performance.now();
   await assert.rejects(
     runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
       createAnswerRuntime: async () =>
         answerRuntime({ pause: async () => new Promise<void>(() => {}) }),
       evaluationTimeoutMilliseconds: 5,
       repository: qualityRepository({
-        async finishEvaluationRun(completion) {
+        async finishAuthorizedEvaluationRun(_request, completion) {
           finished.push(completion);
         },
       }),
@@ -1268,10 +1284,11 @@ test("rejects generated citations whose content provenance differs from retrieva
   const finished: Array<{ status: string }> = [];
   await assert.rejects(
     runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
       createAnswerRuntime: async () =>
         answerRuntime({ citationContentHash: "c".repeat(64) }),
       repository: qualityRepository({
-        async finishEvaluationRun(completion) {
+        async finishAuthorizedEvaluationRun(_request, completion) {
           finished.push(completion);
         },
       }),
@@ -1284,6 +1301,7 @@ test("rejects generated citations whose content provenance differs from retrieva
 
 test("fails an answer when its current citation no longer matches the saved source hash", async () => {
   const response = await runSavedQuestionSet(workspaceId, "question_set_one", {
+    actor: qualityActor,
     createAnswerRuntime: async () => answerRuntime(),
     repository: qualityRepository({
       async getQuestionSet() {

@@ -20,14 +20,14 @@ type Allowance =
   | Readonly<{ accepted: true }>
   | Readonly<{ accepted: false; retryAfterSeconds: number }>;
 
-type QualityHttpDependencies = Readonly<{
-  authorize: () => Promise<unknown>;
+type QualityHttpDependencies<Actor = unknown> = Readonly<{
+  authorize: () => Promise<Actor>;
   consumeAllowance?: (request: Request) => Promise<Allowance>;
 }>;
 
-export type QualityRunHttpDependencies = QualityHttpDependencies &
+export type QualityRunHttpDependencies<Actor = unknown> = QualityHttpDependencies<Actor> &
   Readonly<{
-    run: (questionSetId: string) => Promise<{
+    run: (questionSetId: string, actor: Actor) => Promise<{
       id: string;
       results: QualityEvaluationResults;
     }>;
@@ -43,9 +43,10 @@ export type QualityReplayHttpDependencies = QualityHttpDependencies &
     run: (conversationId: string) => Promise<QualityRetainedReplayResult>;
   }>;
 
-export type QuestionSetImportHttpDependencies = QualityHttpDependencies &
+export type QuestionSetImportHttpDependencies<Actor = unknown> =
+  QualityHttpDependencies<Actor> &
   Readonly<{
-    importQuestionSet: (value: unknown) => Promise<{
+    importQuestionSet: (value: unknown, actor: Actor) => Promise<{
       id: string;
       name: string;
       questionCount: number;
@@ -53,9 +54,10 @@ export type QuestionSetImportHttpDependencies = QualityHttpDependencies &
     }>;
   }>;
 
-export type QualityReviewHttpDependencies = QualityHttpDependencies &
+export type QualityReviewHttpDependencies<Actor = unknown> =
+  QualityHttpDependencies<Actor> &
   Readonly<{
-    importReview: (value: unknown) => Promise<{
+    importReview: (value: unknown, actor: Actor) => Promise<{
       questionCount: number;
       runId: string;
     }>;
@@ -238,11 +240,11 @@ function safeFailure(error: unknown) {
   return json({ error: "unavailable" }, 503);
 }
 
-export async function handleQualityRunRequest(
+export async function handleQualityRunRequest<Actor>(
   request: Request,
-  dependencies: QualityRunHttpDependencies,
+  dependencies: QualityRunHttpDependencies<Actor>,
 ) {
-  await dependencies.authorize();
+  const actor = await dependencies.authorize();
   try {
     const rejection = await authorizedMutation(request, dependencies);
     if (rejection) return rejection;
@@ -253,7 +255,7 @@ export async function handleQualityRunRequest(
     ) {
       throw new QualityRequestError(400);
     }
-    const run = await dependencies.run(body.questionSetId);
+    const run = await dependencies.run(body.questionSetId, actor);
     return json({ runId: run.id }, 201);
   } catch (error) {
     return safeFailure(error);
@@ -299,17 +301,17 @@ export async function handleQualityReplayRequest(
   }
 }
 
-export async function handleQuestionSetImportRequest(
+export async function handleQuestionSetImportRequest<Actor>(
   request: Request,
-  dependencies: QuestionSetImportHttpDependencies,
+  dependencies: QuestionSetImportHttpDependencies<Actor>,
 ) {
-  await dependencies.authorize();
+  const actor = await dependencies.authorize();
   try {
     const rejection = await authorizedMutation(request, dependencies);
     if (rejection) return rejection;
     const body = await objectBody(request, maximumQuestionSetImportUtf8Bytes);
     return json(
-      { questionSet: await dependencies.importQuestionSet(body) },
+      { questionSet: await dependencies.importQuestionSet(body, actor) },
       201,
     );
   } catch (error) {
@@ -317,16 +319,16 @@ export async function handleQuestionSetImportRequest(
   }
 }
 
-export async function handleQualityReviewRequest(
+export async function handleQualityReviewRequest<Actor>(
   request: Request,
-  dependencies: QualityReviewHttpDependencies,
+  dependencies: QualityReviewHttpDependencies<Actor>,
 ) {
-  await dependencies.authorize();
+  const actor = await dependencies.authorize();
   try {
     const rejection = await authorizedMutation(request, dependencies);
     if (rejection) return rejection;
     const body = await objectBody(request, maximumQuestionSetImportUtf8Bytes);
-    const review = await dependencies.importReview(body);
+    const review = await dependencies.importReview(body, actor);
     return json(
       {
         review: {

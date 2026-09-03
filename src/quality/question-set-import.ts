@@ -1,6 +1,7 @@
 // ABOUTME: Validates administrator question-set fixtures against active published evidence.
 // ABOUTME: Injects the active workspace before atomically storing one bounded versioned set.
 import { validateQuestionSet } from "@/db/evidence";
+import type { MemberActor } from "@/auth/member-repository";
 import type {
   Repository,
   SavedQuestion,
@@ -12,7 +13,7 @@ export const savedQuestionSetImportSchema = "opas.saved-question-set.v1";
 
 type QuestionSetImportRepository = Pick<
   Repository,
-  "getQuestionSet" | "listEvidenceChunks" | "saveQuestionSet"
+  "getQuestionSet" | "listEvidenceChunks" | "saveAuthorizedQuestionSet"
 >;
 
 export class QuestionSetImportError extends Error {
@@ -120,6 +121,7 @@ export async function importSavedQuestionSet(
   workspaceId: string,
   value: unknown,
   repository: QuestionSetImportRepository,
+  actor: MemberActor,
   now = () => new Date(),
 ) {
   const questionSet = parseQuestionSet(workspaceId, value, now());
@@ -142,7 +144,10 @@ export async function importSavedQuestionSet(
     }
   }
 
-  await repository.saveQuestionSet(questionSet);
+  await repository.saveAuthorizedQuestionSet(
+    { ...actor, checkedAt: questionSet.createdAt },
+    questionSet,
+  );
   return Object.freeze({
     id: questionSet.id,
     name: questionSet.name,

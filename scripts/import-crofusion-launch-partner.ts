@@ -1,25 +1,17 @@
-// ABOUTME: Reviews or activates the frozen public-safe CROFusion launch-partner corpus through the admin import contract.
-// ABOUTME: Builds the archive in memory and authenticates without logging administrator credentials or session tokens.
-import { adminSessionCookie, createAdminSessionToken } from "@/auth/session";
+// ABOUTME: Builds and validates the frozen public-safe CROFusion import archive without writing data.
+// ABOUTME: Reports the exact private-draft import plan for a named member to upload in the admin UI.
+import { createHash } from "node:crypto";
+
 import { crofusionLaunchPartnerFixtureV1 } from "@/evaluation/fixtures/crofusion-launch-partner-v1";
+import { extractArchiveFiles } from "@/import/archive";
+import { planKnowledgeImport } from "@/import/planner";
 import { strToU8, zipSync } from "fflate";
 
-const productionOrigin = "https://demo.opas.dev";
-
-function selectedMode(value: string | undefined) {
-  if (value !== "dry-run" && value !== "activate") {
-    throw new Error(
-      "Usage: node --env-file=.env --import tsx scripts/import-crofusion-launch-partner.ts [dry-run|activate]",
-    );
+function selectedCommand(value: string | undefined) {
+  if (value !== undefined && value !== "verify") {
+    throw new Error("Usage: tsx scripts/import-crofusion-launch-partner.ts [verify]");
   }
-  return value;
-}
-
-function requiredSecret(value: string | undefined) {
-  if (!value || value.length < 32 || /[\r\n]/u.test(value)) {
-    throw new Error("ADMIN_SESSION_SECRET is unavailable or invalid");
-  }
-  return value;
+  return "verify" as const;
 }
 
 function articleSlug(sourceId: string) {
@@ -48,38 +40,46 @@ function archive() {
         ),
       ]),
     ),
-    { level: 9 },
+    { level: 9, mtime: new Date(2000, 0, 1) },
   );
 }
 
-async function main() {
-  const mode = selectedMode(process.argv[2]);
-  const secret = requiredSecret(process.env.ADMIN_SESSION_SECRET);
-  const session = await createAdminSessionToken(secret);
-  const form = new FormData();
-  form.set("mode", mode);
-  form.set(
-    "file",
-    new File([archive()], "crofusion-launch-partner-v1.zip", {
-      type: "application/zip",
-    }),
-  );
-  const response = await fetch(`${productionOrigin}/admin/content/import/run`, {
-    method: "POST",
-    headers: {
-      Cookie: `${adminSessionCookie}=${session.token}`,
-      Origin: productionOrigin,
-    },
-    body: form,
-    redirect: "error",
-  });
-  const body = (await response.json()) as unknown;
-  process.stdout.write(
-    `${JSON.stringify({ httpStatus: response.status, mode, response: body }, null, 2)}\n`,
-  );
-  if (!response.ok) {
-    throw new Error(`CROFusion import ${mode} failed with HTTP ${response.status}`);
+export async function verifyCrofusionLaunchPartnerArchive() {
+  const bytes = archive();
+  const files = extractArchiveFiles(bytes);
+  const plan = await planKnowledgeImport(files);
+  if (!plan.ready) {
+    throw new Error("The CROFusion launch-partner archive did not produce a ready import plan");
   }
+  if (
+    plan.articles.length !== crofusionLaunchPartnerFixtureV1.sources.length ||
+    plan.articles.some((article) => article.status !== "draft")
+  ) {
+    throw new Error("The CROFusion launch-partner archive did not normalize to exact private drafts");
+  }
+  return Object.freeze({
+    archiveSha256: createHash("sha256").update(bytes).digest("hex"),
+    articles: plan.articles.length,
+    assets: plan.assets.length,
+    categories: plan.categories.length,
+    command: "verify" as const,
+    errors: plan.report.conflicts.filter(({ severity }) => severity === "error")
+      .length,
+    normalizations: plan.report.changes.length,
+    privateDrafts: plan.articles.length,
+    redirects: plan.redirects.length,
+    sourceFiles: files.length,
+    status: "ready" as const,
+    warnings: plan.report.conflicts.filter(({ severity }) => severity === "warning")
+      .length,
+  });
+}
+
+async function main() {
+  selectedCommand(process.argv[2]);
+  process.stdout.write(
+    `${JSON.stringify(await verifyCrofusionLaunchPartnerArchive(), null, 2)}\n`,
+  );
 }
 
 void main();

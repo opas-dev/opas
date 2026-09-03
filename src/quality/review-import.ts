@@ -1,6 +1,7 @@
 // ABOUTME: Applies strict human answer and claim scores to completed saved evaluations.
 // ABOUTME: Recomputes every aggregate before replacing the active-workspace result document.
 import type { Repository } from "@/db/repository";
+import type { MemberActor } from "@/auth/member-repository";
 import {
   createQualityEvaluationResults,
   parseQualityEvaluationResults,
@@ -12,7 +13,7 @@ import {
 
 type QualityReviewRepository = Pick<
   Repository,
-  "getEvaluationRun" | "updateEvaluationRunResults"
+  "getEvaluationRun" | "updateAuthorizedEvaluationRunResults"
 >;
 
 type ReviewQuestion = Readonly<{
@@ -149,6 +150,7 @@ export async function importQualityReview(
   workspaceId: string,
   value: unknown,
   repository: QualityReviewRepository,
+  actor: MemberActor,
   now = () => new Date(),
 ) {
   if (!validIdentifier(workspaceId)) {
@@ -184,11 +186,14 @@ export async function importQualityReview(
       return review ? reviewedQuestion(question, review, reviewedAt) : question;
     }),
   );
-  await repository.updateEvaluationRunResults({
-    id: run.id,
-    results,
-    workspaceId,
-  });
+  await repository.updateAuthorizedEvaluationRunResults(
+    { ...actor, checkedAt: reviewedAtDate },
+    {
+      id: run.id,
+      results,
+      workspaceId,
+    },
+  );
   return Object.freeze({
     questionCount: payload.questions.length,
     results,

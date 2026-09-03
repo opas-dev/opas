@@ -370,6 +370,30 @@ export type EvaluationRunResultsUpdate = Pick<
   "id" | "results" | "workspaceId"
 >;
 
+export type QualityAuthoringRequest = MemberActor &
+  Readonly<{
+    checkedAt: Date;
+  }>;
+
+export interface QualityAuthoringRepository {
+  finishAuthorizedEvaluationRun(
+    request: QualityAuthoringRequest,
+    completion: EvaluationRunCompletion,
+  ): Promise<void>;
+  saveAuthorizedQuestionSet(
+    request: QualityAuthoringRequest,
+    questionSet: SavedQuestionSet,
+  ): Promise<void>;
+  startAuthorizedEvaluationRun(
+    request: QualityAuthoringRequest,
+    run: EvaluationRunStart,
+  ): Promise<void>;
+  updateAuthorizedEvaluationRunResults(
+    request: QualityAuthoringRequest,
+    update: EvaluationRunResultsUpdate,
+  ): Promise<void>;
+}
+
 export type AnswerInferenceLeaseStatus =
   | "active"
   | "cancelled"
@@ -413,35 +437,16 @@ export type AnswerInferenceReconciliation = Pick<
   status: Exclude<AnswerInferenceLeaseStatus, "active" | "expired">;
 };
 
-export type Repository = KnowledgeImportRepository & {
+export type Repository = KnowledgeImportRepository & QualityAuthoringRepository & {
   checkHealth(): Promise<void>;
   findPublishedArticle(workspaceId: string, slug: string): Promise<PublishedArticle | null>;
   listPublishedArticles(workspaceId: string): Promise<PublishedArticle[]>;
   listCategories(workspaceId: string): Promise<Category[]>;
   listArticles(workspaceId: string): Promise<Article[]>;
   getArticle(workspaceId: string, id: string): Promise<Article | null>;
-  createArticle(
-    article: ArticleSubmission,
-    assets: ArticleAssetSelection | undefined,
-    evidence: ArticleEvidenceCommit | null,
-  ): Promise<void>;
-  updateArticle(
-    article: ArticleSubmission,
-    assets: ArticleAssetSelection | undefined,
-    evidence: ArticleEvidenceCommit | null,
-  ): Promise<void>;
-  deleteArticle(workspaceId: string, id: string): Promise<void>;
-  createAssetManifest(workspaceId: string, expiresAt: Date): Promise<AssetManifest>;
-  stageAsset(
-    workspaceId: string,
-    manifestId: string,
-    upload: AssetUpload,
-  ): Promise<Asset>;
   getAsset(workspaceId: string, hash: string): Promise<Asset | null>;
   getPublishedAsset(workspaceId: string, hash: string): Promise<Asset | null>;
   listArticleAssetHashes(workspaceId: string, articleId: string): Promise<string[]>;
-  discardAssetManifest(workspaceId: string, manifestId: string): Promise<void>;
-  cleanupExpiredAssets(workspaceId: string, expiredAt: Date): Promise<void>;
   createAuthorizedAssetManifest(
     request: AssetAuthoringRequest,
     expiresAt: Date,
@@ -486,12 +491,8 @@ export type Repository = KnowledgeImportRepository & {
   revalidateEvidenceCandidates(
     request: EvidenceCandidateRevalidation,
   ): Promise<readonly EvidenceCandidateIdentity[]>;
-  saveQuestionSet(questionSet: SavedQuestionSet): Promise<void>;
   getQuestionSet(workspaceId: string, id: string): Promise<SavedQuestionSet | null>;
   listQuestionSets(workspaceId: string, limit: number): Promise<readonly SavedQuestionSet[]>;
-  startEvaluationRun(run: EvaluationRunStart): Promise<void>;
-  finishEvaluationRun(completion: EvaluationRunCompletion): Promise<void>;
-  updateEvaluationRunResults(update: EvaluationRunResultsUpdate): Promise<void>;
   getEvaluationRun(workspaceId: string, id: string): Promise<EvaluationRun | null>;
   listEvaluationRuns(workspaceId: string, limit: number): Promise<readonly EvaluationRun[]>;
   reserveAnswerInference(
@@ -530,12 +531,8 @@ export type EvidenceRepository = Pick<
   | "activateEmbeddingGeneration"
   | "listActiveChunkEmbeddings"
   | "revalidateEvidenceCandidates"
-  | "saveQuestionSet"
   | "getQuestionSet"
   | "listQuestionSets"
-  | "startEvaluationRun"
-  | "finishEvaluationRun"
-  | "updateEvaluationRunResults"
   | "getEvaluationRun"
   | "listEvaluationRuns"
 >;

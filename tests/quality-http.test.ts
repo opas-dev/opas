@@ -24,6 +24,11 @@ const origin = "https://quality.example.test";
 const sourceHash = "a".repeat(64);
 const fixtureHash = "b".repeat(64);
 const createdAt = new Date("2026-08-30T12:00:00.000Z");
+const qualityActor = Object.freeze({
+  memberId: "member_quality_reviewer",
+  sessionId: "session_quality_reviewer",
+  workspaceId: "workspace_current",
+});
 const validResults = createQualityEvaluationResults([
   {
     actualOutcome: "abstain",
@@ -124,10 +129,15 @@ test("imports a validated question set into only the server-selected workspace",
         assert.equal(workspaceId, "workspace_current");
         return [publishedEvidence];
       },
-      async saveQuestionSet(questionSet) {
+      async saveAuthorizedQuestionSet(request, questionSet) {
+        assert.equal(request.memberId, qualityActor.memberId);
+        assert.equal(request.sessionId, qualityActor.sessionId);
+        assert.equal(request.workspaceId, qualityActor.workspaceId);
+        assert.equal(request.checkedAt, createdAt);
         saved.push(questionSet);
       },
     },
+    qualityActor,
     () => createdAt,
   );
 
@@ -154,7 +164,7 @@ test("rejects malformed, cross-workspace, mismatched, and duplicate imports atom
     async listEvidenceChunks() {
       return evidence;
     },
-    async saveQuestionSet() {
+    async saveAuthorizedQuestionSet() {
       saveCalls += 1;
     },
   };
@@ -188,7 +198,13 @@ test("rejects malformed, cross-workspace, mismatched, and duplicate imports atom
   ];
   for (const fixture of invalidFixtures) {
     await assert.rejects(
-      importSavedQuestionSet("workspace_current", fixture, repository, () => createdAt),
+      importSavedQuestionSet(
+        "workspace_current",
+        fixture,
+        repository,
+        qualityActor,
+        () => createdAt,
+      ),
       (error: unknown) =>
         error instanceof QuestionSetImportError && error.code === "invalid-request",
     );
@@ -207,6 +223,7 @@ test("rejects malformed, cross-workspace, mismatched, and duplicate imports atom
         ],
       },
       repository,
+      qualityActor,
       () => createdAt,
     ),
     (error: unknown) =>
@@ -219,6 +236,7 @@ test("rejects malformed, cross-workspace, mismatched, and duplicate imports atom
       "workspace_current",
       validQuestionSetFixture,
       repository,
+      qualityActor,
       () => createdAt,
     ),
     (error: unknown) =>
@@ -236,6 +254,7 @@ test("rejects malformed, cross-workspace, mismatched, and duplicate imports atom
       "workspace_current",
       validQuestionSetFixture,
       repository,
+      qualityActor,
       () => createdAt,
     ),
     (error: unknown) =>
@@ -266,10 +285,11 @@ test("question set import HTTP boundary authorizes first and enforces its byte l
   const accepted = await handleQuestionSetImportRequest(
     post("/admin/quality/import", validQuestionSetFixture),
     {
-      authorize: async () => ({}),
-      importQuestionSet: async (fixture) => {
+      authorize: async () => qualityActor,
+      importQuestionSet: async (fixture, actor) => {
         importCalls += 1;
         assert.deepEqual(fixture, validQuestionSetFixture);
+        assert.deepEqual(actor, qualityActor);
         return { id: "set", name: "Set", questionCount: 2, version: 1 };
       },
     },
@@ -366,9 +386,10 @@ test("accepts only the exact serialized request origin", async () => {
   const accepted = await handleQualityRunRequest(
     post("/admin/quality/run", { questionSetId: "question_set_one" }),
     {
-      authorize: async () => ({}),
-      run: async (id) => {
+      authorize: async () => qualityActor,
+      run: async (id, actor) => {
         assert.equal(id, "question_set_one");
+        assert.deepEqual(actor, qualityActor);
         return { id: "run_one", results: validResults };
       },
     },

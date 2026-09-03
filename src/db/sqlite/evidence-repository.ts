@@ -19,13 +19,9 @@ import {
   validateEmbeddingJobFailure,
   validateEmbeddingJobRetry,
   validateEmbeddingJobWorkRequest,
-  validateEvaluationRunCompletion,
-  validateEvaluationRunResultsUpdate,
-  validateEvaluationRunStart,
   validateEvidenceCandidateRevalidation,
   validateEvidenceCommit,
   validateEvidenceReviewRequest,
-  validateQuestionSet,
 } from "@/db/evidence";
 import type {
   EmbeddingWorkerGeneration,
@@ -1885,14 +1881,6 @@ export function createSqliteEvidenceRepository(
       return candidates;
     },
 
-    async saveQuestionSet(questionSet) {
-      validateQuestionSet(questionSet);
-      await executableDatabase.insert(savedQuestionSets).values({
-        ...questionSet,
-        questions: questionSet.questions,
-      });
-    },
-
     async getQuestionSet(workspaceId, id) {
       const [questionSet] = await executableDatabase
         .select()
@@ -1918,56 +1906,6 @@ export function createSqliteEvidenceRepository(
         ...questionSet,
         questions: questionSet.questions as readonly SavedQuestion[],
       }));
-    },
-
-    async startEvaluationRun(run) {
-      validateEvaluationRunStart(run);
-      await executableDatabase.insert(evaluationRuns).values({
-        ...run,
-        status: "running",
-        results: null,
-        completedAt: null,
-      });
-    },
-
-    async finishEvaluationRun(completion) {
-      validateEvaluationRunCompletion(completion);
-      const updated = await executableDatabase
-        .update(evaluationRuns)
-        .set({
-          status: completion.status,
-          results: completion.results,
-          completedAt: completion.completedAt,
-        })
-        .where(
-          and(
-            eq(evaluationRuns.workspaceId, completion.workspaceId),
-            eq(evaluationRuns.id, completion.id),
-            eq(evaluationRuns.status, "running"),
-          ),
-        )
-        .returning({ id: evaluationRuns.id });
-      if (updated.length !== 1) {
-        throw new Error("Running evaluation record was not found");
-      }
-    },
-
-    async updateEvaluationRunResults(update) {
-      validateEvaluationRunResultsUpdate(update);
-      const updated = await executableDatabase
-        .update(evaluationRuns)
-        .set({ results: update.results })
-        .where(
-          and(
-            eq(evaluationRuns.workspaceId, update.workspaceId),
-            eq(evaluationRuns.id, update.id),
-            eq(evaluationRuns.status, "completed"),
-          ),
-        )
-        .returning({ id: evaluationRuns.id });
-      if (updated.length !== 1) {
-        throw new Error("Completed evaluation record was not found");
-      }
     },
 
     async getEvaluationRun(workspaceId, id) {

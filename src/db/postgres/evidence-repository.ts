@@ -19,13 +19,9 @@ import {
   validateEmbeddingJobFailure,
   validateEmbeddingJobRetry,
   validateEmbeddingJobWorkRequest,
-  validateEvaluationRunCompletion,
-  validateEvaluationRunResultsUpdate,
-  validateEvaluationRunStart,
   validateEvidenceCandidateRevalidation,
   validateEvidenceCommit,
   validateEvidenceReviewRequest,
-  validateQuestionSet,
 } from "@/db/evidence";
 import type {
   ActiveChunkEmbedding,
@@ -2041,14 +2037,6 @@ export function createPostgresEvidenceRepository(
       }));
     },
 
-    async saveQuestionSet(questionSet) {
-      validateQuestionSet(questionSet);
-      await database.insert(savedQuestionSets).values({
-        ...questionSet,
-        questions: questionSet.questions,
-      });
-    },
-
     async getQuestionSet(workspaceId, id) {
       const [questionSet] = await database
         .select()
@@ -2074,56 +2062,6 @@ export function createPostgresEvidenceRepository(
         ...questionSet,
         questions: questionSet.questions as readonly SavedQuestion[],
       }));
-    },
-
-    async startEvaluationRun(run) {
-      validateEvaluationRunStart(run);
-      await database.insert(evaluationRuns).values({
-        ...run,
-        status: "running",
-        results: null,
-        completedAt: null,
-      });
-    },
-
-    async finishEvaluationRun(completion) {
-      validateEvaluationRunCompletion(completion);
-      const updated = await database
-        .update(evaluationRuns)
-        .set({
-          status: completion.status,
-          results: completion.results,
-          completedAt: completion.completedAt,
-        })
-        .where(
-          and(
-            eq(evaluationRuns.workspaceId, completion.workspaceId),
-            eq(evaluationRuns.id, completion.id),
-            eq(evaluationRuns.status, "running"),
-          ),
-        )
-        .returning();
-      if (updated.length !== 1) {
-        throw new Error("Running evaluation record was not found");
-      }
-    },
-
-    async updateEvaluationRunResults(update) {
-      validateEvaluationRunResultsUpdate(update);
-      const updated = await database
-        .update(evaluationRuns)
-        .set({ results: update.results })
-        .where(
-          and(
-            eq(evaluationRuns.workspaceId, update.workspaceId),
-            eq(evaluationRuns.id, update.id),
-            eq(evaluationRuns.status, "completed"),
-          ),
-        )
-        .returning();
-      if (updated.length !== 1) {
-        throw new Error("Completed evaluation record was not found");
-      }
     },
 
     async getEvaluationRun(workspaceId, id) {
