@@ -929,9 +929,10 @@ After a separate production confirmation, the production sequence is:
 3. set `writes_paused = true` for one workspace, wait for in-flight writes to drain,
    and prove each guarded mutation returns `AUTHORING_PAUSED` with no state delta;
 4. run the migration-only command and verify that workspace's additive backfill, then
-   run the one-time administrator bootstrap command, add
-   `OPAS_PREVIEW_SIGNING_SECRET`, remove `ADMIN_EMAIL`/`ADMIN_PASSWORD` from runtime and
-   its exact secret allowlist, and run the deployment-only v0.3 command; complete
+   run the one-time administrator bootstrap command, activate the retained maintenance
+   Worker while the fence is closed, remove `ADMIN_EMAIL`/`ADMIN_PASSWORD` from runtime,
+   add `OPAS_PREVIEW_SIGNING_SECRET` through the deployment-only v0.3 command, and verify
+   its exact secret allowlist; complete
    public-projection equality plus administrator login/read smoke while authoring
    remains paused—no seed or evidence reconciliation runs in this step;
 5. resume authoring only after current heads, public projections, revision counts,

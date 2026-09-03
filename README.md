@@ -12,7 +12,7 @@ OPAS Answers is an open-source help center and source-grounded answer system: th
 - Anonymous helpfulness feedback and 30-day aggregate analytics avoid cookies and persisted requester metadata.
 - The same application supports Docker with Postgres, Vercel with Neon, and Cloudflare Workers with D1.
 
-OPAS Team Authoring v0.3.0 is the current verified release candidate; v0.2.0 remains the latest tagged production release until the separately confirmed Cloudflare rollout. Release evidence is tracked in [progress.md](progress.md), the source-backed product direction is in [docs/competitive-roadmap.md](docs/competitive-roadmap.md), and the implemented release contract is in [docs/team-authoring-plan.md](docs/team-authoring-plan.md). The original product and architecture brief remains in [docs/brief.md](docs/brief.md).
+OPAS Team Authoring v0.3.0 is the current production release on both maintained Cloudflare deployments. Cross-target and production rollout evidence is tracked in [progress.md](progress.md), the source-backed product direction is in [docs/competitive-roadmap.md](docs/competitive-roadmap.md), and the implemented release contract is in [docs/team-authoring-plan.md](docs/team-authoring-plan.md). The original product and architecture brief remains in [docs/brief.md](docs/brief.md).
 
 ## Live targets
 
@@ -143,7 +143,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and contributi
 
 - v0.1: shipped across Docker/Postgres, primary Cloudflare/D1 production, and the live Vercel/Neon compatibility target with runtime theming, MDX authoring, search, discovery surfaces, and privacy-light analytics.
 - v0.2 — OPAS Answers: Markdown/GitBook migration, Markdown-native WYSIWYG authoring, published-source RAG with citations and abstention, native and embeddable chat, support handoff, answer evaluation, content-gap analytics, and read-only MCP.
-- v0.3 — Team Authoring (verified release candidate): immutable revisions, optimistic concurrency, review roles, rollback, archive recovery, named-member authorization, signed revision previews, and maintenance-safe migrations across Docker/Postgres, Cloudflare/D1, and Vercel/Neon.
+- v0.3 — Team Authoring (shipped): immutable revisions, optimistic concurrency, review roles, rollback, archive recovery, named-member authorization, signed revision previews, and maintenance-safe migrations across Docker/Postgres, Cloudflare/D1, and Vercel/Neon.
 - Next: GitHub sync, permission-scoped private knowledge, and demand-backed AI-agent traffic analytics.
 - Commercial edition: managed AI usage, organization connectors, SAML and SCIM, audit logs, advanced permissions, multi-brand operation, and white-label controls in the isolated `/ee` directory.
 

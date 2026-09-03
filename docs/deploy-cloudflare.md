@@ -11,6 +11,15 @@ The targets share application code but not runtime data, administrator state, an
 | Generic product demo | `wrangler.jsonc` | `opas-mvp` | `opas` | `https://demo.opas.dev` |
 | CROFusion launch-partner demo | `wrangler.crofusion.jsonc` | `opas-demo-cro` | `crofusion` | `https://demo-cro.opas.dev` |
 
+The v0.3 production rollout retained these exact recovery records:
+
+| Target | Active v0.3 Worker | Admin-disabled maintenance Worker | Pre-schema D1 bookmark | Open fence generation |
+|---|---|---|---|---:|
+| Generic | `59d2d981-93c2-455b-9e05-b4091e87270c` | `ef3b9906-d350-4df9-8248-e74cf1eebcd0` | `000000eb-0000005c-000050db-080640e8a2e70339bb8b11164b4918cc` | 2 |
+| CROFusion | `3b6b5ad7-7007-4d6d-ae84-9a663fbb23f2` | `d220d0ca-d29d-4f76-8b27-4a24b970e0ee` | `00000011-000003a0-000050db-412ecddc4b2314da4d2dfab8eb07e15a` | 2 |
+
+The bookmarks precede the v0.3 schema expansion and are disaster-recovery inputs, not routine rollback steps. Restoring either database is destructive and requires a new exact production confirmation.
+
 Use the matching commands for the CROFusion target:
 
 ```sh
@@ -163,20 +172,24 @@ Acceptance requires a `metadata` record first, at least one complete validated `
 
 ## Rollback
 
-List versions, then roll the exact `opas-mvp` Worker back to a known-good version:
+Do not route a pre-fence application version after v0.3 has accepted writes. Inspect and pause the exact workspace generation first, then route the retained admin-disabled maintenance version while leaving the additive database schema in place:
 
 ```sh
-pnpm exec wrangler versions list --name opas-mvp
-OPAS_WORKER_VERSION_ID=00000000-0000-0000-0000-000000000000
-pnpm exec wrangler rollback "$OPAS_WORKER_VERSION_ID" --name opas-mvp --message "Rollback OPAS" --yes
+pnpm authoring:control -- inspect --target cloudflare --workspace demo --remote --config wrangler.jsonc
+pnpm authoring:control -- pause --target cloudflare --workspace demo --expected-generation GENERATION_FROM_THE_FRESH_INSPECT --remote --config wrangler.jsonc
+OPAS_MAINTENANCE_VERSION_ID=ef3b9906-d350-4df9-8248-e74cf1eebcd0
+pnpm exec wrangler versions deploy "$OPAS_MAINTENANCE_VERSION_ID@100%" --name opas-mvp --config wrangler.jsonc --message "OPAS maintenance rollback" --yes
 pnpm smoke https://demo.opas.dev
 curl --fail --silent --show-error https://opas-mvp.timo-bejan.workers.dev/api/health
+curl --silent --show-error --output /tmp/opas-maintenance-admin.json --write-out '%{http_code}\n' https://demo.opas.dev/admin
 ```
+
+The final request must return `503` with code `MAINTENANCE_AUTHORING_DISABLED`. Use the CROFusion config, Worker name, URLs, and recorded maintenance version from the table for that target. Keep authoring paused until the repaired v0.3 application is deployed, its named administrator and public surfaces pass, and a fresh compare-and-swap resume succeeds. Cloudflare rejects secret mutation when the newest uploaded Worker version is inactive, so the proven upgrade sequence deliberately routed the maintenance version while the database fence was closed before removing the v0.2-only `ADMIN_EMAIL` and `ADMIN_PASSWORD` bindings.
 
 The portable smoke suite runs against the canonical origin because it verifies exact canonical and sitemap URLs. The workers.dev fallback check is deliberately limited to the health endpoint; its rendered pages advertise `demo.opas.dev` as canonical.
 
 Do not add the protected `opas.dev` root, `www`, `opas-landing`, or any unrelated route or resource to the Wrangler config. The only maintained Custom Domain exception is `demo.opas.dev` on `opas-mvp`.
 
-A Worker rollback does not roll D1 back. The daily trigger may remain registered while older code lacks its cleanup branch, so verify both cron events after rollback. Do not leave cleanup inactive: invoke the authenticated Node route where available, keep rollback shorter than the retention cleanup interval, or forward-fix the Worker before accepting the rollback. Repair schema state with a reviewed forward migration.
+A Worker rollback does not roll D1 back. Repair schema state with a reviewed forward migration; use the recorded Time Travel bookmark only through a separately confirmed disaster-recovery plan.
 
 Cloudflare references: [OpenNext CLI](https://opennext.js.org/cloudflare/cli), [Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/), [D1 Wrangler commands](https://developers.cloudflare.com/d1/wrangler-commands/), and [Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).

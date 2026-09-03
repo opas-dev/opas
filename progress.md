@@ -10,12 +10,12 @@
 5. Keep the Status counters current.
 
 ## Status
-- **Current phase:** Phase 16 — team-safe authoring
+- **Current phase:** v0.3 complete — team-safe authoring
 - **v0.1:** 40 / 40 complete
 - **v0.2:** 26 / 26 complete
 - **Maintained demos:** 5 / 5 complete
 - **UX redesign:** 6 / 6 complete
-- **Team authoring:** 2 / 11 complete
+- **Team authoring:** 11 / 11 complete
 - **Active release:** [OPAS Team Authoring v0.3](docs/team-authoring-plan.md)
 
 ## Blockers
@@ -213,7 +213,7 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 - [x] 16.8 Add preview-secret configuration, grant rotation/revocation, fragment exchange, scoped cookie, exact-revision renderer, revision-scoped asset delivery, and preview management. **Verify:** cryptographic, claim, deployment, lifecycle, race, cookie, bearer-leak, header, discovery-isolation, asset, and remote-image privacy tests pass in unit and live HTTP coverage.
 - [x] 16.9 Complete content filters, dual working/published status, review/conflict/history/diff/preview controls, Team management, responsive states, and accessible task copy. **Verify:** browser checks at 1,440, 768, 390, and 320 pixels cover keyboard/focus/screen-reader/non-color/reduced-motion/theme/conflict/preview/history/empty/loading/error states with zero overflow and no new browser diagnostics.
 - [x] 16.10 Split migration, deployment, bootstrap, seed, and evidence commands; integrate the fence and revision model across imports, assets, cleanup, seeds, Docker ingress, Cloudflare, Vercel, artifacts, environment templates, smoke tests, and runbooks. **Verify:** bootstrap-gated atomic seeds and retries, paused migration/deploy commands, the 100-article D1 import budget, secret containment, every guarded mutation, lint, typecheck, tests, and all four builds pass.
-- [ ] 16.11 Run the frozen three-target install/upgrade/rollback/concurrency/browser/security/accessibility acceptance and prepare the separately confirmed production rollout. **Verify:** Docker/Postgres, isolated Cloudflare/D1, and disposable Vercel/Neon pass the complete release matrix; after separate production confirmation, record both D1 bookmarks and Worker versions, deploy generic then CROFusion, smoke canonical and workers.dev URLs, and publish the exact green v0.3 tag.
+- [x] 16.11 Run the frozen three-target install/upgrade/rollback/concurrency/browser/security/accessibility acceptance and prepare the separately confirmed production rollout. **Verify:** Docker/Postgres, isolated Cloudflare/D1, and disposable Vercel/Neon pass the complete release matrix; after separate production confirmation, record both D1 bookmarks and Worker versions, deploy generic then CROFusion, smoke canonical and workers.dev URLs, and publish the exact green v0.3 tag.
 
 ## Definition of done (v0.2)
 
@@ -241,6 +241,10 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
+
+- 2026-09-03 — 16.10 asset-fence test-clock checkpoint — fixed the release suite's PostgreSQL asset-authoring fixture after its fixed manifest-expiry timestamp elapsed during the production rollout. The harness now anchors its test records one hour after process start, preserving every authorization and expiry assertion without coupling the suite to a calendar minute; the isolated real PostgreSQL/SQLite test and complete registered suite passed — this commit
+
+- 2026-09-03 — 16.11 production rollout and v0.3 release — after Timo confirmed the generic-first rollout, deployed the exact fence-aware v0.2 cutover and retained admin-disabled maintenance versions independently for generic and CROFusion; recorded both pre-schema D1 Time Travel bookmarks, config digests, cutover/maintenance/v0.3 Worker IDs, and exact secret-name sets; proved all 45 production fence triggers rejected guarded writes without row changes; applied the additive migrations and repeat-stable backfills while paused; bootstrapped named administrators; removed the v0.2 runtime credentials; and resumed both fences at generation 2. Each live target then passed normal one-time editor/reviewer invitation, independent revision-pinned review and two publications, restore-as-draft, signed preview exchange/revocation, archive cleanup, disabled-member verification, canonical smoke, workers.dev health, seed audit, migration audit, and named-admin login. The frozen release matrix had already passed 12/12 on Docker/Postgres, isolated Cloudflare/D1, and disposable Vercel/Neon, plus 40-screen browser verification; the exact release commit passed the full local suite and GitHub CI before annotated tag `v0.3.0` and its release were published — evidence `/Users/timo/work/opas-dev/production-runs/v0.3.0-20260903` — this commit
 
 - 2026-09-03 — 16.10 operator-command checkpoint — made the documented pnpm separator form work for both the named-identity and authoring-fence commands after the production run exposed that pnpm forwards the separator to these scripts. A red regression reproduced both failures; the two focused command suites then passed 18/18 with focused ESLint and diff checks — this commit
 

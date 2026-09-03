@@ -26,7 +26,7 @@ const migrations = {
   postgres: path.join(process.cwd(), "drizzle/postgres"),
   sqlite: path.join(process.cwd(), "drizzle/sqlite"),
 };
-const checkedAt = new Date("2026-09-03T12:00:00.000Z");
+const checkedAt = new Date(Date.now() + 60 * 60 * 1000);
 const workspaceId = "workspace_assets";
 const ownerMemberId = "member_asset_owner";
 const memberId = "member_asset_editor";
