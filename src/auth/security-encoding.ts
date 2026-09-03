@@ -3,7 +3,8 @@
 
 const base64UrlAlphabet =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-const canonicalDeploymentPattern = /^[a-z0-9](?:[a-z0-9.-]{0,46}[a-z0-9])?$/;
+const canonicalDeploymentPattern =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/;
 
 export type RandomBytes = (length: number) => Uint8Array;
 

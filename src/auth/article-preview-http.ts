@@ -43,6 +43,10 @@ function json(body: unknown, status = 200) {
 
 function requestOriginMatches(request: Request, siteOrigin: string) {
   try {
+    const requestHost = request.headers.get("host");
+    if (requestHost !== null) {
+      return requestHost.toLowerCase() === new URL(siteOrigin).host;
+    }
     return new URL(request.url).origin === siteOrigin;
   } catch {
     return false;

@@ -120,8 +120,10 @@ function browserRequest(
   options: Readonly<{
     body?: unknown;
     cookie?: string;
+    hostHeader?: string;
     method?: "GET" | "POST";
     requestOrigin?: string;
+    requestUrlOrigin?: string;
   }> = {},
 ) {
   const method = options.method ?? "GET";
@@ -135,14 +137,41 @@ function browserRequest(
     headers.set("content-type", "application/json");
     headers.set("origin", options.requestOrigin ?? origin);
   }
+  if (options.hostHeader) headers.set("host", options.hostHeader);
   if (options.cookie) headers.set("cookie", options.cookie);
 
-  return new NextRequest(`${origin}${pathname}`, {
+  return new NextRequest(`${options.requestUrlOrigin ?? origin}${pathname}`, {
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     headers,
     method,
   });
 }
+
+test("accepts the configured public Host when standalone rewrites the request URL", async () => {
+  const harness = await createHarness();
+  const response = await handleMemberLinkExchange(
+    browserRequest("/admin/accept/invite/exchange", {
+      body: { bearer },
+      hostHeader: new URL(origin).host,
+      method: "POST",
+      requestUrlOrigin: "http://0.0.0.0:3000",
+    }),
+    "invite",
+    dependencies(harness.repository),
+  );
+  assert.equal(response.status, 200);
+
+  const wrongHost = await handleMemberLinkExchange(
+    browserRequest("/admin/accept/invite/exchange", {
+      body: { bearer },
+      hostHeader: "attacker.example",
+      method: "POST",
+    }),
+    "invite",
+    dependencies(harness.repository),
+  );
+  assert.equal(wrongHost.status, 403);
+});
 
 function dependencies(repository: MemberRepository, clock = () => startedAt) {
   return { clock, configuration, repository, siteOrigin: origin };

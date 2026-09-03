@@ -68,14 +68,17 @@ function browserRequestIsSameOrigin(
   siteOrigin: string,
   requireOrigin: boolean,
 ) {
-  let requestOrigin: string;
+  let requestTargetsSite: boolean;
   try {
-    requestOrigin = new URL(request.url).origin;
+    const requestHost = request.headers.get("host");
+    requestTargetsSite = requestHost
+      ? requestHost.toLowerCase() === new URL(siteOrigin).host
+      : new URL(request.url).origin === siteOrigin;
   } catch {
     return false;
   }
   return (
-    requestOrigin === siteOrigin &&
+    requestTargetsSite &&
     (!requireOrigin || request.headers.get("origin") === siteOrigin) &&
     request.headers.get("sec-fetch-site") === "same-origin" &&
     request.headers.get("sec-fetch-mode") === "cors" &&

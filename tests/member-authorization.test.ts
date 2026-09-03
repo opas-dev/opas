@@ -300,7 +300,7 @@ test("session configuration derives one canonical deployment hostname and fails 
 
   for (const OPAS_SITE_URL of [
     "https://bad_host.example.com",
-    `https://${"a".repeat(49)}.test`,
+    `https://${"a".repeat(64)}.test`,
   ]) {
     assert.throws(
       () =>

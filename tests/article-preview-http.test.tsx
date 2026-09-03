@@ -167,6 +167,7 @@ function browserRequest(
   options: Readonly<{
     body?: unknown;
     cookie?: string;
+    hostHeader?: string;
     method?: "GET" | "POST";
     originHeader?: string;
     requestOrigin?: string;
@@ -184,6 +185,7 @@ function browserRequest(
     headers.set("content-type", "application/json");
     headers.set("origin", options.originHeader ?? origin);
   }
+  if (options.hostHeader) headers.set("host", options.hostHeader);
   if (options.cookie) headers.set("cookie", options.cookie);
   return new NextRequest(`${options.requestOrigin ?? origin}${pathname}`, {
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -191,6 +193,32 @@ function browserRequest(
     method,
   });
 }
+
+test("accepts the configured public Host when standalone rewrites the request URL", async () => {
+  const harness = memoryRepository();
+  const preview = await issuedPreview(harness.repository);
+  const response = await handleArticlePreviewExchange(
+    browserRequest("/preview/exchange", {
+      body: { bearer: preview.token },
+      hostHeader: new URL(origin).host,
+      method: "POST",
+      requestOrigin: "http://0.0.0.0:3000",
+    }),
+    runtime(harness.repository),
+  );
+
+  assert.equal(response.status, 200);
+
+  const wrongHost = await handleArticlePreviewExchange(
+    browserRequest("/preview/exchange", {
+      body: { bearer: preview.token },
+      hostHeader: "attacker.example",
+      method: "POST",
+    }),
+    runtime(harness.repository),
+  );
+  assert.equal(wrongHost.status, 403);
+});
 
 function runtime(repository: ArticlePreviewRepository, clock = () => now) {
   return { clock, configuration, repository, siteOrigin: origin };

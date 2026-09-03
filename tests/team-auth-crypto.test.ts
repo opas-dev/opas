@@ -319,6 +319,11 @@ test("database session IDs and cookies are random, deployment-scoped, and host-o
   );
   assert.equal(databaseSessionCookieName("opas.dev"), "opas_admin_session_b3Bhcy5kZXY");
   assert.notEqual(databaseSessionCookieName("opas.dev"), databaseSessionCookieName("cro.opas.dev"));
+  assert.doesNotThrow(() =>
+    databaseSessionCookieName(
+      "opas-acceptance-v03-rc1-0903.timo-bejan.workers.dev",
+    ),
+  );
   assert.throws(() => databaseSessionCookieName("OPAS.DEV"), /INVALID_DEPLOYMENT_ID/);
 
   const expiresAt = new Date(now.getTime() + 60_000);
