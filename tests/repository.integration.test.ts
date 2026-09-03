@@ -31,7 +31,6 @@ import type {
   AnswerInferenceReservation,
   ArticleEvidenceCommit,
   ArticleSubmission,
-  KnowledgeImportArticle,
   Repository,
 } from "@/db/repository";
 import * as postgresSchema from "@/db/schema/postgres";
@@ -45,8 +44,6 @@ import { createSqliteCategoryAuthoringRepository } from "@/db/sqlite/category-au
 import { seedD1 } from "@/db/sqlite/seed";
 import { createSqliteThemeAuthoringRepository } from "@/db/sqlite/theme-authoring-repository";
 import type { ThemeAuthoringRepository } from "@/db/theme-authoring";
-import { executeKnowledgeImport } from "@/import/execute";
-import { planKnowledgeImport } from "@/import/planner";
 
 const expectedColumns = {
   answer_inference_leases: [
@@ -487,438 +484,6 @@ function importPng(marker: number) {
     0x0a,
     marker,
   ]);
-}
-
-function importArticle(
-  id: string,
-  categoryId: string,
-  slug: string,
-  position: number,
-  assetHashes: readonly string[] = [],
-  status: "draft" | "published" = "published",
-): KnowledgeImportArticle {
-  const title = `Import ${id}`;
-  const article = {
-    id,
-    workspaceId: demoIds.workspace,
-    categoryId,
-    slug,
-    title,
-    mdx: `# ${title}\n`,
-    status,
-    isFaq: false,
-    authorName: "Import operator",
-    position,
-    publishedAt: status === "published" ? new Date() : null,
-    assetHashes,
-  };
-  return {
-    ...article,
-    evidence: articleEvidence(article),
-  };
-}
-
-async function exerciseKnowledgeImport(harness: Harness) {
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-  let baseline = await harness.counts();
-  const successManifest = await harness.repository.createAssetManifest(
-    demoIds.workspace,
-    expiresAt,
-  );
-  const referencedAsset = await harness.repository.stageAsset(
-    demoIds.workspace,
-    successManifest.id,
-    { mediaType: "image/png", content: importPng(1) },
-  );
-  const unreferencedAsset = await harness.repository.stageAsset(
-    demoIds.workspace,
-    successManifest.id,
-    { mediaType: "image/png", content: importPng(2) },
-  );
-
-  const successCategoryIds = ["category_import_later", "category_import_first"];
-  const successArticleIds = [
-    "article_import_later",
-    "article_import_first",
-    "article_import_draft",
-  ];
-  await harness.repository.activateKnowledgeImport({
-    workspaceId: demoIds.workspace,
-    manifestId: successManifest.id,
-    categories: [
-      {
-        id: successCategoryIds[0],
-        slug: "import-later",
-        name: "Import later",
-        description: null,
-        position: 41,
-      },
-      {
-        id: successCategoryIds[1],
-        slug: "import-first",
-        name: "Import first",
-        description: null,
-        position: 40,
-      },
-    ],
-    articles: [
-      importArticle(
-        successArticleIds[0],
-        successCategoryIds[1],
-        "import-later",
-        1,
-        [referencedAsset.hash],
-      ),
-      importArticle(
-        successArticleIds[1],
-        successCategoryIds[1],
-        "import-first",
-        0,
-      ),
-      importArticle(
-        successArticleIds[2],
-        successCategoryIds[0],
-        "import-draft",
-        0,
-        [],
-        "draft",
-      ),
-    ],
-  });
-
-  assert.deepEqual(
-    (await harness.repository.listCategories(demoIds.workspace))
-      .filter((category) => successCategoryIds.includes(category.id))
-      .map((category) => category.id),
-    [successCategoryIds[1], successCategoryIds[0]],
-    `${harness.name} did not preserve imported category ordering`,
-  );
-  assert.deepEqual(
-    (await harness.repository.listPublishedArticles(demoIds.workspace))
-      .filter((article) => successArticleIds.includes(article.id))
-      .map((article) => article.id),
-    [successArticleIds[1], successArticleIds[0]],
-    `${harness.name} did not preserve imported article ordering`,
-  );
-  assert.deepEqual(
-    await harness.repository.listArticleAssetHashes(
-      demoIds.workspace,
-      successArticleIds[0],
-    ),
-    [referencedAsset.hash],
-  );
-  assert.equal(
-    await harness.repository.getAsset(demoIds.workspace, unreferencedAsset.hash),
-    null,
-    `${harness.name} retained an unreferenced staged import asset`,
-  );
-  assert.equal((await harness.counts()).asset_manifests, baseline.asset_manifests);
-  assert.equal(
-    (await harness.repository.getIndexingState(demoIds.workspace))?.generation,
-    1,
-    `${harness.name} did not commit one generation for the whole import`,
-  );
-  assert.deepEqual(
-    (await harness.repository.listEvidenceChunks(demoIds.workspace)).map(
-      (chunk) => chunk.articleId,
-    ),
-    [successArticleIds[1], successArticleIds[0]],
-    `${harness.name} did not publish imported evidence in article order`,
-  );
-  assert.ok(
-    (await harness.repository.getArticle(demoIds.workspace, successArticleIds[0]))
-      ?.contentHash,
-  );
-  assert.equal(
-    (await harness.repository.getArticle(demoIds.workspace, successArticleIds[2]))
-      ?.contentHash,
-    null,
-  );
-
-  for (const articleId of successArticleIds) {
-    await harness.repository.deleteArticle(demoIds.workspace, articleId);
-  }
-  for (const categoryId of successCategoryIds) {
-    assert.equal(
-      await deleteCategory(harness, demoIds.workspace, categoryId),
-      true,
-    );
-  }
-  assert.equal(
-    await harness.repository.getAsset(demoIds.workspace, referencedAsset.hash),
-    null,
-  );
-  const countsAfterImportCleanup = await harness.counts();
-  assert.deepEqual(
-    { ...countsAfterImportCleanup, workspace_index_states: baseline.workspace_index_states },
-    baseline,
-  );
-  assert.equal(
-    countsAfterImportCleanup.workspace_index_states,
-    baseline.workspace_index_states + 1,
-  );
-  baseline = countsAfterImportCleanup;
-
-  const plannedPng = importPng(3);
-  const plannedImport = await planKnowledgeImport(
-    [
-      {
-        path: "SUMMARY.md",
-        content: new TextEncoder().encode(
-          "# Summary\n\n## Planned docs\n\n* [Overview](README.md)\n* [Guide](guide.md)\n",
-        ),
-      },
-      {
-        path: "README.md",
-        content: new TextEncoder().encode(
-          "# Overview\n\n![Import diagram](diagram.png)\n",
-        ),
-      },
-      {
-        path: "guide.md",
-        content: new TextEncoder().encode("# Guide\n\nImported guide.\n"),
-      },
-      { path: "diagram.png", content: plannedPng },
-    ],
-    { defaultStatus: "published", defaultAuthorName: "Plan operator" },
-  );
-  assert.equal(plannedImport.ready, true);
-  await executeKnowledgeImport({
-    repository: harness.repository,
-    workspaceId: demoIds.workspace,
-    plan: plannedImport,
-  });
-  const plannedCategorySlugs = new Set(
-    plannedImport.categories.map((category) => category.slug),
-  );
-  const plannedArticleSlugs = new Set(
-    plannedImport.articles.map((article) => article.slug),
-  );
-  const activatedCategories = (
-    await harness.repository.listCategories(demoIds.workspace)
-  ).filter((category) => plannedCategorySlugs.has(category.slug));
-  const activatedArticles = (
-    await harness.repository.listArticles(demoIds.workspace)
-  ).filter((article) => plannedArticleSlugs.has(article.slug));
-  assert.deepEqual(
-    activatedCategories.map((category) => category.slug),
-    plannedImport.categories.map((category) => category.slug),
-  );
-  assert.deepEqual(
-    activatedArticles.map((article) => article.slug),
-    plannedImport.articles.map((article) => article.slug),
-  );
-  assert.deepEqual(
-    await harness.repository.listArticleAssetHashes(
-      demoIds.workspace,
-      activatedArticles.find(
-        (article) => article.slug === plannedImport.articles[0].slug,
-      )!.id,
-    ),
-    plannedImport.articles[0].assetHashes,
-  );
-  for (const article of activatedArticles) {
-    await harness.repository.deleteArticle(demoIds.workspace, article.id);
-  }
-  for (const category of activatedCategories) {
-    assert.equal(
-      await deleteCategory(harness, demoIds.workspace, category.id),
-      true,
-    );
-  }
-  assert.deepEqual(await harness.counts(), baseline);
-
-  const failureCases = [
-    {
-      name: "existing slug",
-      requestedHash: null,
-      article: (hash: string) => [
-        importArticle(
-          "article_import_rollback_first",
-          "category_import_rollback",
-          "import-rollback-first",
-          0,
-          [hash],
-        ),
-        importArticle(
-          "article_import_rollback_conflict",
-          "category_import_rollback",
-          demoContent.articles[0].slug,
-          1,
-        ),
-      ],
-    },
-    {
-      name: "missing category",
-      requestedHash: null,
-      article: (hash: string) => [
-        importArticle(
-          "article_import_missing_category",
-          "category_import_missing",
-          "import-missing-category",
-          0,
-          [hash],
-        ),
-      ],
-    },
-    {
-      name: "missing asset",
-      requestedHash: "f".repeat(64),
-      article: (hash: string) => [
-        importArticle(
-          "article_import_missing_asset",
-          "category_import_rollback",
-          "import-missing-asset",
-          0,
-          [hash],
-        ),
-      ],
-    },
-  ] as const;
-
-  for (const [index, failureCase] of failureCases.entries()) {
-    const manifest = await harness.repository.createAssetManifest(
-      demoIds.workspace,
-      expiresAt,
-    );
-    const asset = await harness.repository.stageAsset(
-      demoIds.workspace,
-      manifest.id,
-      { mediaType: "image/png", content: importPng(10 + index) },
-    );
-    const requestedHash = failureCase.requestedHash ?? asset.hash;
-    await assert.rejects(
-      harness.repository.activateKnowledgeImport({
-        workspaceId: demoIds.workspace,
-        manifestId: manifest.id,
-        categories: [
-          {
-            id: "category_import_rollback",
-            slug: `import-rollback-${index}`,
-            name: `Import rollback ${index}`,
-            description: null,
-            position: 50,
-          },
-        ],
-        articles: failureCase.article(requestedHash),
-      }),
-      `${harness.name} accepted an import with ${failureCase.name}`,
-    );
-    assert.deepEqual(
-      await harness.counts(),
-      baseline,
-      `${harness.name} retained rows from an import with ${failureCase.name}`,
-    );
-    assert.equal(
-      await harness.repository.getAsset(demoIds.workspace, asset.hash),
-      null,
-      `${harness.name} retained an orphan from an import with ${failureCase.name}`,
-    );
-  }
-  assert.equal(
-    (
-      await harness.repository.getArticle(
-        demoIds.workspace,
-        demoIds.publishedArticle,
-      )
-    )?.title,
-    demoContent.articles[0].title,
-    `${harness.name} changed existing content during an import rollback`,
-  );
-
-  const expiredManifest = await harness.repository.createAssetManifest(
-    demoIds.workspace,
-    expiresAt,
-  );
-  const expiredAsset = await harness.repository.stageAsset(
-    demoIds.workspace,
-    expiredManifest.id,
-    { mediaType: "image/png", content: importPng(20) },
-  );
-  await harness.expireAssetManifest(expiredManifest.id);
-  await assert.rejects(
-    harness.repository.activateKnowledgeImport({
-      workspaceId: demoIds.workspace,
-      manifestId: expiredManifest.id,
-      categories: [
-        {
-          id: "category_import_expired",
-          slug: "import-expired",
-          name: "Import expired",
-          description: null,
-          position: 50,
-        },
-      ],
-      articles: [
-        importArticle(
-          "article_import_expired",
-          "category_import_expired",
-          "import-expired",
-          0,
-          [expiredAsset.hash],
-        ),
-      ],
-    }),
-    `${harness.name} accepted an expired import manifest`,
-  );
-  assert.deepEqual(await harness.counts(), baseline);
-
-  const foreignWorkspaceId = `workspace_import_foreign_${harness.name.toLocaleLowerCase("en-US")}`;
-  await harness.createWorkspace({
-    id: foreignWorkspaceId,
-    slug: foreignWorkspaceId,
-    name: "Import foreign workspace",
-  });
-  const foreignManifest = await harness.repository.createAssetManifest(
-    foreignWorkspaceId,
-    expiresAt,
-  );
-  const foreignAsset = await harness.repository.stageAsset(
-    foreignWorkspaceId,
-    foreignManifest.id,
-    { mediaType: "image/png", content: importPng(21) },
-  );
-  await assert.rejects(
-    harness.repository.activateKnowledgeImport({
-      workspaceId: demoIds.workspace,
-      manifestId: foreignManifest.id,
-      categories: [
-        {
-          id: "category_import_cross_workspace",
-          slug: "import-cross-workspace",
-          name: "Import cross workspace",
-          description: null,
-          position: 50,
-        },
-      ],
-      articles: [
-        importArticle(
-          "article_import_cross_workspace",
-          "category_import_cross_workspace",
-          "import-cross-workspace",
-          0,
-          [foreignAsset.hash],
-        ),
-      ],
-    }),
-    `${harness.name} accepted another workspace's import manifest`,
-  );
-  assert.ok(
-    await harness.repository.getAsset(foreignWorkspaceId, foreignAsset.hash),
-    `${harness.name} deleted another workspace's staged import asset`,
-  );
-  assert.equal(
-    (await harness.repository.listCategories(demoIds.workspace)).some(
-      (category) => category.id === "category_import_cross_workspace",
-    ),
-    false,
-  );
-  await harness.repository.discardAssetManifest(
-    foreignWorkspaceId,
-    foreignManifest.id,
-  );
-  await harness.deleteWorkspace(foreignWorkspaceId);
-  assert.deepEqual(await harness.counts(), baseline);
 }
 
 async function deleteSeedCategoryArticles(harness: Harness, categoryId: string) {
@@ -1416,7 +981,6 @@ async function exerciseRepository(harness: Harness) {
 
   await harness.repository.checkHealth();
   await exerciseAnswerInferenceAdmission(harness);
-  await exerciseKnowledgeImport(harness);
 
   const published = await harness.repository.findPublishedArticle(
     demoIds.workspace,
@@ -1480,7 +1044,9 @@ async function exerciseRepository(harness: Harness) {
   };
   await createCategory(harness, contractCategory);
   assert.deepEqual(
-    (await harness.repository.listCategories(demoIds.workspace)).map((category) => category.id),
+    (await harness.categoryAuthoring.listCategories(demoIds.workspace)).map(
+      (category) => category.id,
+    ),
     [
       demoIds.gettingStartedCategory,
       contractCategory.id,
@@ -1497,11 +1063,12 @@ async function exerciseRepository(harness: Harness) {
     description: "Cross-dialect CRUD",
     position: -1,
   });
-  assert.deepEqual((await harness.repository.listCategories(demoIds.workspace))[0], {
+  assert.deepEqual((await harness.categoryAuthoring.listCategories(demoIds.workspace))[0], {
     ...contractCategory,
     name: "Repository contract",
     description: "Cross-dialect CRUD",
     position: -1,
+    version: 2,
   });
 
   assert.equal(
@@ -1520,7 +1087,7 @@ async function exerciseRepository(harness: Harness) {
     name: "Wrong workspace",
   });
   assert.equal(
-    (await harness.repository.listCategories(demoIds.workspace))[0].name,
+    (await harness.categoryAuthoring.listCategories(demoIds.workspace))[0].name,
     "Repository contract",
     `${harness.name} updated a category outside the requested workspace`,
   );
@@ -2070,7 +1637,7 @@ async function exerciseRepository(harness: Harness) {
     false,
   );
   assert.ok(
-    (await harness.repository.listCategories(demoIds.workspace)).some(
+    (await harness.categoryAuthoring.listCategories(demoIds.workspace)).some(
       (category) => category.id === contractCategory.id,
     ),
   );
@@ -2079,7 +1646,7 @@ async function exerciseRepository(harness: Harness) {
     true,
   );
   assert.ok(
-    !(await harness.repository.listCategories(demoIds.workspace)).some(
+    !(await harness.categoryAuthoring.listCategories(demoIds.workspace)).some(
       (category) => category.id === contractCategory.id,
     ),
   );

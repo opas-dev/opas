@@ -28,7 +28,7 @@
     "test:preview": "tsx --test --test-concurrency=1 tests/article-preview.test.ts tests/article-preview-http.test.tsx tests/article-preview-admin.test.tsx tests/article-preview-repository.integration.test.ts tests/article-preview-d1.integration.test.ts",
     "test:quality": "tsx --test tests/quality-console.test.ts tests/quality-http.test.ts tests/quality-review.test.ts tests/quality-ui.test.tsx tests/content-gaps.test.tsx",
     "test:mcp": "tsx --test tests/mcp.test.ts tests/article-actions.test.tsx",
-    "test:import": "tsx --test tests/import-archive.test.ts tests/import-execute.test.ts tests/import-planner.test.ts tests/import-upload.test.ts",
+    "test:import": "tsx --test --test-concurrency=1 tests/import-archive.test.ts tests/import-execute.test.ts tests/import-planner.test.ts tests/import-upload.test.ts tests/knowledge-import-repository.integration.test.ts tests/knowledge-import-d1.integration.test.ts",
     "test:mdx": "tsx --test tests/mdx-safety.test.ts",
     "test:seo": "tsx --test tests/seo.test.ts tests/public-profile.test.ts",
     "test:search": "tsx --test tests/search.test.ts",

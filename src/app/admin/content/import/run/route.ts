@@ -2,7 +2,6 @@
 // ABOUTME: Replans every activation against current workspace slugs before any database write.
 import { revalidatePath } from "next/cache";
 
-import { scheduleEmbeddingRecovery } from "@/ai/embedding-scheduling";
 import { authoringPausedResponse } from "@/authoring/failures";
 import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
@@ -30,7 +29,12 @@ function errorDetails(error: unknown) {
 }
 
 export async function POST(request: Request) {
-  await requireMemberCapability("import:run", demoIds.workspace);
+  const session = await requireMemberCapability("import:run", demoIds.workspace);
+  const actor = {
+    memberId: session.memberId,
+    sessionId: session.sessionId,
+    workspaceId: session.workspaceId,
+  };
 
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null) {
@@ -74,13 +78,10 @@ export async function POST(request: Request) {
   }
 
   const repository = await getRepository();
-  const [categories, articles] = await Promise.all([
-    repository.listCategories(demoIds.workspace),
-    repository.listArticles(demoIds.workspace),
-  ]);
+  const claims = await repository.listKnowledgeImportSlugClaims(actor);
   const plan = await planKnowledgeImport(files, {
-    existingCategorySlugs: categories.map((category) => category.slug),
-    existingArticleSlugs: articles.map((article) => article.slug),
+    existingCategorySlugs: claims.categorySlugs,
+    existingArticleSlugs: claims.articleSlugs,
   });
 
   if (!plan.ready) {
@@ -98,7 +99,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await executeKnowledgeImport({ repository, workspaceId: demoIds.workspace, plan });
+    await executeKnowledgeImport({ repository, actor, plan });
   } catch (error) {
     const paused = authoringPausedResponse(error);
     if (paused) return paused;
@@ -109,8 +110,7 @@ export async function POST(request: Request) {
     );
   }
 
-  scheduleEmbeddingRecovery();
-  revalidatePath("/", "layout");
+  revalidatePath("/admin/content");
   return Response.json(
     {
       status: "complete",

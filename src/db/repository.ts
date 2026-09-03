@@ -3,6 +3,9 @@
 import type { EmbeddingWorkerRepository } from "@/ai/embedding-worker";
 import type { ArticleDraftRepository } from "@/db/article-drafts";
 import type { MemberActor } from "@/auth/member-repository";
+import type {
+  KnowledgeImportRepository,
+} from "@/db/knowledge-import";
 
 export type ArticleStatus = "draft" | "published";
 
@@ -73,24 +76,6 @@ export type Category = {
   name: string;
   description: string | null;
   position: number;
-};
-
-export type KnowledgeImportCategory = Omit<Category, "workspaceId">;
-
-export type KnowledgeImportArticle = Omit<
-  ArticleSubmission,
-  "workspaceId" | "position"
-> & {
-  position: number;
-  assetHashes: readonly string[];
-  evidence: ArticleEvidenceCommit | null;
-};
-
-export type KnowledgeImport = {
-  workspaceId: string;
-  manifestId: string;
-  categories: readonly KnowledgeImportCategory[];
-  articles: readonly KnowledgeImportArticle[];
 };
 
 export type Theme = {
@@ -428,7 +413,7 @@ export type AnswerInferenceReconciliation = Pick<
   status: Exclude<AnswerInferenceLeaseStatus, "active" | "expired">;
 };
 
-export type Repository = {
+export type Repository = KnowledgeImportRepository & {
   checkHealth(): Promise<void>;
   findPublishedArticle(workspaceId: string, slug: string): Promise<PublishedArticle | null>;
   listPublishedArticles(workspaceId: string): Promise<PublishedArticle[]>;
@@ -473,7 +458,6 @@ export type Repository = {
   cleanupAuthorizedExpiredAssets(
     request: AssetAuthoringRequest,
   ): Promise<void>;
-  activateKnowledgeImport(knowledgeImport: KnowledgeImport): Promise<void>;
   getTheme(workspaceId: string): Promise<Theme | null>;
   getAnalytics(workspaceId: string): Promise<Analytics>;
   createFeedback(feedback: Feedback): Promise<void>;

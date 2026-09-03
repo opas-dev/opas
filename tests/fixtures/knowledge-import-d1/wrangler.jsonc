@@ -1,0 +1,18 @@
+// ABOUTME: Configures a disposable Wrangler-local Worker for private import acceptance.
+// ABOUTME: Uses isolated D1 state and exposes no remote database or production resource.
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "opas-knowledge-import-test",
+  "main": "custom-worker.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "opas-knowledge-import-test",
+      "database_id": "00000000-0000-0000-0000-000000000004",
+      "preview_database_id": "DB",
+      "migrations_dir": "../../../drizzle/sqlite"
+    }
+  ]
+}

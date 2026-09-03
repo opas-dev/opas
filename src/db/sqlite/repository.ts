@@ -1,6 +1,6 @@
 // ABOUTME: Implements the OPAS repository for injected SQLite-compatible D1 databases.
 // ABOUTME: Normalizes D1 records to the same domain contract used by Postgres deployments.
-import { and, asc, count, eq, gte, lt, sql } from "drizzle-orm";
+import { and, asc, count, eq, exists, gte, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { AnyD1Database, DrizzleD1Database } from "drizzle-orm/d1";
@@ -17,13 +17,12 @@ import type { AssetAuthoringRequest } from "@/db/repository";
 import type {
   ArticleAssetSelection,
   ArticleSubmission,
-  KnowledgeImport,
-  KnowledgeImportArticle,
   Repository,
 } from "@/db/repository";
 import { searchMissRetentionStart } from "@/db/search-misses";
 import { createSqliteAnswerInferenceRepository } from "@/db/sqlite/answer-inference-repository";
 import { createSqliteArticleDraftRepository } from "@/db/sqlite/article-draft-repository";
+import { createSqliteKnowledgeImportRepository } from "@/db/sqlite/knowledge-import-repository";
 import {
   articleEvidenceCommitStatements,
   articleEvidenceInvalidationStatements,
@@ -250,169 +249,10 @@ function articleAttachmentStatements(
   ];
 }
 
-function validImportManifestStatement(
-  workspaceId: string,
-  manifestId: string,
-  checkedAt: Date,
-) {
-  return sql`
-    insert into asset_manifest_items (manifest_id, asset_id, workspace_id)
-    select null, null, ${workspaceId}
-    where not exists (
-      select 1
-      from asset_manifests
-      where id = ${manifestId}
-        and workspace_id = ${workspaceId}
-        and expires_at > ${checkedAt.getTime()}
-    )
-  `;
-}
-
-function validImportCategoryStatement(
-  workspaceId: string,
-  categoryId: string,
-) {
-  return sql`
-    insert into asset_manifest_items (manifest_id, asset_id, workspace_id)
-    select null, null, ${workspaceId}
-    where not exists (
-      select 1
-      from categories
-      where id = ${categoryId}
-        and workspace_id = ${workspaceId}
-    )
-  `;
-}
-
-function importArticleAttachmentStatement(
-  workspaceId: string,
-  manifestId: string,
-  article: KnowledgeImportArticle,
-  checkedAt: Date,
-) {
-  const { hashes } = prepareAssetSelection({ hashes: article.assetHashes });
-  const serializedHashes = JSON.stringify(hashes);
-
-  return sql`
-    with requested(hash) as (
-      select distinct value from json_each(${serializedHashes})
-    ),
-    allowed(asset_id, hash) as (
-      select assets.id, assets.hash
-      from assets
-      inner join requested on requested.hash = assets.hash
-      inner join asset_manifest_items
-        on asset_manifest_items.asset_id = assets.id
-       and asset_manifest_items.workspace_id = assets.workspace_id
-      inner join asset_manifests
-        on asset_manifests.id = asset_manifest_items.manifest_id
-       and asset_manifests.workspace_id = asset_manifest_items.workspace_id
-      where assets.workspace_id = ${workspaceId}
-        and asset_manifests.id = ${manifestId}
-        and asset_manifests.expires_at > ${checkedAt.getTime()}
-    ),
-    attachment_rows(article_id, asset_id, workspace_id) as (
-      select ${article.id}, allowed.asset_id, ${workspaceId}
-      from allowed
-      union all
-      select null, null, ${workspaceId}
-      where not exists (
-        select 1
-        from articles
-        where id = ${article.id}
-          and workspace_id = ${workspaceId}
-      )
-        or (select count(*) from requested) <> (select count(*) from allowed)
-    )
-    insert into article_assets (article_id, asset_id, workspace_id)
-    select article_id, asset_id, workspace_id from attachment_rows where true
-    on conflict do nothing
-  `;
-}
-
-function knowledgeImportStatements(
+export function createSqliteRepository(
   database: SqliteDatabase,
-  knowledgeImport: KnowledgeImport,
-  checkedAt: Date,
-) {
-  const executableDatabase = database as DrizzleD1Database<typeof schema>;
-  const { workspaceId, manifestId } = knowledgeImport;
-  const statements: SQL[] = [
-    validImportManifestStatement(workspaceId, manifestId, checkedAt),
-  ];
-
-  for (const category of knowledgeImport.categories) {
-    statements.push(
-      executableDatabase
-        .insert(categories)
-        .values({ ...category, workspaceId })
-        .getSQL(),
-    );
-  }
-
-  for (const article of knowledgeImport.articles) {
-    validateArticleEvidence(
-      {
-        id: article.id,
-        workspaceId,
-        categoryId: article.categoryId,
-        slug: article.slug,
-        title: article.title,
-        mdx: article.mdx,
-        status: article.status,
-        isFaq: article.isFaq,
-        authorName: article.authorName,
-        position: article.position,
-        publishedAt: article.publishedAt,
-      },
-      article.evidence,
-    );
-    statements.push(
-      validImportCategoryStatement(workspaceId, article.categoryId),
-      executableDatabase
-        .insert(articles)
-        .values({
-          id: article.id,
-          workspaceId,
-          categoryId: article.categoryId,
-          slug: article.slug,
-          title: article.title,
-          mdx: article.mdx,
-          contentHash: article.evidence?.articleContentHash ?? null,
-          status: article.status,
-          isFaq: article.isFaq,
-          authorName: article.authorName,
-          position: article.position,
-          publishedAt: article.publishedAt,
-        })
-        .getSQL(),
-      importArticleAttachmentStatement(
-        workspaceId,
-        manifestId,
-        article,
-        checkedAt,
-      ),
-    );
-  }
-
-  statements.push(
-    ...articleEvidenceCommitStatements(
-      database,
-      knowledgeImport.articles.flatMap((article) =>
-        article.evidence ? [article.evidence] : [],
-      ),
-      checkedAt,
-    ),
-  );
-
-  statements.push(
-    sql`delete from asset_manifests where id = ${manifestId} and workspace_id = ${workspaceId}`,
-    orphanAssetCleanup(workspaceId),
-  );
-  return statements;
-}
-
-export function createSqliteRepository(database: SqliteDatabase): Repository {
+  knowledgeImportClock: () => Date = () => new Date(),
+): Repository {
   // Both drivers expose the same execute methods, but Drizzle drops them from its union type.
   const executableDatabase = database as DrizzleD1Database<typeof schema>;
 
@@ -420,6 +260,7 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
     ...createSqliteAnswerInferenceRepository(database),
     ...createSqliteArticleDraftRepository(database),
     ...createSqliteEvidenceRepository(database),
+    ...createSqliteKnowledgeImportRepository(database, knowledgeImportClock),
     async checkHealth() {
       await executableDatabase.run(sql`select 1`);
     },
@@ -467,7 +308,23 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
           position: categories.position,
         })
         .from(categories)
-        .where(eq(categories.workspaceId, workspaceId))
+        .where(
+          and(
+            eq(categories.workspaceId, workspaceId),
+            exists(
+              executableDatabase
+                .select({ id: articles.id })
+                .from(articles)
+                .where(
+                  and(
+                    eq(articles.workspaceId, categories.workspaceId),
+                    eq(articles.categoryId, categories.id),
+                    eq(articles.status, "published"),
+                  ),
+                ),
+            ),
+          ),
+        )
         .orderBy(asc(categories.position), asc(categories.id))
         .execute();
     },
@@ -819,31 +676,6 @@ export function createSqliteRepository(database: SqliteDatabase): Repository {
         sql`delete from asset_manifests where workspace_id = ${request.workspaceId} and expires_at <= ${request.checkedAt.getTime()}`,
         orphanAssetCleanup(request.workspaceId),
       ]);
-    },
-
-    async activateKnowledgeImport(knowledgeImport) {
-      try {
-        await executeAtomically(
-          database,
-          knowledgeImportStatements(database, knowledgeImport, new Date()),
-        );
-      } catch (error) {
-        try {
-          await executeAtomically(
-            database,
-            discardManifestStatements(
-              knowledgeImport.workspaceId,
-              knowledgeImport.manifestId,
-            ),
-          );
-        } catch (cleanupError) {
-          throw new AggregateError(
-            [error, cleanupError],
-            "The knowledge import and staged asset cleanup both failed.",
-          );
-        }
-        throw error;
-      }
     },
 
     async getTheme(workspaceId) {

@@ -55,7 +55,7 @@ export type ImportSkippedContent = {
 
 export type ImportChange = {
   path: string;
-  kind: "demoted-heading" | "inserted-title";
+  kind: "demoted-heading" | "inserted-title" | "normalized-status";
   line?: number;
   message: string;
 };

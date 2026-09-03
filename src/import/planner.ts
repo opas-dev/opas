@@ -769,12 +769,19 @@ export async function planKnowledgeImport(
     }
 
     const canonicalUrl = `/${category.slug}/${slug}`;
+    if (status === "published") {
+      report.changes.push({
+        path: file.path,
+        kind: "normalized-status",
+        message: "Published source status will be imported as a private draft.",
+      });
+    }
     const prepared: PreparedArticle = {
       sourcePath: file.path,
       categorySlug: category.slug,
       slug,
       title: selectedTitle,
-      status,
+      status: "draft",
       isFaq,
       authorName,
       position: candidate.position,

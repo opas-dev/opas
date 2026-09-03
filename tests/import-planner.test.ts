@@ -118,7 +118,7 @@ test("plans a representative GitBook export with deterministic navigation and re
   const install = plan.articles[2];
   assert.equal(setup.mdx, "# Setup\n\nSee [Install](/guides/install-opas).\n");
   assert.equal(install.title, "Install OPAS");
-  assert.equal(install.status, "published");
+  assert.equal(install.status, "draft");
   assert.equal(install.isFaq, true);
   assert.equal(install.authorName, "Docs Team");
   assert.match(install.mdx, /^# Install OPAS\n\n## Install/m);
@@ -153,6 +153,12 @@ test("plans a representative GitBook export with deterministic navigation and re
   assert.ok(
     plan.report.changes.some(
       ({ path, kind }) => path === "docs/guides/setup/install.md" && kind === "demoted-heading",
+    ),
+  );
+  assert.ok(
+    plan.report.changes.some(
+      ({ path, kind }) =>
+        path === "docs/guides/setup/install.md" && kind === "normalized-status",
     ),
   );
   assert.ok(
