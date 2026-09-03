@@ -468,7 +468,12 @@ async function startPreviewServer(
             preview
               ? `<main><p>Private preview</p><h1>${preview.title}</h1></main>`
               : "<main>Preview unavailable</main>",
-            { headers: articlePreviewResponseHeaders },
+            {
+              headers: {
+                ...articlePreviewResponseHeaders,
+                "Cache-Control": "private, no-cache, no-store, max-age=0, must-revalidate",
+              },
+            },
           ),
         );
       }

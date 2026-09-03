@@ -8,14 +8,16 @@ import { unstable_getResponseFromNextConfig } from "next/experimental/testing/se
 import nextConfig from "../next.config";
 import { contentSecurityPolicy } from "../src/security/headers";
 
-test("applies shared security headers everywhere and one global CSP outside embed", async () => {
+test("applies shared security headers outside isolated embed and preview responses", async () => {
   const createHeaders = nextConfig.headers;
   if (!createHeaders) {
     assert.fail("Next.js must define the all-route header rule");
   }
 
   const rules = await createHeaders();
-  const globalRule = rules.find((rule) => rule.source === "/:path*");
+  const globalRule = rules.find(
+    (rule) => rule.source === "/:path((?!preview$)(?!preview/).*)",
+  );
 
   assert.ok(globalRule);
   const values = Object.fromEntries(
@@ -53,6 +55,23 @@ test("applies shared security headers everywhere and one global CSP outside embe
   });
   assert.equal(embedResponse.headers.get("content-security-policy"), null);
   assert.equal(embedResponse.headers.get("x-content-type-options"), "nosniff");
+
+  for (const path of ["/preview", "/preview/session", "/preview/assets/example"]) {
+    const response = await unstable_getResponseFromNextConfig({
+      nextConfig,
+      url: `https://help.example.test${path}`,
+    });
+    for (const name of [
+      "content-security-policy",
+      "permissions-policy",
+      "referrer-policy",
+      "x-content-type-options",
+      "link",
+      "x-llms-txt",
+    ]) {
+      assert.equal(response.headers.get(name), null, `${path} ${name}`);
+    }
+  }
 });
 
 test("limits CSP sources while allowing the two runtime MDX requirements", () => {

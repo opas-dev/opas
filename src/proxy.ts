@@ -15,13 +15,14 @@ export async function proxy(request: NextRequest) {
     return authorizeAdminRoute(request, sessionSecret, deploymentId);
   }
 
-  if (
-    request.nextUrl.pathname === "/preview" ||
-    request.nextUrl.pathname.startsWith("/preview/")
-  ) {
+  if (request.nextUrl.pathname === "/preview") {
     const response = NextResponse.next();
     applyArticlePreviewResponseHeaders(response.headers);
     return response;
+  }
+
+  if (request.nextUrl.pathname.startsWith("/preview/")) {
+    return NextResponse.next();
   }
 
   const response = NextResponse.next();

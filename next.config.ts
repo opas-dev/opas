@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: "/:path*",
+        source: "/:path((?!preview$)(?!preview/).*)",
         headers: [
           ...sharedSecurityHeaders,
           {
@@ -34,7 +34,7 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: "/:path((?!embed$).*)",
+        source: "/:path((?!embed$)(?!preview$)(?!preview/).*)",
         headers: [
           {
             key: "Content-Security-Policy",

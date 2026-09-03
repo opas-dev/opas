@@ -199,8 +199,16 @@ function workflowTarget(actor: DraftActor, head: ArticleWorkingHead) {
 }
 
 function privateResponseHeaders(response: Response) {
+  const cacheDirectives = new Set(
+    (response.headers.get("cache-control") ?? "")
+      .split(",")
+      .map((directive) => directive.trim().toLowerCase())
+      .filter(Boolean),
+  );
   return (
-    response.headers.get("cache-control") === "private, no-store" &&
+    cacheDirectives.has("private") &&
+    cacheDirectives.has("no-store") &&
+    !cacheDirectives.has("public") &&
     response.headers.get("x-robots-tag") === "noindex, nofollow, noarchive" &&
     response.headers.get("referrer-policy") === "no-referrer" &&
     response.headers.get("x-frame-options") === "DENY" &&

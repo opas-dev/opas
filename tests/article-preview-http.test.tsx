@@ -35,6 +35,7 @@ import {
   handleArticlePreviewExchange,
   handleArticlePreviewSession,
 } from "@/auth/article-preview-http";
+import { articlePreviewResponseHeaders } from "@/auth/article-preview-headers";
 import {
   articlePreviewCookieName,
   createArticlePreviewGrantId,
@@ -479,11 +480,21 @@ test("the preview reader stays outside every public discovery producer", () => {
   assert.match(page, /viewer’s IP address and request timing/u);
 });
 
-test("proxy policy covers the preview document and every scoped asset", async () => {
-  for (const pathname of ["/preview", `/preview/assets/${assetHash}`]) {
-    const response = await proxy(new NextRequest(`${origin}${pathname}`));
-    assert.equal(response.headers.get("x-middleware-next"), "1");
-    assertPrivateHeaders(response);
+test("proxy owns the preview document policy while handlers own scoped route policies", async () => {
+  const pageResponse = await proxy(new NextRequest(`${origin}/preview`));
+  assert.equal(pageResponse.headers.get("x-middleware-next"), "1");
+  assertPrivateHeaders(pageResponse);
+
+  for (const pathname of [
+    "/preview/exchange",
+    "/preview/session",
+    `/preview/assets/${assetHash}`,
+  ]) {
+    const routeResponse = await proxy(new NextRequest(`${origin}${pathname}`));
+    assert.equal(routeResponse.headers.get("x-middleware-next"), "1");
+    for (const name of Object.keys(articlePreviewResponseHeaders)) {
+      assert.equal(routeResponse.headers.get(name), null, `${pathname} ${name}`);
+    }
   }
   assert.ok(proxyConfiguration.matcher.includes("/preview/:path*"));
 });
