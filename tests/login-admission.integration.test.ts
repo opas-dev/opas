@@ -600,6 +600,11 @@ function sqliteHarness(mode: "D1" | "SQLite"): Harness {
 async function postgresHarness(): Promise<Harness> {
   const container = await new PostgreSqlContainer("postgres:18.6-alpine").start();
   const pool = new Pool({ connectionString: container.getConnectionUri(), max: 20 });
+  const unexpectedPoolErrors: Error[] = [];
+  let closing = false;
+  pool.on("error", (error) => {
+    if (!closing) unexpectedPoolErrors.push(error);
+  });
   await pool.query(`
     create table workspaces (
       id text primary key not null,
@@ -642,8 +647,11 @@ async function postgresHarness(): Promise<Harness> {
 
   return {
     async close() {
+      const unexpectedPoolError = unexpectedPoolErrors[0];
+      closing = true;
       await pool.end();
       await container.stop();
+      if (unexpectedPoolError) throw unexpectedPoolError;
     },
     async insertWindow(seed) {
       await pool.query(
