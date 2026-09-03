@@ -78,6 +78,13 @@
       "when": 1788391517127,
       "tag": "0010_workspace_authoring_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788394930443,
+      "tag": "0011_silly_green_goblin",
+      "breakpoints": true
     }
   ]
 }

@@ -78,6 +78,13 @@
       "when": 1788391516700,
       "tag": "0010_workspace_authoring_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788394930450,
+      "tag": "0011_magical_loki",
+      "breakpoints": true
     }
   ]
 }

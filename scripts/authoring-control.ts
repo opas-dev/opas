@@ -39,6 +39,9 @@ export type AuthoringControlResult = Readonly<{
 }>;
 
 export type AuthoringControlStore = Readonly<{
+  backfillState(
+    workspaceId: string,
+  ): Promise<"complete" | "incomplete" | "not-installed">;
   change(
     workspaceId: string,
     expectedGeneration: number,
@@ -50,6 +53,56 @@ export type AuthoringControlStore = Readonly<{
 }>;
 
 type DatabaseRow = Record<string, unknown>;
+
+const postgresTeamAuthoringGuardTargets = [
+  ["article_heads_authoring_control_trigger", "article_heads"],
+  ["article_slug_claims_authoring_control_trigger", "article_slug_claims"],
+  ["article_revisions_authoring_control_trigger", "article_revisions"],
+  ["article_revision_assets_authoring_control_trigger", "article_revision_assets"],
+  ["article_review_events_authoring_control_trigger", "article_review_events"],
+  ["article_preview_grants_authoring_control_insert_trigger", "article_preview_grants"],
+  ["article_preview_grants_authoring_control_delete_trigger", "article_preview_grants"],
+  ["article_revisions_immutable_trigger", "article_revisions"],
+  ["article_revision_assets_immutable_trigger", "article_revision_assets"],
+  ["assets_revision_history_delete_trigger", "assets"],
+  ["article_review_events_immutable_trigger", "article_review_events"],
+  ["article_preview_grants_revocation_update_trigger", "article_preview_grants"],
+  ["article_heads_integrity_trigger", "article_heads"],
+  ["articles_materialization_integrity_trigger", "articles"],
+  ["articles_history_delete_trigger", "articles"],
+  ["article_slug_claims_integrity_trigger", "article_slug_claims"],
+  ["categories_current_revision_delete_trigger", "categories"],
+] as const;
+
+const sqliteTeamAuthoringGuardNames = [
+  "article_heads_authoring_control_insert_trigger",
+  "article_heads_authoring_control_update_trigger",
+  "article_heads_authoring_control_delete_trigger",
+  "article_slug_claims_authoring_control_insert_trigger",
+  "article_slug_claims_authoring_control_update_trigger",
+  "article_slug_claims_authoring_control_delete_trigger",
+  "article_revisions_authoring_control_insert_trigger",
+  "article_revisions_immutable_update_trigger",
+  "article_revisions_immutable_delete_trigger",
+  "article_revision_assets_authoring_control_insert_trigger",
+  "article_revision_assets_immutable_update_trigger",
+  "article_revision_assets_immutable_delete_trigger",
+  "assets_revision_history_delete_trigger",
+  "article_review_events_authoring_control_insert_trigger",
+  "article_review_events_immutable_update_trigger",
+  "article_review_events_immutable_delete_trigger",
+  "article_preview_grants_authoring_control_insert_trigger",
+  "article_preview_grants_revocation_update_trigger",
+  "article_preview_grants_authoring_control_delete_trigger",
+  "article_heads_integrity_insert_trigger",
+  "article_heads_integrity_update_trigger",
+  "articles_materialization_insert_trigger",
+  "articles_materialization_update_trigger",
+  "articles_history_delete_trigger",
+  "article_slug_claims_integrity_update_trigger",
+  "article_slug_claims_integrity_delete_trigger",
+  "categories_current_revision_delete_trigger",
+] as const;
 
 const usage =
   "Usage: authoring-control.ts <inspect|pause|resume> --target <postgres|neon|cloudflare> --workspace <id-or-slug> [--expected-generation <n>] [--config <wrangler.jsonc> (--local [--persist-to <directory>]|--remote)]";
@@ -203,6 +256,15 @@ export async function runAuthoringControlCommand(
     );
   }
 
+  if (
+    command.action === "resume" &&
+    (await store.backfillState(control.workspaceId)) === "incomplete"
+  ) {
+    throw new Error(
+      "AUTHORING_BACKFILL_INCOMPLETE: the workspace cannot resume until the team-authoring backfill is audited.",
+    );
+  }
+
   const writesPaused = command.action === "pause";
   if (control.writesPaused === writesPaused) return { changed: false, control };
   const changed = await store.change(
@@ -257,8 +319,47 @@ inner join workspaces on workspaces.id = changed.workspace_id
 
 type Query = (text: string, values: readonly unknown[]) => Promise<readonly DatabaseRow[]>;
 
+export async function readPostgresAuthoringBackfillState(
+  query: Query,
+  workspaceId: string,
+) {
+  const installed = await query(
+    "select to_regclass('public.workspace_authoring_migrations') is not null as installed",
+    [],
+  );
+  if (!parseBoolean(installed[0]?.installed)) return "not-installed" as const;
+  const triggerNames = postgresTeamAuthoringGuardTargets.map(([name]) => name);
+  const relationNames = postgresTeamAuthoringGuardTargets.map(([, relation]) => relation);
+  const completed = await query(
+    `select
+       exists (
+         select 1 from workspace_authoring_migrations
+         where workspace_id = $1 and version = 1
+       ) and not exists (
+         select 1
+         from unnest($2::text[], $3::text[]) required(trigger_name, relation_name)
+         where not exists (
+           select 1
+           from pg_trigger trigger
+           inner join pg_class relation on relation.oid = trigger.tgrelid
+           inner join pg_namespace namespace on namespace.oid = relation.relnamespace
+           where trigger.tgname = required.trigger_name
+             and relation.relname = required.relation_name
+             and namespace.nspname = current_schema()
+             and not trigger.tgisinternal
+             and trigger.tgenabled in ('O', 'A')
+         )
+       ) as completed`,
+    [workspaceId, triggerNames, relationNames],
+  );
+  return parseBoolean(completed[0]?.completed) ? "complete" as const : "incomplete" as const;
+}
+
 function createSqlControlStore(query: Query, close: () => Promise<void>): AuthoringControlStore {
   return {
+    async backfillState(workspaceId) {
+      return readPostgresAuthoringBackfillState(query, workspaceId);
+    },
     async change(workspaceId, expectedGeneration, writesPaused, changedAt) {
       const rows = await query(changeControlSql, [
         workspaceId,
@@ -363,6 +464,10 @@ async function openCloudflareControlStore(
     }
     const output = await runCloudflareProcess("pnpm", args, {
       captureOutput: true,
+      classifyFailure(errorOutput) {
+        const detail = errorOutput.trim();
+        return detail ? new Error(detail) : undefined;
+      },
       cwd: snapshot.directory,
       environment,
     });
@@ -370,6 +475,26 @@ async function openCloudflareControlStore(
   };
 
   return {
+    async backfillState(workspaceId) {
+      const installed = await query(
+        "select count(*) as installed from sqlite_master where type = 'table' and name = 'workspace_authoring_migrations'",
+      );
+      if (Number(installed[0]?.installed) !== 1) return "not-installed";
+      const guardNames = sqliteTeamAuthoringGuardNames
+        .map(quoteSqliteText)
+        .join(", ");
+      const completed = await query(`
+select
+  exists (
+    select 1 from workspace_authoring_migrations
+    where workspace_id = ${quoteSqliteText(workspaceId)} and version = 1
+  ) and (
+    select count(*) from sqlite_master
+    where type = 'trigger' and name in (${guardNames})
+  ) = ${sqliteTeamAuthoringGuardNames.length} as completed;
+`);
+      return Number(completed[0]?.completed) === 1 ? "complete" : "incomplete";
+    },
     async change(workspaceId, expectedGeneration, writesPaused, changedAt) {
       const workspaceReference = quoteSqliteText(workspaceId);
       const rows = await query(`

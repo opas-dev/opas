@@ -1,0 +1,2 @@
+ABOUTME: Keeps the fixture's validated local-only Workers asset directory present.
+ABOUTME: The native D1 test Worker does not serve assets from this directory.

@@ -37,6 +37,65 @@ export const workspaces = pgTable("workspaces", {
   ...timestampColumns,
 });
 
+export const workspaceMembers = pgTable(
+  "workspace_members",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    normalizedEmail: text("normalized_email").notNull(),
+    displayName: text("display_name").notNull(),
+    role: text("role", { enum: ["administrator", "editor", "reviewer"] }).notNull(),
+    status: text("status", { enum: ["active", "disabled"] }).notNull(),
+    passwordSalt: text("password_salt").notNull(),
+    passwordDigest: text("password_digest").notNull(),
+    passwordIterations: integer("password_iterations").notNull(),
+    createdByMemberId: text("created_by_member_id"),
+    ...timestampColumns,
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("workspace_members_id_workspace_unique").on(
+      table.id,
+      table.workspaceId,
+    ),
+    uniqueIndex("workspace_members_workspace_email_unique").on(
+      table.workspaceId,
+      table.normalizedEmail,
+    ),
+    foreignKey({
+      columns: [table.createdByMemberId, table.workspaceId],
+      foreignColumns: [table.id, table.workspaceId],
+    }).onDelete("cascade"),
+    index("workspace_members_workspace_status_role_index").on(
+      table.workspaceId,
+      table.status,
+      table.role,
+    ),
+    check(
+      "workspace_members_email_check",
+      sql`${table.normalizedEmail} = lower(trim(${table.normalizedEmail})) and length(${table.normalizedEmail}) between 3 and 320`,
+    ),
+    check(
+      "workspace_members_display_name_check",
+      sql`length(${table.displayName}) between 1 and 100`,
+    ),
+    check(
+      "workspace_members_role_check",
+      sql`${table.role} in ('administrator', 'editor', 'reviewer')`,
+    ),
+    check(
+      "workspace_members_status_check",
+      sql`${table.status} in ('active', 'disabled')`,
+    ),
+    check(
+      "workspace_members_password_check",
+      sql`length(${table.passwordSalt}) = 43 and length(${table.passwordDigest}) = 43 and ${table.passwordSalt} ~ '^[0-9A-Za-z_-]{43}$' and ${table.passwordDigest} ~ '^[0-9A-Za-z_-]{43}$' and ${table.passwordIterations} = 600000`,
+    ),
+  ],
+);
+
 export const workspaceAuthoringControls = pgTable(
   "workspace_authoring_controls",
   {
@@ -52,6 +111,158 @@ export const workspaceAuthoringControls = pgTable(
     check(
       "workspace_authoring_controls_generation_check",
       sql`${table.generation} >= 0`,
+    ),
+  ],
+);
+
+export const adminLoginWindows = pgTable(
+  "admin_login_windows",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    dimension: text("dimension", {
+      enum: ["source", "source_principal", "principal", "workspace"],
+    }).notNull(),
+    keyDigest: text("key_digest").notNull(),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+    count: integer("count").notNull().default(0),
+    blockedUntil: timestamp("blocked_until", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.workspaceId,
+        table.dimension,
+        table.keyDigest,
+        table.windowStartedAt,
+      ],
+    }),
+    index("admin_login_windows_workspace_expiry_index").on(
+      table.workspaceId,
+      table.expiresAt,
+    ),
+    check(
+      "admin_login_windows_dimension_check",
+      sql`${table.dimension} in ('source', 'source_principal', 'principal', 'workspace')`,
+    ),
+    check(
+      "admin_login_windows_digest_check",
+      sql`length(${table.keyDigest}) = 64 and ${table.keyDigest} = lower(${table.keyDigest}) and ${table.keyDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("admin_login_windows_count_check", sql`${table.count} >= 0`),
+    check(
+      "admin_login_windows_time_check",
+      sql`${table.expiresAt} > ${table.windowStartedAt} and ${table.expiresAt} <= ${table.windowStartedAt} + interval '24 hours' and (${table.blockedUntil} is null or (${table.blockedUntil} >= ${table.windowStartedAt} and ${table.blockedUntil} <= ${table.expiresAt}))`,
+    ),
+  ],
+);
+
+export const adminSessions = pgTable(
+  "admin_sessions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    memberId: text("member_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.memberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    index("admin_sessions_workspace_member_expiry_index").on(
+      table.workspaceId,
+      table.memberId,
+      table.expiresAt,
+    ),
+    check(
+      "admin_sessions_id_check",
+      sql`length(${table.id}) = 43 and ${table.id} ~ '^[0-9A-Za-z_-]{43}$'`,
+    ),
+    check(
+      "admin_sessions_time_check",
+      sql`${table.expiresAt} > ${table.createdAt} and ${table.expiresAt} <= ${table.createdAt} + interval '8 hours' and (${table.revokedAt} is null or ${table.revokedAt} >= ${table.createdAt})`,
+    ),
+  ],
+);
+
+export const memberInvitations = pgTable(
+  "member_invitations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["invite", "credential_reset"] }).notNull(),
+    normalizedEmail: text("normalized_email").notNull(),
+    targetRole: text("target_role", {
+      enum: ["administrator", "editor", "reviewer"],
+    }),
+    memberId: text("member_id"),
+    tokenDigest: text("token_digest").notNull(),
+    createdByMemberId: text("created_by_member_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("member_invitations_token_digest_unique").on(table.tokenDigest),
+    uniqueIndex("member_invitations_active_invite_unique")
+      .on(table.workspaceId, table.normalizedEmail)
+      .where(
+        sql`${table.kind} = 'invite' and ${table.acceptedAt} is null and ${table.revokedAt} is null`,
+      ),
+    uniqueIndex("member_invitations_active_reset_unique")
+      .on(table.workspaceId, table.memberId)
+      .where(
+        sql`${table.kind} = 'credential_reset' and ${table.acceptedAt} is null and ${table.revokedAt} is null`,
+      ),
+    foreignKey({
+      columns: [table.memberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.createdByMemberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    index("member_invitations_workspace_expiry_index").on(
+      table.workspaceId,
+      table.expiresAt,
+    ),
+    check(
+      "member_invitations_kind_check",
+      sql`${table.kind} in ('invite', 'credential_reset')`,
+    ),
+    check(
+      "member_invitations_email_check",
+      sql`${table.normalizedEmail} = lower(trim(${table.normalizedEmail})) and length(${table.normalizedEmail}) between 3 and 320`,
+    ),
+    check(
+      "member_invitations_target_check",
+      sql`(${table.kind} = 'invite' and ${table.targetRole} is not null and ${table.targetRole} in ('administrator', 'editor', 'reviewer') and ${table.memberId} is null) or (${table.kind} = 'credential_reset' and ${table.targetRole} is null and ${table.memberId} is not null)`,
+    ),
+    check(
+      "member_invitations_creator_check",
+      sql`${table.createdByMemberId} is not null or (${table.kind} = 'invite' and ${table.targetRole} is not null and ${table.targetRole} = 'administrator' and ${table.memberId} is null) or (${table.kind} = 'credential_reset' and ${table.targetRole} is null and ${table.memberId} is not null)`,
+    ),
+    check(
+      "member_invitations_digest_check",
+      sql`length(${table.tokenDigest}) = 64 and ${table.tokenDigest} = lower(${table.tokenDigest}) and ${table.tokenDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "member_invitations_expiry_check",
+      sql`(${table.kind} = 'invite' and ${table.expiresAt} = ${table.createdAt} + interval '48 hours') or (${table.kind} = 'credential_reset' and ${table.expiresAt} = ${table.createdAt} + interval '1 hour')`,
+    ),
+    check(
+      "member_invitations_lifecycle_check",
+      sql`not (${table.acceptedAt} is not null and ${table.revokedAt} is not null) and (${table.acceptedAt} is null or (${table.acceptedAt} >= ${table.createdAt} and ${table.acceptedAt} <= ${table.expiresAt})) and (${table.revokedAt} is null or ${table.revokedAt} >= ${table.createdAt})`,
     ),
   ],
 );
@@ -207,6 +418,388 @@ export const articleAssets = pgTable(
       foreignColumns: [assets.id, assets.workspaceId],
     }).onDelete("cascade"),
     index("article_assets_asset_index").on(table.assetId),
+  ],
+);
+
+export const workspaceAuthoringMigrations = pgTable(
+  "workspace_authoring_migrations",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    articleCount: integer("article_count").notNull(),
+    projectionHash: text("projection_hash").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workspaceId, table.version] }),
+    check(
+      "workspace_authoring_migrations_values_check",
+      sql`${table.version} >= 1 and ${table.articleCount} >= 0 and length(${table.projectionHash}) = 64 and ${table.projectionHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+export const articleRevisions = pgTable(
+  "article_revisions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    articleId: text("article_id").notNull(),
+    revisionNumber: integer("revision_number").notNull(),
+    categoryId: text("category_id").notNull(),
+    categorySlug: text("category_slug").notNull(),
+    categoryName: text("category_name").notNull(),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    mdx: text("mdx").notNull(),
+    isFaq: boolean("is_faq").notNull(),
+    authorName: text("author_name").notNull(),
+    position: integer("position").notNull(),
+    revisionHash: text("revision_hash").notNull(),
+    changeKind: text("change_kind", {
+      enum: ["manual", "import", "rollback", "migration", "seed"],
+    }).notNull(),
+    createdByMemberId: text("created_by_member_id"),
+    createdBySystemLabel: text("created_by_system_label"),
+    changeSummary: text("change_summary"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    restoredFromRevisionId: text("restored_from_revision_id"),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.articleId, table.workspaceId],
+      foreignColumns: [articles.id, articles.workspaceId],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.createdByMemberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [
+        table.workspaceId,
+        table.articleId,
+        table.restoredFromRevisionId,
+      ],
+      foreignColumns: [table.workspaceId, table.articleId, table.id],
+    }).onDelete("cascade"),
+    uniqueIndex("article_revisions_workspace_article_number_unique").on(
+      table.workspaceId,
+      table.articleId,
+      table.revisionNumber,
+    ),
+    uniqueIndex("article_revisions_workspace_article_identity_unique").on(
+      table.workspaceId,
+      table.articleId,
+      table.id,
+      table.revisionNumber,
+    ),
+    uniqueIndex("article_revisions_workspace_identity_unique").on(
+      table.workspaceId,
+      table.id,
+    ),
+    uniqueIndex("article_revisions_workspace_article_id_unique").on(
+      table.workspaceId,
+      table.articleId,
+      table.id,
+    ),
+    index("article_revisions_history_index").on(
+      table.workspaceId,
+      table.articleId,
+      table.revisionNumber,
+    ),
+    check("article_revisions_number_check", sql`${table.revisionNumber} >= 1`),
+    check(
+      "article_revisions_snapshot_check",
+      sql`length(${table.categoryId}) >= 1 and length(${table.categorySlug}) between 1 and 120 and length(${table.categoryName}) between 1 and 100 and length(${table.slug}) between 1 and 120 and length(${table.title}) between 1 and 160 and octet_length(${table.mdx}) <= 100000 and length(${table.authorName}) between 1 and 100 and ${table.position} between 0 and 10000`,
+    ),
+    check(
+      "article_revisions_hash_check",
+      sql`length(${table.revisionHash}) = 64 and ${table.revisionHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "article_revisions_change_kind_check",
+      sql`${table.changeKind} in ('manual', 'import', 'rollback', 'migration', 'seed')`,
+    ),
+    check(
+      "article_revisions_actor_check",
+      sql`(${table.changeKind} = 'migration' and ${table.createdByMemberId} is null and ${table.createdBySystemLabel} is not null and ${table.createdBySystemLabel} = 'OPAS migration') or (${table.changeKind} <> 'migration' and ${table.createdByMemberId} is not null and ${table.createdBySystemLabel} is null)`,
+    ),
+    check(
+      "article_revisions_summary_check",
+      sql`${table.changeSummary} is null or length(${table.changeSummary}) <= 500`,
+    ),
+    check(
+      "article_revisions_restore_check",
+      sql`(${table.changeKind} = 'rollback' and ${table.restoredFromRevisionId} is not null) or (${table.changeKind} <> 'rollback' and ${table.restoredFromRevisionId} is null)`,
+    ),
+  ],
+);
+
+export const articleRevisionAssets = pgTable(
+  "article_revision_assets",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    articleId: text("article_id").notNull(),
+    revisionId: text("revision_id").notNull(),
+    revisionNumber: integer("revision_number").notNull(),
+    assetId: text("asset_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.revisionId, table.assetId] }),
+    foreignKey({
+      columns: [
+        table.workspaceId,
+        table.articleId,
+        table.revisionId,
+        table.revisionNumber,
+      ],
+      foreignColumns: [
+        articleRevisions.workspaceId,
+        articleRevisions.articleId,
+        articleRevisions.id,
+        articleRevisions.revisionNumber,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.assetId, table.workspaceId],
+      foreignColumns: [assets.id, assets.workspaceId],
+    }).onDelete("cascade"),
+    index("article_revision_assets_asset_index").on(
+      table.workspaceId,
+      table.assetId,
+    ),
+  ],
+);
+
+export const articleSlugClaims = pgTable(
+  "article_slug_claims",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    normalizedSlug: text("normalized_slug").notNull(),
+    articleId: text("article_id").notNull(),
+    workingClaim: boolean("working_claim").notNull(),
+    articleRowClaim: boolean("article_row_claim").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workspaceId, table.normalizedSlug] }),
+    foreignKey({
+      columns: [table.articleId, table.workspaceId],
+      foreignColumns: [articles.id, articles.workspaceId],
+    }).onDelete("cascade"),
+    uniqueIndex("article_slug_claims_workspace_slug_article_unique").on(
+      table.workspaceId,
+      table.normalizedSlug,
+      table.articleId,
+    ),
+    index("article_slug_claims_article_index").on(
+      table.workspaceId,
+      table.articleId,
+    ),
+    check(
+      "article_slug_claims_slug_check",
+      sql`${table.normalizedSlug} = lower(trim(${table.normalizedSlug})) and length(${table.normalizedSlug}) between 1 and 120`,
+    ),
+    check(
+      "article_slug_claims_owner_check",
+      sql`${table.workingClaim} or ${table.articleRowClaim}`,
+    ),
+  ],
+);
+
+export const articleHeads = pgTable(
+  "article_heads",
+  {
+    articleId: text("article_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    workingRevisionId: text("working_revision_id").notNull(),
+    workingRevisionNumber: integer("working_revision_number").notNull(),
+    workingSlug: text("working_slug").notNull(),
+    publishedRevisionId: text("published_revision_id"),
+    publishedRevisionNumber: integer("published_revision_number"),
+    reviewState: text("review_state", {
+      enum: ["editing", "in_review", "changes_requested", "approved", "published"],
+    }).notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedByMemberId: text("archived_by_member_id"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.articleId, table.workspaceId] }),
+    foreignKey({
+      columns: [table.articleId, table.workspaceId],
+      foreignColumns: [articles.id, articles.workspaceId],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [
+        table.workspaceId,
+        table.articleId,
+        table.workingRevisionId,
+        table.workingRevisionNumber,
+      ],
+      foreignColumns: [
+        articleRevisions.workspaceId,
+        articleRevisions.articleId,
+        articleRevisions.id,
+        articleRevisions.revisionNumber,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [
+        table.workspaceId,
+        table.articleId,
+        table.publishedRevisionId,
+        table.publishedRevisionNumber,
+      ],
+      foreignColumns: [
+        articleRevisions.workspaceId,
+        articleRevisions.articleId,
+        articleRevisions.id,
+        articleRevisions.revisionNumber,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.workspaceId, table.workingSlug, table.articleId],
+      foreignColumns: [
+        articleSlugClaims.workspaceId,
+        articleSlugClaims.normalizedSlug,
+        articleSlugClaims.articleId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.archivedByMemberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    index("article_heads_workspace_state_index").on(
+      table.workspaceId,
+      table.reviewState,
+      table.archivedAt,
+    ),
+    check("article_heads_working_number_check", sql`${table.workingRevisionNumber} >= 1`),
+    check(
+      "article_heads_published_pointer_check",
+      sql`(${table.publishedRevisionId} is null and ${table.publishedRevisionNumber} is null) or (${table.publishedRevisionId} is not null and ${table.publishedRevisionNumber} is not null and ${table.publishedRevisionNumber} >= 1)`,
+    ),
+    check(
+      "article_heads_archive_check",
+      sql`(${table.archivedAt} is null and ${table.archivedByMemberId} is null) or (${table.archivedAt} is not null and ${table.archivedByMemberId} is not null)`,
+    ),
+    check(
+      "article_heads_review_state_check",
+      sql`${table.reviewState} in ('editing', 'in_review', 'changes_requested', 'approved', 'published')`,
+    ),
+    check(
+      "article_heads_published_state_check",
+      sql`${table.reviewState} <> 'published' or (${table.archivedAt} is null and ${table.publishedRevisionId} is not null and ${table.publishedRevisionNumber} is not null and ${table.publishedRevisionId} = ${table.workingRevisionId} and ${table.publishedRevisionNumber} = ${table.workingRevisionNumber})`,
+    ),
+  ],
+);
+
+export const articleReviewEvents = pgTable(
+  "article_review_events",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    articleId: text("article_id").notNull(),
+    revisionId: text("revision_id").notNull(),
+    revisionNumber: integer("revision_number").notNull(),
+    memberId: text("member_id").notNull(),
+    action: text("action", {
+      enum: [
+        "submitted",
+        "withdrawn",
+        "changes_requested",
+        "category_changed",
+        "approved",
+        "published",
+        "unpublished",
+        "archived",
+        "restored",
+        "emergency_published",
+      ],
+    }).notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [
+        table.workspaceId,
+        table.articleId,
+        table.revisionId,
+        table.revisionNumber,
+      ],
+      foreignColumns: [
+        articleRevisions.workspaceId,
+        articleRevisions.articleId,
+        articleRevisions.id,
+        articleRevisions.revisionNumber,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.memberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    index("article_review_events_history_index").on(
+      table.workspaceId,
+      table.articleId,
+      table.createdAt,
+    ),
+    check(
+      "article_review_events_action_check",
+      sql`${table.action} in ('submitted', 'withdrawn', 'changes_requested', 'category_changed', 'approved', 'published', 'unpublished', 'archived', 'restored', 'emergency_published')`,
+    ),
+    check(
+      "article_review_events_note_check",
+      sql`${table.note} is null or length(${table.note}) <= 500`,
+    ),
+  ],
+);
+
+export const articlePreviewGrants = pgTable(
+  "article_preview_grants",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    revisionId: text("revision_id").notNull(),
+    createdByMemberId: text("created_by_member_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedByMemberId: text("revoked_by_member_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.workspaceId, table.revisionId],
+      foreignColumns: [articleRevisions.workspaceId, articleRevisions.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.createdByMemberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.revokedByMemberId, table.workspaceId],
+      foreignColumns: [workspaceMembers.id, workspaceMembers.workspaceId],
+    }).onDelete("cascade"),
+    uniqueIndex("article_preview_grants_active_revision_unique")
+      .on(table.workspaceId, table.revisionId)
+      .where(sql`${table.revokedAt} is null`),
+    index("article_preview_grants_workspace_expiry_index").on(
+      table.workspaceId,
+      table.expiresAt,
+    ),
+    check(
+      "article_preview_grants_id_check",
+      sql`length(${table.id}) = 43 and ${table.id} ~ '^[0-9A-Za-z_-]{43}$'`,
+    ),
+    check(
+      "article_preview_grants_expiry_check",
+      sql`${table.expiresAt} = ${table.createdAt} + interval '7 days'`,
+    ),
+    check(
+      "article_preview_grants_revocation_check",
+      sql`(${table.revokedAt} is null and ${table.revokedByMemberId} is null) or (${table.revokedAt} is not null and ${table.revokedByMemberId} is not null and ${table.revokedAt} >= ${table.createdAt})`,
+    ),
   ],
 );
 

@@ -23,9 +23,13 @@ const activeControl: AuthoringControl = {
 
 function recordingStore(
   controls: readonly AuthoringControl[] = [activeControl],
+  backfillState: "complete" | "incomplete" | "not-installed" = "not-installed",
 ): AuthoringControlStore & { changes: unknown[][] } {
   const changes: unknown[][] = [];
   return {
+    async backfillState() {
+      return backfillState;
+    },
     changes,
     async change(workspaceId, generation, writesPaused, changedAt) {
       changes.push([workspaceId, generation, writesPaused, changedAt]);
@@ -174,6 +178,45 @@ test("does not advance a fence already in the requested state", async () => {
   );
   assert.equal(result.changed, false);
   assert.deepEqual(store.changes, []);
+});
+
+test("refuses to resume while the team-authoring backfill is incomplete", async () => {
+  const store = recordingStore(
+    [{ ...activeControl, writesPaused: true }],
+    "incomplete",
+  );
+  await assert.rejects(
+    runAuthoringControlCommand(
+      {
+        action: "resume",
+        expectedGeneration: 4,
+        target: "postgres",
+        workspace: "opas",
+      },
+      store,
+    ),
+    /AUTHORING_BACKFILL_INCOMPLETE/u,
+  );
+  assert.deepEqual(store.changes, []);
+});
+
+test("resumes before the table exists or after the workspace ledger is complete", async () => {
+  for (const backfillState of ["not-installed", "complete"] as const) {
+    const store = recordingStore(
+      [{ ...activeControl, writesPaused: true }],
+      backfillState,
+    );
+    const result = await runAuthoringControlCommand(
+      {
+        action: "resume",
+        expectedGeneration: 4,
+        target: "postgres",
+        workspace: "opas",
+      },
+      store,
+    );
+    assert.equal(result.control.writesPaused, false);
+  }
 });
 
 test("parses Wrangler D1 rows without retaining command metadata", () => {
