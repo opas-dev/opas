@@ -64,8 +64,8 @@ services:
       OPAS_HANDOFF_WEBHOOK_URL: ${OPAS_HANDOFF_WEBHOOK_URL:-}
       OPAS_SITE_URL: ${OPAS_SITE_URL:?Set OPAS_SITE_URL in .env}
       OPAS_PREVIEW_SIGNING_SECRET: ${OPAS_PREVIEW_SIGNING_SECRET:?Set OPAS_PREVIEW_SIGNING_SECRET in .env}
-    ports:
-      - "${APP_PORT:-3000}:3000"
+    expose:
+      - "3000"
     depends_on:
       db:
         condition: service_healthy
@@ -76,6 +76,31 @@ services:
           "node",
           "-e",
           "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ingress:
+    build:
+      context: .
+      target: ingress
+    environment:
+      OPAS_UPSTREAM_HOST: app
+      OPAS_UPSTREAM_PORT: 3000
+      PORT: 8080
+    ports:
+      - "${APP_PORT:-3000}:8080"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 5s
       timeout: 3s

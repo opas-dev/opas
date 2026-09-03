@@ -4,6 +4,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { parse } from "yaml";
+
+import { ingressRequestHeaders } from "../scripts/docker-ingress.mjs";
 
 test("Postgres and Neon expose separate migration, seed, and evidence commands", async () => {
   const [manifest, dockerfile, postgres, neon] = await Promise.all([
@@ -61,4 +64,45 @@ test("runtime deployment surfaces exclude bootstrap credentials and include prev
     assert.equal(required.includes("ADMIN_SESSION_SECRET"), true);
     assert.equal(required.includes("OPAS_PREVIEW_SIGNING_SECRET"), true);
   }
+});
+
+test("Docker exposes OPAS only through its client-address rebuilding ingress", async () => {
+  const [composeSource, dockerfile] = await Promise.all([
+    readFile(new URL("../docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+  ]);
+  const compose = parse(composeSource) as {
+    services: Record<string, Record<string, unknown>>;
+  };
+  const app = compose.services.app;
+  const ingress = compose.services.ingress;
+
+  assert.equal(app.ports, undefined);
+  assert.deepEqual(app.expose, ["3000"]);
+  assert.deepEqual(ingress.build, { context: ".", target: "ingress" });
+  assert.deepEqual(ingress.ports, ["${APP_PORT:-3000}:8080"]);
+  assert.match(dockerfile, /FROM node:22\.23\.2-alpine AS ingress/u);
+  assert.match(dockerfile, /CMD \["node", "scripts\/docker-ingress\.mjs"\]/u);
+
+  assert.deepEqual(
+    ingressRequestHeaders(
+      {
+        "cf-connecting-ip": "192.0.2.4",
+        connection: "keep-alive, x-remove-me",
+        forwarded: "for=192.0.2.5",
+        host: "help.example.test",
+        "x-remove-me": "connection-scoped",
+        "x-forwarded-for": "192.0.2.6",
+        "x-opas-client-address": "192.0.2.7",
+        "x-real-ip": "192.0.2.8",
+        "x-vercel-forwarded-for": "192.0.2.9",
+      },
+      "198.51.100.24",
+    ),
+    {
+      host: "help.example.test",
+      "x-opas-client-address": "198.51.100.24",
+    },
+  );
+  assert.throws(() => ingressRequestHeaders({}, undefined));
 });
