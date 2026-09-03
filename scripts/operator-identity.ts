@@ -98,7 +98,8 @@ function requireValue(args: readonly string[], index: number) {
 export function parseOperatorIdentityCommand(
   args: readonly string[],
 ): OperatorIdentityCommand {
-  const [action, ...options] = args;
+  const normalizedArgs = args[0] === "--" ? args.slice(1) : args;
+  const [action, ...options] = normalizedArgs;
   if (action !== "bootstrap" && action !== "invite" && action !== "reset") {
     invalidCommand();
   }

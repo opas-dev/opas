@@ -118,7 +118,8 @@ function requireValue(args: readonly string[], index: number, option: string) {
 export function parseAuthoringControlCommand(
   args: readonly string[],
 ): AuthoringControlCommand {
-  const [action, ...options] = args;
+  const normalizedArgs = args[0] === "--" ? args.slice(1) : args;
+  const [action, ...options] = normalizedArgs;
   if (action !== "inspect" && action !== "pause" && action !== "resume") {
     throw new Error(usage);
   }

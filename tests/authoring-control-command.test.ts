@@ -73,6 +73,20 @@ test("parses explicit target and mutation generation", () => {
   );
 });
 
+test("accepts the pnpm argument separator used by the documented command", () => {
+  assert.equal(
+    parseAuthoringControlCommand([
+      "--",
+      "inspect",
+      "--target",
+      "postgres",
+      "--workspace",
+      "opas",
+    ]).action,
+    "inspect",
+  );
+});
+
 test("requires fresh CAS input and an explicit D1 location", () => {
   assert.throws(
     () =>

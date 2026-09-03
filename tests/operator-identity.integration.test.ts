@@ -809,6 +809,19 @@ function deterministicRandom(start = 0) {
 test("operator command parsing requires an artifact and explicit Cloudflare location", () => {
   assert.equal(
     parseOperatorIdentityCommand([
+      "--",
+      "bootstrap",
+      "--target",
+      "postgres",
+      "--workspace",
+      "demo",
+      "--display-name",
+      "Admin",
+    ]).action,
+    "bootstrap",
+  );
+  assert.equal(
+    parseOperatorIdentityCommand([
       "reset",
       "--target",
       "cloudflare",

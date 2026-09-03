@@ -242,6 +242,8 @@ Resolved: B1 (Vercel) — CLI authenticated locally as `timobejan`, 2026-08-27. 
 ## Log
 Append-only, newest first: `YYYY-MM-DD — item(s) — what happened — verification result — commit`.
 
+- 2026-09-03 — 16.10 operator-command checkpoint — made the documented pnpm separator form work for both the named-identity and authoring-fence commands after the production run exposed that pnpm forwards the separator to these scripts. A red regression reproduced both failures; the two focused command suites then passed 18/18 with focused ESLint and diff checks — this commit
+
 - 2026-09-03 — 16.10 Cloudflare deployment-command checkpoint — made the documented generic and CROFusion deploy/dry-run commands load the mode-0600 local `.env` before validating and isolating runtime secrets, and added a matching CROFusion dry-run entry. This fixes the release preflight finding where the command ignored valid local values and reported an empty session secret; the complete deployment suite passed 110/110, focused ESLint and `git diff --check` passed — this commit
 
 - 2026-09-03 — 16.10 release-metadata checkpoint — synchronized the public MCP server metadata and its protocol contract with the v0.3.0 package version after the exact release-candidate CI correctly rejected the stale v0.2.0 advertisement. The complete MCP suite passed 14/14; focused ESLint, typecheck, and `git diff --check` passed — this commit
