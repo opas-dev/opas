@@ -25,6 +25,10 @@ import { createPostgresArticleDraftRepository } from "@/db/postgres/article-draf
 import { createPostgresCategoryAuthoringRepository } from "@/db/postgres/category-authoring-repository";
 import { createPostgresRepository } from "@/db/postgres/repository";
 import { postgresTeamAuthoringGuardStatements } from "@/db/postgres/team-authoring-backfill";
+import {
+  isRetryableWriteConflict,
+  uniqueWriteConstraint,
+} from "@/db/postgres/write-conflict";
 import type { Repository } from "@/db/repository";
 import * as postgresSchema from "@/db/schema/postgres";
 import * as sqliteSchema from "@/db/schema/sqlite";
@@ -37,6 +41,28 @@ import {
   ImportExecutionConflictError,
 } from "@/import/execute";
 import type { KnowledgeImportPlan } from "@/import/planner";
+
+test("Postgres write conflicts survive nested driver errors", () => {
+  assert.equal(
+    isRetryableWriteConflict({ cause: { cause: { code: "40P01" } } }),
+    true,
+  );
+  assert.equal(
+    isRetryableWriteConflict({ cause: { code: "40001" } }),
+    true,
+  );
+  assert.equal(
+    uniqueWriteConstraint({
+      cause: {
+        code: "23505",
+        constraint: "categories_workspace_slug_unique",
+      },
+    }),
+    "categories_workspace_slug_unique",
+  );
+  assert.equal(isRetryableWriteConflict({ cause: { code: "23505" } }), false);
+  assert.equal(uniqueWriteConstraint({ cause: { code: "22012" } }), null);
+});
 
 const checkedAt = new Date("2026-09-03T14:00:00.000Z");
 const workspaceId = "workspace_import_contract";
@@ -974,14 +1000,30 @@ async function exercise(harness: Harness) {
     }),
   ]);
   assert.equal(saveRace.status, "fulfilled");
-  assert.equal(saveRace.status === "fulfilled" ? saveRace.value.status : "", "saved");
-  assert.equal(saveImportRace.status, "rejected");
-  assert.ok(
-    saveImportRace.status === "rejected" &&
-      saveImportRace.reason instanceof ImportExecutionConflictError,
-  );
+  const saveWon = saveRace.status === "fulfilled" && saveRace.value.status === "saved";
+  const saveImportWon = saveImportRace.status === "fulfilled";
+  assert.equal(Number(saveWon) + Number(saveImportWon), 1);
+  if (!saveWon && saveRace.status === "fulfilled") {
+    assert.equal(saveRace.value.status, "conflict");
+  }
+  if (!saveImportWon) {
+    assert.ok(saveImportRace.reason instanceof ImportExecutionConflictError);
+  }
   const afterSaveRace = await harness.inventory();
-  assert.equal(afterSaveRace.categories.length, beforeSaveRace.categories.length);
+  assert.equal(
+    afterSaveRace.categories.length,
+    beforeSaveRace.categories.length + Number(saveImportWon),
+  );
+  assert.equal(
+    afterSaveRace.articles.filter(({ slug }) => slug === "save-race-target").length,
+    1,
+  );
+  assert.equal(
+    afterSaveRace.slugClaims.filter(
+      ({ normalized_slug }) => normalized_slug === "save-race-target",
+    ).length,
+    1,
+  );
   assert.equal(afterSaveRace.manifests, beforeSaveRace.manifests);
   assert.equal(afterSaveRace.manifestItems, beforeSaveRace.manifestItems);
   assert.deepEqual(afterSaveRace.assets, beforeSaveRace.assets);
@@ -1013,20 +1055,34 @@ async function exercise(harness: Harness) {
     }),
   ]);
   assert.equal(restoreRace.status, "fulfilled");
-  assert.equal(
-    restoreRace.status === "fulfilled" ? restoreRace.value.status : "",
-    "transitioned",
-  );
-  assert.equal(restoreImportRace.status, "rejected");
-  assert.ok(
-    restoreImportRace.status === "rejected" &&
+  const restoreWon =
+    restoreRace.status === "fulfilled" && restoreRace.value.status === "transitioned";
+  const restoreImportWon = restoreImportRace.status === "fulfilled";
+  assert.equal(Number(restoreWon) + Number(restoreImportWon), 1);
+  if (!restoreWon && restoreRace.status === "fulfilled") {
+    assert.equal(restoreRace.value.status, "conflict");
+  }
+  if (!restoreImportWon) {
+    assert.ok(
       restoreImportRace.reason instanceof ImportExecutionConflictError,
-    restoreImportRace.status === "rejected"
-      ? `${restoreImportRace.reason?.constructor?.name}: ${String(restoreImportRace.reason)}`
-      : "import unexpectedly activated",
-  );
+      `${restoreImportRace.reason?.constructor?.name}: ${String(restoreImportRace.reason)}`,
+    );
+  }
   const afterRestoreRace = await harness.inventory();
-  assert.equal(afterRestoreRace.categories.length, beforeRestoreRace.categories.length);
+  assert.equal(
+    afterRestoreRace.categories.length,
+    beforeRestoreRace.categories.length + Number(restoreImportWon),
+  );
+  assert.equal(
+    afterRestoreRace.articles.filter(({ slug }) => slug === "published-source").length,
+    1,
+  );
+  assert.equal(
+    afterRestoreRace.slugClaims.filter(
+      ({ normalized_slug }) => normalized_slug === "published-source",
+    ).length,
+    1,
+  );
   assert.equal(afterRestoreRace.manifests, beforeRestoreRace.manifests);
   assert.equal(afterRestoreRace.manifestItems, beforeRestoreRace.manifestItems);
   assert.deepEqual(afterRestoreRace.assets, beforeRestoreRace.assets);

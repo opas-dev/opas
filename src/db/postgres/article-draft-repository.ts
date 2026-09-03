@@ -83,6 +83,10 @@ import {
   articleEvidenceCommitStatements,
   articleEvidenceInvalidationStatements,
 } from "@/db/postgres/evidence-repository";
+import {
+  isRetryableWriteConflict,
+  uniqueWriteConstraint,
+} from "@/db/postgres/write-conflict";
 import type * as schema from "@/db/schema/postgres";
 
 type PostgresDatabase =
@@ -1297,6 +1301,16 @@ async function classifyCreateFailure(
   ) {
     return { status: "rejected", code: "ASSET_UNAVAILABLE" };
   }
+  const constraint = uniqueWriteConstraint(error);
+  if (constraint) {
+    return {
+      status: "conflict",
+      code: constraint.includes("articles_pkey") ? "ARTICLE_EXISTS" : "SLUG_CONFLICT",
+    };
+  }
+  if (isRetryableWriteConflict(error)) {
+    return { status: "conflict", code: "SLUG_CONFLICT" };
+  }
   throw error;
 }
 
@@ -1361,6 +1375,16 @@ async function classifySaveFailure(
     ))
   ) {
     return { status: "rejected", code: "ASSET_UNAVAILABLE" };
+  }
+  if (uniqueWriteConstraint(error)) {
+    return { status: "conflict", code: "SLUG_CONFLICT" };
+  }
+  if (isRetryableWriteConflict(error)) {
+    return {
+      status: "conflict",
+      code: "STALE_REVISION",
+      currentRevisionNumber: state.revisionNumber,
+    };
   }
   throw error;
 }
@@ -1855,6 +1879,22 @@ async function classifyWorkflowFailure(
   ) {
     return { status: "rejected", code: "ASSET_UNAVAILABLE" };
   }
+  if (uniqueWriteConstraint(error)) {
+    return {
+      status: "conflict",
+      code: "SLUG_CONFLICT",
+      currentRevisionNumber: state.revisionNumber,
+      currentReviewState: state.reviewState,
+    };
+  }
+  if (isRetryableWriteConflict(error)) {
+    return {
+      status: "conflict",
+      code: "STALE_REVISION",
+      currentRevisionNumber: state.revisionNumber,
+      currentReviewState: state.reviewState,
+    };
+  }
   throw error;
 }
 
@@ -1883,6 +1923,14 @@ async function classifyArchiveFailure(
   if (!state) return { status: "rejected", code: "ARTICLE_NOT_FOUND" };
   const conflict = archiveStateConflict(state, request, restoring);
   if (conflict) return conflict;
+  if (isRetryableWriteConflict(error)) {
+    return {
+      status: "conflict",
+      code: "STALE_REVISION",
+      currentRevisionNumber: state.revisionNumber,
+      currentReviewState: state.reviewState,
+    };
+  }
   throw error;
 }
 
@@ -1972,6 +2020,14 @@ async function classifyRestoreRevisionFailure(
     )) !== selected.revisionHash
   ) {
     return { status: "rejected", code: "REVISION_INTEGRITY_FAILED" };
+  }
+  if (uniqueWriteConstraint(error) || isRetryableWriteConflict(error)) {
+    return {
+      status: "conflict",
+      code: "SLUG_CONFLICT",
+      currentRevisionNumber: state.revisionNumber,
+      currentReviewState: state.reviewState,
+    };
   }
   throw error;
 }

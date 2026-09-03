@@ -32,6 +32,10 @@ import {
   categories,
   workspaceMembers,
 } from "@/db/schema/postgres";
+import {
+  isRetryableWriteConflict,
+  uniqueWriteConstraint,
+} from "@/db/postgres/write-conflict";
 import type * as schema from "@/db/schema/postgres";
 
 type PostgresDatabase =
@@ -414,6 +418,13 @@ async function classifyFailure(
   if (await categoryHasConflict(database, knowledgeImport)) return "CATEGORY_CONFLICT";
   if (await articleHasConflict(database, knowledgeImport)) return "ARTICLE_CONFLICT";
   if (!(await assetsAreAvailable(database, knowledgeImport, checkedAt))) return "ASSET_UNAVAILABLE";
+  if (isRetryableWriteConflict(error)) return "ARTICLE_CONFLICT";
+  const constraint = uniqueWriteConstraint(error);
+  if (constraint) {
+    return constraint.includes("categor")
+      ? "CATEGORY_CONFLICT"
+      : "ARTICLE_CONFLICT";
+  }
   throw error;
 }
 
