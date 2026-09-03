@@ -22,6 +22,17 @@ const forbiddenArtifactText = [
   "ADMIN_SESSION_SECRET",
   "OPAS_PREVIEW_SIGNING_SECRET",
   "The artifact can authenticate administrators",
+  "createPostgresArticleDraftRepository",
+  "createPostgresKnowledgeImportRepository",
+  "createPostgresQualityAuthoringRepository",
+  "createSqliteArticleDraftRepository",
+  "createSqliteKnowledgeImportRepository",
+  "createSqliteQualityAuthoringRepository",
+] as const;
+
+const authoringRepositoryLines = [
+  /^import \{ create(?:Postgres|Sqlite)(?:ArticleDraft|KnowledgeImport|QualityAuthoring)Repository \} from "@\/db\/(?:postgres|sqlite)\/(?:article-draft|knowledge-import|quality-authoring)-repository";\n/gmu,
+  /^\s*\.\.\.create(?:Postgres|Sqlite)(?:ArticleDraft|KnowledgeImport|QualityAuthoring)Repository\([^\n]+\),\n/gmu,
 ] as const;
 
 function isWithin(parent: string, child: string) {
@@ -43,6 +54,18 @@ function projectPath(project: string, path: string) {
   return target;
 }
 
+function removeAuthoringRepositoryComposition(path: string) {
+  if (!existsSync(path)) return;
+  let source = readFileSync(path, "utf8");
+  for (const pattern of authoringRepositoryLines) source = source.replace(pattern, "");
+  const repositoryEnd = "\n  });\n}";
+  const trimmed = source.trimEnd();
+  if (trimmed.endsWith(repositoryEnd)) {
+    source = `${trimmed.slice(0, -repositoryEnd.length)}\n  } as Repository);\n}\n`;
+  }
+  writeFileSync(path, source);
+}
+
 export function prepareMaintenanceProject(projectPathname: string) {
   const project = requireProjectDirectory(projectPathname);
   const template = projectPath(project, "src/maintenance/proxy.ts");
@@ -54,12 +77,17 @@ export function prepareMaintenanceProject(projectPathname: string) {
     "src/app/admin",
     "src/app/api/internal",
     "src/app/preview",
-    "src/auth",
   ]) {
     rmSync(projectPath(project, path), { force: true, recursive: true });
   }
   copyFileSync(template, projectPath(project, "src/proxy.ts"));
   rmSync(projectPath(project, "src/maintenance"), { force: true, recursive: true });
+  for (const path of [
+    "src/db/postgres/repository.ts",
+    "src/db/sqlite/repository.ts",
+  ]) {
+    removeAuthoringRepositoryComposition(projectPath(project, path));
+  }
 
   const vercelPath = projectPath(project, "vercel.json");
   if (existsSync(vercelPath)) {
@@ -168,7 +196,7 @@ export function assertMaintenanceArtifactBoundary(
     for (const forbidden of forbiddenArtifactText) {
       if (text.includes(forbidden)) {
         throw new Error(
-          `The maintenance artifact contains a forbidden administrator reference in ${basename(path)}.`,
+          `The maintenance artifact contains a forbidden private reference in ${basename(path)}.`,
         );
       }
     }

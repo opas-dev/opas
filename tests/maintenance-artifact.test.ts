@@ -40,6 +40,15 @@ test("maintenance proxy blocks every admin path and non-read request", async () 
     new NextRequest("https://help.invalid/admin/login", {
       headers: { cookie: "opas_admin_session=historical" },
     }),
+    new NextRequest("https://help.invalid/admin/content", {
+      headers: { cookie: "opas_admin_session=stale-signed-session" },
+    }),
+    new NextRequest("https://help.invalid/admin", {
+      headers: {
+        authorization: "Bearer historical-credential",
+        cookie: "opas_admin_session=forged-session; opas_preview=historical-preview",
+      },
+    }),
     new NextRequest("https://help.invalid/api/internal/embeddings", { method: "GET" }),
     new NextRequest("https://help.invalid/api/articles/article/feedback", {
       method: "POST",
@@ -56,7 +65,7 @@ test("maintenance proxy blocks every admin path and non-read request", async () 
   assert.equal(publicResponse.headers.get("x-middleware-next"), "1");
 });
 
-test("project preparation removes private routes, auth readers, and schedules", () => {
+test("project preparation removes private routes and schedules", () => {
   const root = mkdtempSync(join(tmpdir(), "opas-maintenance-test-"));
   try {
     for (const directory of [
@@ -64,6 +73,8 @@ test("project preparation removes private routes, auth readers, and schedules", 
       "src/app/api/internal/embeddings",
       "src/auth",
       "src/maintenance",
+      "src/db/postgres",
+      "src/db/sqlite",
     ]) {
       mkdirSync(join(root, directory), { recursive: true });
     }
@@ -72,6 +83,18 @@ test("project preparation removes private routes, auth readers, and schedules", 
     writeFileSync(join(root, "src/auth/config.ts"), "ADMIN_SESSION_SECRET");
     writeFileSync(join(root, "src/proxy.ts"), "authenticated proxy");
     writeFileSync(join(root, "src/maintenance/proxy.ts"), "public maintenance proxy");
+    for (const dialect of ["postgres", "sqlite"]) {
+      const prefix = dialect === "postgres" ? "Postgres" : "Sqlite";
+      writeFileSync(
+        join(root, `src/db/${dialect}/repository.ts`),
+        `import { create${prefix}ArticleDraftRepository } from "@/db/${dialect}/article-draft-repository";\n` +
+          `const repository = {\n  ...create${prefix}ArticleDraftRepository(database),\n  publicRead() {},\n};\n`,
+      );
+      writeFileSync(
+        join(root, `src/db/${dialect}/article-draft-repository.ts`),
+        `export const create${prefix}ArticleDraftRepository = () => ({ publishArticle() {} });\n`,
+      );
+    }
     writeFileSync(
       join(root, "tsconfig.json"),
       JSON.stringify({ compilerOptions: { strict: true }, include: ["**/*.ts"] }),
@@ -84,9 +107,20 @@ test("project preparation removes private routes, auth readers, and schedules", 
     prepareMaintenanceProject(root);
     assert.equal(readFileSync(join(root, "src/proxy.ts"), "utf8"), "public maintenance proxy");
     assert.equal(readFileSync(join(root, "vercel.json"), "utf8").includes("crons"), false);
-    assert.throws(() => readFileSync(join(root, "src/auth/config.ts")));
+    assert.equal(
+      readFileSync(join(root, "src/auth/config.ts"), "utf8"),
+      "ADMIN_SESSION_SECRET",
+    );
     assert.throws(() => readFileSync(join(root, "src/app/admin/login/page.tsx")));
     assert.throws(() => readFileSync(join(root, "src/app/api/internal/embeddings/route.ts")));
+    assert.doesNotMatch(
+      readFileSync(join(root, "src/db/postgres/repository.ts"), "utf8"),
+      /createPostgresArticleDraftRepository/u,
+    );
+    assert.doesNotMatch(
+      readFileSync(join(root, "src/db/sqlite/repository.ts"), "utf8"),
+      /createSqliteArticleDraftRepository/u,
+    );
     assert.deepEqual(
       (JSON.parse(readFileSync(join(root, "tsconfig.json"), "utf8")) as {
         include: string[];
@@ -147,7 +181,15 @@ test("artifact inspection rejects administrator environment readers", () => {
     writeFileSync(join(root, "worker.js"), "process.env.ADMIN_EMAIL");
     assert.throws(
       () => assertMaintenanceArtifactBoundary(root),
-      /forbidden administrator reference/u,
+      /forbidden private reference/u,
+    );
+    writeFileSync(
+      join(root, "worker.js"),
+      "createPostgresArticleDraftRepository(database)",
+    );
+    assert.throws(
+      () => assertMaintenanceArtifactBoundary(root),
+      /forbidden private reference/u,
     );
   } finally {
     rmSync(root, { force: true, recursive: true });
@@ -206,7 +248,10 @@ test("Vercel maintenance inputs prune admin code and require only Neon reads", (
         "crons" in JSON.parse(readFileSync(join(prepared.directory, "vercel.json"), "utf8")),
         false,
       );
-      assert.throws(() => readFileSync(join(prepared.directory, "src/auth/config.ts")));
+      assert.equal(
+        readFileSync(join(prepared.directory, "src/auth/config.ts"), "utf8"),
+        "administrator reader\n",
+      );
       assert.throws(() =>
         readFileSync(join(prepared.directory, "src/app/admin/login/page.tsx")),
       );
