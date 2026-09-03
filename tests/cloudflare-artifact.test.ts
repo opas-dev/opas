@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -32,13 +33,16 @@ import {
   parseCloudflareSecretList,
   prepareCloudflareBuild,
   prepareCloudflareProject,
+  runBuiltCloudflareCommand,
   sanitizedCloudflareEnvironment,
   validateCloudflareDeploymentCacheContract,
   validateCloudflareRemoteSecretNames,
   validateCloudflareRemoteSecretState,
   validateCloudflareSecretSource,
 } from "../scripts/cloudflare-artifact";
+import { readCloudflareTarget } from "../scripts/bootstrap-cloudflare";
 import { runCloudflareProcess } from "../scripts/cloudflare-process";
+import { maintenanceCloudflareConfig } from "../scripts/maintenance-artifact";
 import { pnpmStoreDirectory } from "../scripts/pnpm-store";
 
 function fixture() {
@@ -682,6 +686,99 @@ test("uploads the scanned Worker entry without rebuilding it", () => {
     ],
   );
 });
+
+test(
+  "preserves a non-default maintenance config and rechecks its source before upload",
+  { skip: process.platform === "win32" },
+  async () => {
+    const workspace = fixture();
+    const project = mkdtempSync(join(tmpdir(), "opas-maintenance-upload-test-"));
+    const commandDirectory = mkdtempSync(join(tmpdir(), "opas-maintenance-command-test-"));
+    const configName = "wrangler.acceptance.jsonc";
+    const sourceConfigPath = join(workspace, configName);
+    const preparedConfigPath = join(project, configName);
+    const commandLogPath = join(project, "pnpm-calls.log");
+    const source = readFileSync(resolve("wrangler.jsonc"), "utf8");
+    writeFileSync(sourceConfigPath, source);
+    const expectedTarget = readCloudflareTarget(configName, workspace);
+    const maintenanceConfig = maintenanceCloudflareConfig(expectedTarget.config);
+    const preparedSource = `// ABOUTME: Defines a test maintenance Worker.\n// ABOUTME: Omits private runtime bindings.\n${JSON.stringify(maintenanceConfig, null, 2)}\n`;
+    writeFileSync(preparedConfigPath, preparedSource);
+    mkdirSync(join(project, ".open-next", "assets"), { recursive: true });
+    mkdirSync(join(project, ".open-next", "cloudflare"), { recursive: true });
+    writeFileSync(
+      join(project, ".open-next", "cloudflare", "next-env.mjs"),
+      "export const production = {};\nexport const development = {};\nexport const test = {};\n",
+    );
+    writeFileSync(join(project, ".open-next", "worker.js"), "export default {};\n");
+    const fakePnpmPath = join(commandDirectory, "pnpm");
+    writeFileSync(
+      fakePnpmPath,
+      `#!${process.execPath}\n` +
+        `${String.raw`const { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const args = process.argv.slice(2);
+appendFileSync(join(process.cwd(), "pnpm-calls.log"), JSON.stringify(args) + "\n");
+if (args.includes("--dry-run")) {
+  const outputIndex = args.indexOf("--outdir");
+  const output = args[outputIndex + 1];
+  mkdirSync(output, { recursive: true });
+  writeFileSync(join(output, "custom-worker.js"), "export default {};\n");
+  if (existsSync(join(process.cwd(), "mutate-source"))) {
+    const path = ${JSON.stringify(sourceConfigPath)};
+    writeFileSync(path, readFileSync(path, "utf8").replace('"enabled": true', '"enabled": false'));
+  }
+} else if (args[2] === "secret" && args[3] === "list") {
+  process.stdout.write(${JSON.stringify(JSON.stringify(expectedTarget.secretNames.map((name) => ({ name, type: "secret_text" }))))});
+} else if (args[2] === "deployments" && args[3] === "list") {
+  process.stdout.write("[]");
+} else if (!(args[2] === "versions" && args[3] === "upload")) {
+  process.exitCode = 1;
+}`}`,
+    );
+    chmodSync(fakePnpmPath, 0o755);
+    const build = { directory: project, dispose() {} };
+    const options = {
+      environment: { HOME: workspace, PATH: commandDirectory },
+      expectedTarget,
+      maintenance: true,
+      workspace,
+    };
+
+    try {
+      await runBuiltCloudflareCommand(
+        "upload",
+        ["--config", configName],
+        build,
+        options,
+      );
+      assert.equal(readFileSync(preparedConfigPath, "utf8"), preparedSource);
+      writeFileSync(join(project, "mutate-source"), "mutate during dry run\n");
+      await assert.rejects(
+        runBuiltCloudflareCommand(
+          "upload",
+          ["--config", configName],
+          build,
+          options,
+        ),
+        /Cloudflare config no longer matches the validated target/u,
+      );
+      const calls = readFileSync(commandLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      assert.equal(
+        calls.filter((args) => args[2] === "versions" && args[3] === "upload")
+          .length,
+        1,
+      );
+    } finally {
+      rmSync(commandDirectory, { force: true, recursive: true });
+      rmSync(project, { force: true, recursive: true });
+      rmSync(workspace, { force: true, recursive: true });
+    }
+  },
+);
 
 test("audits the remote secret names through the isolated config", () => {
   assert.deepEqual(

@@ -1266,6 +1266,14 @@ async function runScannedCloudflareDeployment(
       secrets,
     );
     const validateGuardedInputs = async () => {
+      if (maintenance) {
+        await validatePreparedCloudflareConfig(
+          workspace,
+          workspace,
+          configPath,
+          expectedTarget,
+        );
+      }
       await validatePreparedCloudflareConfig(
         workspace,
         project,
@@ -1575,7 +1583,16 @@ export async function runBuiltCloudflareCommand(
   const commandArguments = snapshot.command;
   const secrets = snapshot.secrets;
 
-  synchronizeCommandPaths(workspace, project, commandArguments);
+  if (options.maintenance) {
+    await validatePreparedCloudflareConfig(
+      workspace,
+      workspace,
+      parsedArguments.configPath,
+      options.expectedTarget,
+    );
+  } else {
+    synchronizeCommandPaths(workspace, project, commandArguments);
+  }
   const preparedTarget = await validatePreparedCloudflareConfig(
     workspace,
     project,
