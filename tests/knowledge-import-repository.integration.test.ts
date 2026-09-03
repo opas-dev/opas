@@ -72,6 +72,12 @@ const actor: MemberActor = {
   workspaceId,
 };
 const backupAdministratorId = "member_import_backup";
+const backupAdministratorSessionId = "B".repeat(43);
+const backupAdministratorActor: MemberActor = {
+  memberId: backupAdministratorId,
+  sessionId: backupAdministratorSessionId,
+  workspaceId,
+};
 const png = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01,
 ]);
@@ -314,13 +320,15 @@ async function createPostgresHarness(): Promise<Harness> {
   );
   await pool.query(
     `insert into admin_sessions (id, workspace_id, member_id, created_at, expires_at)
-     values ($1, $2, $3, $4, $5)`,
+     values ($1, $2, $3, $4, $5), ($6, $2, $7, $4, $5)`,
     [
       actor.sessionId,
       workspaceId,
       actor.memberId,
       checkedAt,
       new Date(checkedAt.getTime() + 7 * 60 * 60 * 1000),
+      backupAdministratorSessionId,
+      backupAdministratorId,
     ],
   );
 
@@ -473,12 +481,17 @@ async function createSqliteHarness(): Promise<Harness> {
   client
     .prepare(
       `insert into admin_sessions (id, workspace_id, member_id, created_at, expires_at)
-       values (?, ?, ?, ?, ?)`,
+       values (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`,
     )
     .run(
       actor.sessionId,
       workspaceId,
       actor.memberId,
+      checkedAt.getTime(),
+      checkedAt.getTime() + 7 * 60 * 60 * 1000,
+      backupAdministratorSessionId,
+      workspaceId,
+      backupAdministratorId,
       checkedAt.getTime(),
       checkedAt.getTime() + 7 * 60 * 60 * 1000,
     );
@@ -648,10 +661,124 @@ async function publicSurface(repository: Repository) {
   };
 }
 
+async function assertImportCollisionForExistingHeadStates(
+  harness: Harness,
+  createId: () => string,
+) {
+  async function createArticle(id: string, slug: string) {
+    const saved = await harness.repository.createDraftArticle({
+      actor,
+      article: {
+        id,
+        workspaceId,
+        categoryId: publicCategoryId,
+        slug,
+        title: `Collision ${slug}`,
+        mdx: `# Collision ${slug}\n\nPrivate collision control.`,
+        isFaq: false,
+        authorName: "Import contract",
+        position: 0,
+      },
+      assets: { hashes: [] },
+      changeKind: "manual",
+      changeSummary: `Create ${slug} collision control`,
+    });
+    assert.equal(saved.status, "saved");
+    if (saved.status !== "saved") throw new Error(`${slug} was not created.`);
+    return saved;
+  }
+
+  async function assertCollision(slug: string, expectedState: string) {
+    const before = await harness.inventory();
+    await assert.rejects(
+      executeKnowledgeImport({
+        repository: harness.repository,
+        actor,
+        plan: plan(`import-${slug}`, slug, "draft"),
+        clock: () => checkedAt,
+        createId,
+      }),
+      (error: unknown) =>
+        error instanceof ImportExecutionConflictError &&
+        error.code === "ARTICLE_CONFLICT",
+      `${harness.name} accepted an import over an ${expectedState} head`,
+    );
+    assert.deepEqual(
+      await harness.inventory(),
+      before,
+      `${harness.name} changed state after the ${expectedState} collision`,
+    );
+  }
+
+  const inReviewId = `article_${harness.name.toLowerCase()}_in_review_collision`;
+  const inReview = await createArticle(inReviewId, "in-review-collision");
+  const submitted = await harness.repository.submitArticleForReview({
+    actor,
+    articleId: inReviewId,
+    expectedReviewState: "editing",
+    expectedWorkingRevisionNumber: inReview.revisionNumber,
+    revisionId: inReview.revisionId,
+    workspaceId,
+  });
+  assert.equal(submitted.status, "transitioned");
+  if (submitted.status === "transitioned") {
+    assert.equal(submitted.reviewState, "in_review");
+  }
+  await assertCollision("in-review-collision", "in_review");
+
+  const approvedId = `article_${harness.name.toLowerCase()}_approved_collision`;
+  const approved = await createArticle(approvedId, "approved-collision");
+  const submittedForApproval = await harness.repository.submitArticleForReview({
+    actor,
+    articleId: approvedId,
+    expectedReviewState: "editing",
+    expectedWorkingRevisionNumber: approved.revisionNumber,
+    revisionId: approved.revisionId,
+    workspaceId,
+  });
+  assert.equal(submittedForApproval.status, "transitioned");
+  const approval = await harness.repository.approveArticleRevision({
+    actor: backupAdministratorActor,
+    articleId: approvedId,
+    expectedReviewState: "in_review",
+    expectedWorkingRevisionNumber: approved.revisionNumber,
+    revisionId: approved.revisionId,
+    workspaceId,
+  });
+  assert.equal(approval.status, "transitioned");
+  if (approval.status === "transitioned") {
+    assert.equal(approval.reviewState, "approved");
+  }
+  await assertCollision("approved-collision", "approved");
+
+  const archived = await harness.repository.archiveArticle({
+    actor,
+    articleId: approvedId,
+    expectedPublicStatus: "draft",
+    expectedReviewState: "approved",
+    expectedWorkingRevisionNumber: approved.revisionNumber,
+    revisionId: approved.revisionId,
+    workspaceId,
+  });
+  assert.equal(archived.status, "transitioned");
+  if (archived.status === "transitioned") {
+    assert.equal(archived.action, "archived");
+    assert.equal(archived.reviewState, "approved");
+  }
+  assert.notEqual(
+    (await harness.inventory()).heads.find(
+      ({ article_id }) => article_id === approvedId,
+    )?.archived_at,
+    null,
+  );
+  await assertCollision("approved-collision", "archived");
+}
+
 async function exercise(harness: Harness) {
   let identity = 0;
   const createId = () => `${harness.name.toLocaleLowerCase("en-US")}-${++identity}`;
   await createPublishedBaseline(harness);
+  await assertImportCollisionForExistingHeadStates(harness, createId);
   const publicBaseline = await publicSurface(harness.repository);
   const storageBaseline = await harness.inventory();
   const importedPlan = plan("guides", "published-source", "published");

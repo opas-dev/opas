@@ -68,6 +68,8 @@ type Harness = Readonly<{
   deleteMember(memberId: string): Promise<void>;
   deleteWorkspace(workspaceId: string): Promise<void>;
   invitationState(id: string): Promise<Readonly<{ accepted: boolean; revoked: boolean }> | null>;
+  isAuthoringPaused(workspaceId: string): Promise<boolean>;
+  pauseAuthoring(workspaceId: string, paused: boolean): Promise<void>;
   previewState(id: string): Promise<PreviewState | null>;
   repository: MemberRepository;
   sessionCount(workspaceId: string): Promise<number>;
@@ -275,6 +277,8 @@ async function exerciseMemberRepository(name: string, harness: Harness) {
   const secondInviteId = `invite_two_${name}`;
   const invitedEmail = `invited-${name}@example.com`;
   const adminActor = actor(workspaceId, adminId, adminSessionId);
+  await harness.pauseAuthoring(workspaceId, true);
+  assert.equal(await harness.isAuthoringPaused(workspaceId), true);
   assert.equal(
     await harness.repository.changeMemberRole({
       actor: adminActor,
@@ -676,6 +680,8 @@ async function exerciseMemberRepository(name: string, harness: Harness) {
     sessionId: editorSession,
     workspaceId,
   });
+  await harness.pauseAuthoring(workspaceId, false);
+  assert.equal(await harness.isAuthoringPaused(workspaceId), false);
   const firstGrantId = grantId("I");
   await harness.createPreview(workspaceId, editorId, firstGrantId);
   const disabledAt = new Date(startedAt.getTime() + 5 * hour + 1_000);
@@ -966,6 +972,23 @@ function sqliteHarness(useD1: boolean): Harness {
         ? { accepted: result.acceptedAt !== null, revoked: result.revokedAt !== null }
         : null;
     },
+    async isAuthoringPaused(workspaceId) {
+      const result = client
+        .prepare(
+          "select writes_paused as writesPaused from workspace_authoring_controls where workspace_id = ?",
+        )
+        .get(workspaceId) as { writesPaused: number } | undefined;
+      return result?.writesPaused === 1;
+    },
+    async pauseAuthoring(workspaceId, paused) {
+      client
+        .prepare(
+          `update workspace_authoring_controls
+           set writes_paused = ?, generation = generation + 1
+           where workspace_id = ?`,
+        )
+        .run(paused ? 1 : 0, workspaceId);
+    },
     async previewState(id) {
       const result = client
         .prepare(
@@ -1112,6 +1135,21 @@ async function postgresHarness(): Promise<Harness> {
       return row
         ? { accepted: row.acceptedAt !== null, revoked: row.revokedAt !== null }
         : null;
+    },
+    async isAuthoringPaused(workspaceId) {
+      const result = await pool.query<{ writesPaused: boolean }>(
+        'select writes_paused as "writesPaused" from workspace_authoring_controls where workspace_id = $1',
+        [workspaceId],
+      );
+      return result.rows[0]?.writesPaused === true;
+    },
+    async pauseAuthoring(workspaceId, paused) {
+      await pool.query(
+        `update workspace_authoring_controls
+         set writes_paused = $1, generation = generation + 1
+         where workspace_id = $2`,
+        [paused, workspaceId],
+      );
     },
     async previewState(id) {
       const result = await pool.query<{
