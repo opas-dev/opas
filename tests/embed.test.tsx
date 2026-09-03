@@ -127,7 +127,9 @@ test("gives the dedicated embed route one runtime frame-parent policy", async ()
       contentSecurityPolicy,
     );
     assert.equal(composedEmbedPolicies.length, 1);
-    assert.deepEqual(proxyConfig, { matcher: ["/admin/:path*", "/embed"] });
+    assert.deepEqual(proxyConfig, {
+      matcher: ["/admin/:path*", "/embed", "/preview/:path*"],
+    });
     assert.equal(
       embedCsp,
       createEmbedContentSecurityPolicy([parentOrigin, secondParentOrigin]),
