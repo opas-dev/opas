@@ -766,6 +766,11 @@ test(
   async () => {
     const container = await new PostgreSqlContainer("postgres:18.6-alpine").start();
     const pool = new Pool({ connectionString: container.getConnectionUri(), max: 20 });
+    const unexpectedPoolErrors: Error[] = [];
+    let closing = false;
+    pool.on("error", (error) => {
+      if (!closing) unexpectedPoolErrors.push(error);
+    });
     const database = createPostgresDatabase(pool, { schema: postgresSchema });
     try {
       await migratePostgres(database, {
@@ -809,8 +814,11 @@ test(
         rawPublicWriteCount: () => count("public_write_reservations"),
       });
     } finally {
+      const unexpectedPoolError = unexpectedPoolErrors[0];
+      closing = true;
       await pool.end();
       await container.stop();
+      if (unexpectedPoolError) throw unexpectedPoolError;
     }
   },
 );
