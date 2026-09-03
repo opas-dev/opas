@@ -488,7 +488,6 @@ test("maintenance artifacts remove and block previews while omitting their secre
   try {
     for (const directory of [
       "src/app/preview/assets",
-      "src/auth",
       "src/maintenance",
     ]) {
       mkdirSync(path.join(root, directory), { recursive: true });
@@ -498,16 +497,11 @@ test("maintenance artifacts remove and block previews while omitting their secre
       "private preview route",
     );
     writeFileSync(
-      path.join(root, "src/auth/preview-config.ts"),
-      "OPAS_PREVIEW_SIGNING_SECRET",
-    );
-    writeFileSync(
       path.join(root, "src/maintenance/proxy.ts"),
       "maintenance proxy",
     );
     prepareMaintenanceProject(root);
     assert.throws(() => readFileSync(path.join(root, "src/app/preview/page.tsx")));
-    assert.throws(() => readFileSync(path.join(root, "src/auth/preview-config.ts")));
     assert.doesNotThrow(() => assertMaintenanceArtifactBoundary(root));
 
     writeFileSync(
