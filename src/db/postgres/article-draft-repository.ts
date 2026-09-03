@@ -164,6 +164,23 @@ type ContentReadAuthorization = Readonly<{
   checkedAt: Date;
 }>;
 
+const articleIdentityConstraints = new Set([
+  "articles_pkey",
+  "articles_id_workspace_unique",
+]);
+const articleSlugConstraints = new Set([
+  "articles_workspace_slug_unique",
+  "article_slug_claims_workspace_id_normalized_slug_pk",
+  "article_slug_claims_workspace_slug_article_unique",
+]);
+
+function uniqueArticleWriteConflict(error: unknown) {
+  const constraint = uniqueWriteConstraint(error);
+  if (constraint && articleIdentityConstraints.has(constraint)) return "ARTICLE_EXISTS";
+  if (constraint && articleSlugConstraints.has(constraint)) return "SLUG_CONFLICT";
+  return null;
+}
+
 function isEditableState(state: CurrentDraft["reviewState"]) {
   return state !== "in_review";
 }
@@ -1301,12 +1318,9 @@ async function classifyCreateFailure(
   ) {
     return { status: "rejected", code: "ASSET_UNAVAILABLE" };
   }
-  const constraint = uniqueWriteConstraint(error);
-  if (constraint) {
-    return {
-      status: "conflict",
-      code: constraint.includes("articles_pkey") ? "ARTICLE_EXISTS" : "SLUG_CONFLICT",
-    };
+  const uniqueConflict = uniqueArticleWriteConflict(error);
+  if (uniqueConflict) {
+    return { status: "conflict", code: uniqueConflict };
   }
   if (isRetryableWriteConflict(error)) {
     return { status: "conflict", code: "SLUG_CONFLICT" };
@@ -1376,7 +1390,7 @@ async function classifySaveFailure(
   ) {
     return { status: "rejected", code: "ASSET_UNAVAILABLE" };
   }
-  if (uniqueWriteConstraint(error)) {
+  if (uniqueArticleWriteConflict(error) === "SLUG_CONFLICT") {
     return { status: "conflict", code: "SLUG_CONFLICT" };
   }
   if (isRetryableWriteConflict(error)) {
@@ -1879,7 +1893,7 @@ async function classifyWorkflowFailure(
   ) {
     return { status: "rejected", code: "ASSET_UNAVAILABLE" };
   }
-  if (uniqueWriteConstraint(error)) {
+  if (uniqueArticleWriteConflict(error) === "SLUG_CONFLICT") {
     return {
       status: "conflict",
       code: "SLUG_CONFLICT",
@@ -2021,7 +2035,10 @@ async function classifyRestoreRevisionFailure(
   ) {
     return { status: "rejected", code: "REVISION_INTEGRITY_FAILED" };
   }
-  if (uniqueWriteConstraint(error) || isRetryableWriteConflict(error)) {
+  if (
+    uniqueArticleWriteConflict(error) === "SLUG_CONFLICT" ||
+    isRetryableWriteConflict(error)
+  ) {
     return {
       status: "conflict",
       code: "SLUG_CONFLICT",

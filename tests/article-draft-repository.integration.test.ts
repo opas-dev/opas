@@ -578,9 +578,14 @@ async function exerciseWorkflow(harness: Harness) {
   await harness.renameCategoryThroughRepository("Guides");
   head = await workingHead(harness);
   if (head.reviewState === "changes_requested") {
+    const title = `${head.article.title} after category review`;
     const recapturedCategory = await harness.repository.saveDraftArticle(
       saveRequest(
-        { ...head.article, title: `${head.article.title} after category review` },
+        {
+          ...head.article,
+          title,
+          mdx: `# ${title}\n\nRecaptured category snapshot.`,
+        },
         head.revisionNumber,
         head.assetHashes,
       ),
