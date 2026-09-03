@@ -272,6 +272,13 @@ test("every protected entry point requests its exact capability", () => {
       "draft:edit",
       "review:decide",
     ],
+    "src/app/admin/content/articles/[id]/history/[revisionNumber]/[revisionId]/page.tsx": [
+      "content:read",
+    ],
+    "src/app/admin/content/articles/[id]/history/[revisionNumber]/page.tsx": [
+      "content:read",
+    ],
+    "src/app/admin/content/articles/[id]/history/page.tsx": ["content:read"],
     "src/app/admin/content/articles/[id]/page.tsx": ["content:read"],
     "src/app/admin/content/articles/new/page.tsx": ["draft:edit"],
     "src/app/admin/content/assets/[hash]/route.ts": ["content:read"],
