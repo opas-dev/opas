@@ -150,10 +150,12 @@ test("routes every remote Cloudflare package command through target validation",
   for (const name of [
     "cf:backfill",
     "cf:backfill:crofusion",
+    "cf:build:maintenance",
     "cf:deploy",
     "cf:dry-run",
     "cf:migrate",
     "cf:seed",
+    "cf:upload:maintenance",
   ]) {
     assert.match(packageJson.scripts[name], /scripts\/run-cloudflare\.ts/u);
   }

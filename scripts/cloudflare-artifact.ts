@@ -102,7 +102,7 @@ const safeCloudflarePathPattern = process.platform === "win32"
   ? /^[A-Za-z0-9_./:\\@+-]+$/
   : /^[A-Za-z0-9_./:@+-]+$/;
 
-export type CloudflareArtifactCommand = "deploy" | "preview";
+export type CloudflareArtifactCommand = "deploy" | "preview" | "upload";
 type CloudflareArgumentMode = CloudflareArtifactCommand | "build" | "data";
 
 export type CloudflareBuild = {
@@ -710,7 +710,7 @@ export function cloudflareCommandArguments(
       continue;
     }
     if (externalEqualsOption) {
-      if (mode === "build" || mode === "data") {
+      if (mode === "build" || mode === "data" || mode === "upload") {
         throw new Error(
           `${externalEqualsOption} is not supported for this Cloudflare command.`,
         );
@@ -723,7 +723,7 @@ export function cloudflareCommandArguments(
       continue;
     }
     if (externalCommandPathOptions.has(argument)) {
-      if (mode === "build" || mode === "data") {
+      if (mode === "build" || mode === "data" || mode === "upload") {
         throw new Error(
           `${argument} is not supported for this Cloudflare command.`,
         );
@@ -1001,11 +1001,12 @@ function cloudflareUploadEntry(bundle: string) {
 export function cloudflareExactUploadArguments(
   entry: string,
   commandArguments: string[],
+  versionOnly = false,
 ) {
   return [
     "exec",
     "wrangler",
-    "deploy",
+    ...(versionOnly ? ["versions", "upload"] : ["deploy"]),
     entry,
     "--no-bundle",
     "--strict",
@@ -1025,6 +1026,19 @@ export function cloudflareSecretListArguments(configPath: string) {
     "list",
     "--format",
     "json",
+    "--config",
+    configPath,
+  ];
+}
+
+export function cloudflareDeploymentListArguments(configPath: string) {
+  assertSafeCloudflarePath(configPath, "Cloudflare isolated config path");
+  return [
+    "exec",
+    "wrangler",
+    "deployments",
+    "list",
+    "--json",
     "--config",
     configPath,
   ];
@@ -1145,6 +1159,29 @@ async function readCloudflareRemoteSecretNames(
   }
 }
 
+async function readCloudflareRemoteDeployments(
+  project: string,
+  configPath: string,
+  environment: Record<string, string | undefined>,
+) {
+  const output = await runCloudflareProcess(
+    "pnpm",
+    cloudflareDeploymentListArguments(configPath),
+    {
+      captureOutput: true,
+      cwd: project,
+      environment: { ...environment, CI: "1", NO_COLOR: "1" },
+    },
+  );
+  try {
+    const deployments = JSON.parse(output) as unknown;
+    if (!Array.isArray(deployments)) throw new Error();
+    return deployments;
+  } catch {
+    throw new Error("Wrangler returned an invalid Cloudflare deployment list.");
+  }
+}
+
 export function validateCloudflareRemoteSecretState(
   state: Readonly<{ exists: boolean; names: readonly string[] }>,
   requiredNames: readonly string[],
@@ -1176,11 +1213,12 @@ async function runScannedCloudflareDeployment(
   scanEnvironment: Record<string, string | undefined>,
   secrets: string[],
   secretFiles: string[],
-  upload: boolean,
+  upload: "deploy" | "version" | false,
   configPath: string,
   expectedTarget: RunOptions["expectedTarget"],
   requiredSecretNames: readonly string[],
   workerName: string,
+  maintenance = false,
 ) {
   const dryRun = dryRunArguments(
     project,
@@ -1233,6 +1271,7 @@ async function runScannedCloudflareDeployment(
         project,
         configPath,
         expectedTarget,
+        maintenance,
       );
       if (cloudflareFilesDigest(guardedFiles) !== guardedDigest) {
         throw new Error(
@@ -1247,7 +1286,15 @@ async function runScannedCloudflareDeployment(
     const assets = join(project, ".open-next", "assets");
     const bundleDigest = cloudflareTreeDigest(dryRun.output);
     const assetsDigest = cloudflareTreeDigest(assets);
-    const uploadsAllRequiredSecrets = secretFiles.length === 1;
+    const uploadsAllRequiredSecrets =
+      upload === "deploy" && secretFiles.length === 1;
+    const deploymentsBefore = upload === "version"
+      ? await readCloudflareRemoteDeployments(
+          project,
+          preparedConfigPath,
+          directEnvironment,
+        )
+      : undefined;
     const restoreInputs = freezeCloudflareUploadInputs([
       dryRun.output,
       assets,
@@ -1271,6 +1318,7 @@ async function runScannedCloudflareDeployment(
         cloudflareExactUploadArguments(
           entry,
           remapCommandArguments(workspace, project, commandArguments),
+          upload === "version",
         ),
         project,
         directEnvironment,
@@ -1287,6 +1335,19 @@ async function runScannedCloudflareDeployment(
         requiredSecretNames,
         false,
       );
+      if (
+        deploymentsBefore &&
+        !isDeepStrictEqual(
+          deploymentsBefore,
+          await readCloudflareRemoteDeployments(
+            project,
+            preparedConfigPath,
+            directEnvironment,
+          ),
+        )
+      ) {
+        throw new Error("Cloudflare version upload changed the active deployment.");
+      }
       await validateGuardedInputs();
     } finally {
       restoreInputs();
@@ -1435,8 +1496,35 @@ async function validatePreparedCloudflareConfig(
   project: string,
   configPath: string,
   expectedTarget: RunOptions["expectedTarget"],
+  maintenance = false,
 ) {
   const { workspaceRelativePath } = workspacePath(workspace, configPath);
+  if (maintenance) {
+    if (!expectedTarget) {
+      throw new Error("Cloudflare maintenance requires an exact validated target.");
+    }
+    const preparedConfigPath = join(project, workspaceRelativePath);
+    const source = readFileSync(preparedConfigPath, "utf8");
+    const config = JSON.parse(source.split("\n").slice(2).join("\n")) as Record<
+      string,
+      unknown
+    >;
+    const expectedConfig = maintenanceCloudflareConfig(
+      expectedTarget.config as Parameters<typeof maintenanceCloudflareConfig>[0],
+    );
+    if (!isDeepStrictEqual(config, expectedConfig)) {
+      throw new Error(
+        "The isolated maintenance config no longer matches the validated target.",
+      );
+    }
+    return {
+      ...expectedTarget,
+      config,
+      configPath: preparedConfigPath,
+      secretNames: [],
+      sourcePrefix: source.slice(0, source.indexOf("{")),
+    };
+  }
   const { readCloudflareTarget } = await import("./bootstrap-cloudflare");
   const target = readCloudflareTarget(workspaceRelativePath, project);
 
@@ -1493,6 +1581,7 @@ export async function runBuiltCloudflareCommand(
     project,
     parsedArguments.configPath,
     options.expectedTarget,
+    options.maintenance,
   );
   if (
     snapshot.files.length > 0 &&
@@ -1505,7 +1594,12 @@ export async function runBuiltCloudflareCommand(
       "The validated secret file must match secrets.required in the isolated config.",
     );
   }
-  if (command === "deploy") {
+  if (command === "upload" && (!options.maintenance || !options.expectedTarget)) {
+    throw new Error(
+      "Cloudflare version uploads require an exact maintenance target.",
+    );
+  }
+  if (command === "deploy" || command === "upload") {
     await runScannedCloudflareDeployment(
       project,
       workspace,
@@ -1514,11 +1608,18 @@ export async function runBuiltCloudflareCommand(
       scanEnvironment,
       secrets,
       snapshot.files,
-      !hasOption(commandArguments, "--dry-run"),
+      command === "upload"
+        ? "version"
+        : hasOption(commandArguments, "--dry-run")
+          ? false
+          : "deploy",
       parsedArguments.configPath,
       options.expectedTarget,
-      preparedTarget.secretNames,
+      command === "upload"
+        ? options.expectedTarget?.secretNames ?? []
+        : preparedTarget.secretNames,
       preparedTarget.workerName,
+      options.maintenance,
     );
     return;
   }

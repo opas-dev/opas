@@ -67,6 +67,12 @@ test("Cloudflare exposes isolated local and remote backfill commands", async () 
     scripts["db:backfill:d1:local"],
     "tsx scripts/run-cloudflare.ts backfill --local",
   );
+  assert.equal(
+    scripts["cf:upload:maintenance"],
+    "tsx scripts/run-cloudflare.ts upload --maintenance",
+  );
+  assert.match(runner, /command === "upload" && !maintenance/u);
+  assert.match(runner, /maintenance: true/u);
   assert.match(runner, /verifyCloudflareDatabaseTarget\(target\)/u);
   assert.match(runner, /prepareCloudflareTargetSnapshot\(target\)/u);
   assert.match(runner, /environment: cloudflareCommandEnvironment\(target\.accountId\)/u);

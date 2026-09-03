@@ -32,17 +32,30 @@ async function runWrangler(
 async function main(args: string[]) {
   const [command, ...commandArgs] = args;
   if (
-    !["backfill", "build", "deploy", "preview", "migrate", "seed"].includes(
+    ![
+      "backfill",
+      "build",
+      "deploy",
+      "preview",
+      "migrate",
+      "seed",
+      "upload",
+    ].includes(
       command,
     )
   ) {
     throw new Error(
-      "Usage: run-cloudflare.ts <backfill|build|deploy|preview|migrate|seed> [arguments]",
+      "Usage: run-cloudflare.ts <backfill|build|deploy|preview|migrate|seed|upload> [arguments]",
     );
   }
   const maintenance = commandArgs[0] === "--maintenance";
-  if (maintenance && command !== "build") {
-    throw new Error("Maintenance mode is available only for isolated Cloudflare builds.");
+  if (maintenance && command !== "build" && command !== "upload") {
+    throw new Error(
+      "Maintenance mode is available only for isolated Cloudflare builds and version uploads.",
+    );
+  }
+  if (command === "upload" && !maintenance) {
+    throw new Error("Cloudflare version uploads are restricted to maintenance mode.");
   }
   const localData =
     (command === "backfill" || command === "seed") &&
@@ -59,7 +72,9 @@ async function main(args: string[]) {
         ? "build"
         : command === "deploy"
           ? "deploy"
-          : "preview";
+          : command === "upload"
+            ? "upload"
+            : "preview";
   const parsed = cloudflareCommandArguments(targetArgs, mode);
   const target = readCloudflareTarget(parsed.configPath);
   cloudflareCommandEnvironment(target.accountId);
@@ -73,6 +88,15 @@ async function main(args: string[]) {
       environment,
       expectedTarget: target,
       maintenance,
+    });
+    return;
+  }
+  if (command === "upload") {
+    await verifyCloudflareDatabaseTarget(target);
+    await buildAndRunCloudflareCommand(command, targetArgs, {
+      environment,
+      expectedTarget: target,
+      maintenance: true,
     });
     return;
   }

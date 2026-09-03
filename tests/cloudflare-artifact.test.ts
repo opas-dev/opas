@@ -25,6 +25,7 @@ import {
   buildAndRunCloudflareCommand,
   cloudflareBuildEnvironment,
   cloudflareCommandArguments,
+  cloudflareDeploymentListArguments,
   cloudflareExactUploadArguments,
   cloudflareSecretListArguments,
   isMissingCloudflareWorkerSecretListError,
@@ -609,14 +610,16 @@ test("routes shared and build-only arguments to the matching commands", () => {
       ),
     /cannot be passed safely/,
   );
-  for (const args of [
-    ["--secrets-file", "/tmp/secrets.json"],
-    ["--secrets-file=/tmp/secrets.json"],
-  ]) {
-    assert.throws(
-      () => cloudflareCommandArguments(args, "data"),
-      /not supported for this Cloudflare command/,
-    );
+  for (const mode of ["data", "upload"] as const) {
+    for (const args of [
+      ["--secrets-file", "/tmp/secrets.json"],
+      ["--secrets-file=/tmp/secrets.json"],
+    ]) {
+      assert.throws(
+        () => cloudflareCommandArguments(args, mode),
+        /not supported for this Cloudflare command/,
+      );
+    }
   }
 });
 
@@ -660,9 +663,39 @@ test("uploads the scanned Worker entry without rebuilding it", () => {
       "--secrets-file=/tmp/private/secrets.json",
     ],
   );
+  assert.deepEqual(
+    cloudflareExactUploadArguments(
+      "/tmp/scanned/custom-worker.js",
+      ["--config", "/tmp/project/wrangler.jsonc"],
+      true,
+    ),
+    [
+      "exec",
+      "wrangler",
+      "versions",
+      "upload",
+      "/tmp/scanned/custom-worker.js",
+      "--no-bundle",
+      "--strict",
+      "--config",
+      "/tmp/project/wrangler.jsonc",
+    ],
+  );
 });
 
 test("audits the remote secret names through the isolated config", () => {
+  assert.deepEqual(
+    cloudflareDeploymentListArguments("/tmp/private/wrangler.jsonc"),
+    [
+      "exec",
+      "wrangler",
+      "deployments",
+      "list",
+      "--json",
+      "--config",
+      "/tmp/private/wrangler.jsonc",
+    ],
+  );
   assert.deepEqual(
     cloudflareSecretListArguments("/tmp/private/wrangler.jsonc"),
     [
@@ -696,6 +729,9 @@ test("audits the remote secret names through the isolated config", () => {
   }
   assert.throws(() =>
     cloudflareSecretListArguments("/tmp/private/config.jsonc;injected"),
+  );
+  assert.throws(() =>
+    cloudflareDeploymentListArguments("/tmp/private/config.jsonc;injected"),
   );
 });
 

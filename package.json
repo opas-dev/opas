@@ -44,6 +44,7 @@
     "cf:bootstrap": "node --env-file=.env --import tsx scripts/bootstrap-cloudflare.ts",
     "cf:build": "tsx scripts/run-cloudflare.ts build",
     "cf:build:maintenance": "tsx scripts/run-cloudflare.ts build --maintenance",
+    "cf:upload:maintenance": "tsx scripts/run-cloudflare.ts upload --maintenance",
     "cf:deploy": "tsx scripts/run-cloudflare.ts deploy",
     "cf:dry-run": "tsx scripts/run-cloudflare.ts deploy --dry-run",
     "cf:backfill": "tsx scripts/run-cloudflare.ts backfill",
