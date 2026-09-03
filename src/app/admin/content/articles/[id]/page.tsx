@@ -5,7 +5,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ArticleEditor } from "@/app/admin/content/article-editor";
-import { ArticlePreviewManagement } from "@/app/admin/content/article-preview-management";
 import { AdminHeader } from "@/app/admin/header";
 import { requireMemberCapability } from "@/auth/admin";
 import { getRepository } from "@/db";
@@ -22,19 +21,14 @@ export default async function EditArticlePage({ params }: PageProps<"/admin/cont
   const admin = await requireMemberCapability("content:read", demoIds.workspace);
   const { id } = await params;
   const repository = await getRepository();
-  const [head, categories] = await Promise.all([
-    repository.getArticleWorkingHead({
-      actor: { memberId: admin.memberId, sessionId: admin.sessionId },
-      articleId: id,
-      workspaceId: demoIds.workspace,
-    }),
+  const [article, categories] = await Promise.all([
+    repository.getArticle(demoIds.workspace, id),
     repository.listCategories(demoIds.workspace),
   ]);
 
-  if (!head) {
+  if (!article) {
     notFound();
   }
-  const article = head.article;
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -45,17 +39,11 @@ export default async function EditArticlePage({ params }: PageProps<"/admin/cont
         </Link>
         <div className="mb-10 mt-6 max-w-3xl">
           <p className="m-0 text-sm font-semibold text-primary">
-            {head.publicStatus === "published" ? "Published answer" : "Private draft"}
+            {article.status === "published" ? "Published answer" : "Private draft"}
           </p>
           <h1 className="mb-0 mt-3 text-3xl font-semibold tracking-[-0.03em] text-balance sm:text-4xl">
             Edit {article.title}
           </h1>
-        </div>
-        <div className="mb-8">
-          <ArticlePreviewManagement
-            revisionId={head.revisionId}
-            revisionNumber={head.revisionNumber}
-          />
         </div>
         <ArticleEditor
           categories={categories.map(({ id: categoryId, name }) => ({ id: categoryId, name }))}
@@ -65,7 +53,7 @@ export default async function EditArticlePage({ params }: PageProps<"/admin/cont
             title: article.title,
             slug: article.slug,
             mdx: article.mdx,
-            status: head.publicStatus,
+            status: article.status,
             isFaq: article.isFaq,
             authorName: article.authorName,
           }}
