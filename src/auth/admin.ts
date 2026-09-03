@@ -16,6 +16,7 @@ import {
   databaseSessionCookieOptions,
 } from "@/auth/database-session";
 import {
+  authorizeMemberRequest,
   authorizeMemberSession,
   MemberSessionError,
 } from "@/auth/member-authorization";
@@ -24,6 +25,22 @@ import type { MemberLoginSession } from "@/auth/member-login";
 import type { ActiveMemberSession } from "@/auth/member-repository";
 
 const loginPath = "/admin/login";
+
+async function resolveRequiredMemberSession(
+  authorize: () => Promise<ActiveMemberSession>,
+): Promise<ActiveMemberSession> {
+  try {
+    return await authorize();
+  } catch (error) {
+    if (error instanceof MemberSessionError) {
+      redirect(loginPath);
+    }
+    if (error instanceof AuthorizationError) {
+      notFound();
+    }
+    throw error;
+  }
+}
 
 export async function startAdminSession(
   session: MemberLoginSession,
@@ -79,8 +96,8 @@ export async function requireMemberCapability(
   const { deploymentId, sessionSecret } = getAdminSessionConfig();
   const token = (await cookies()).get(databaseSessionCookieName(deploymentId))?.value;
 
-  try {
-    return await authorizeMemberSession(
+  return resolveRequiredMemberSession(async () =>
+    authorizeMemberSession(
       {
         capability,
         checkedAt: new Date(),
@@ -90,14 +107,28 @@ export async function requireMemberCapability(
         workspaceId,
       },
       await getMemberRepository(),
-    );
-  } catch (error) {
-    if (error instanceof MemberSessionError) {
-      redirect(loginPath);
-    }
-    if (error instanceof AuthorizationError) {
-      notFound();
-    }
-    throw error;
-  }
+    ),
+  );
+}
+
+export async function requireMemberRequestCapability(
+  request: Pick<Request, "headers">,
+  capability: Capability,
+  workspaceId: string,
+): Promise<ActiveMemberSession> {
+  const { deploymentId, sessionSecret } = getAdminSessionConfig();
+
+  return resolveRequiredMemberSession(async () =>
+    authorizeMemberRequest(
+      request,
+      {
+        capability,
+        checkedAt: new Date(),
+        deploymentId,
+        sessionSecret,
+        workspaceId,
+      },
+      await getMemberRepository(),
+    ),
+  );
 }

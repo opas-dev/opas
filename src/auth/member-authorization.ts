@@ -1,7 +1,10 @@
 // ABOUTME: Authorizes named members from strict session claims and authoritative database state.
 // ABOUTME: Rejects stale identity before applying the current role's exact requested capability.
 import { requireCapability, type Capability } from "@/auth/capabilities";
-import { verifyDatabaseSessionToken } from "@/auth/database-session";
+import {
+  databaseSessionCookieName,
+  verifyDatabaseSessionToken,
+} from "@/auth/database-session";
 import type {
   ActiveMemberSession,
   MemberRepository,
@@ -24,6 +27,24 @@ export type MemberAuthorizationRequest = Readonly<{
   token: string | undefined;
   workspaceId: string;
 }>;
+
+type MemberRequestAuthorization = Omit<MemberAuthorizationRequest, "token">;
+
+export async function authorizeMemberRequest(
+  request: Pick<Request, "headers">,
+  authorization: MemberRequestAuthorization,
+  repository: MemberRepository,
+): Promise<ActiveMemberSession> {
+  const cookieName = databaseSessionCookieName(authorization.deploymentId);
+  const matches = (request.headers.get("cookie") ?? "")
+    .split(";")
+    .map((field) => field.trim())
+    .filter((field) => field.startsWith(`${cookieName}=`));
+  const token =
+    matches.length === 1 ? matches[0]?.slice(cookieName.length + 1) : undefined;
+
+  return authorizeMemberSession({ ...authorization, token }, repository);
+}
 
 export async function authorizeMemberSession(
   request: MemberAuthorizationRequest,

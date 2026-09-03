@@ -5,6 +5,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import { NextRequest } from "next/server";
+
 import {
   AuthorizationError,
   capabilities,
@@ -13,8 +15,12 @@ import {
   type Capability,
   type TeamRole,
 } from "@/auth/capabilities";
-import { createDatabaseSessionToken } from "@/auth/database-session";
 import {
+  createDatabaseSessionToken,
+  databaseSessionCookieName,
+} from "@/auth/database-session";
+import {
+  authorizeMemberRequest,
   authorizeMemberSession,
   MemberSessionError,
 } from "@/auth/member-authorization";
@@ -226,6 +232,51 @@ test("the same signed token immediately observes a database role change", async 
   );
 });
 
+test("route authorization reads its supplied request outside ambient Next request scope", async () => {
+  const token = await signedToken();
+  const request = new NextRequest("https://docs.example.com/admin/content/preview", {
+    headers: {
+      cookie: `${databaseSessionCookieName(deploymentId)}=${token}`,
+    },
+    method: "POST",
+  });
+  const member = activeMember("editor");
+  const repository = repositoryWithSession(async () => member);
+
+  const authorized = await Promise.all(
+    Array.from({ length: 4 }, async () => {
+      await Promise.resolve();
+      return authorizeMemberRequest(
+        request,
+        {
+          capability: "content:read",
+          checkedAt,
+          deploymentId,
+          sessionSecret,
+          workspaceId,
+        },
+        repository,
+      );
+    }),
+  );
+
+  assert.deepEqual(authorized, [member, member, member, member]);
+});
+
+test("live preview binds authorization to the route request object", () => {
+  const source = readFileSync(
+    path.join(process.cwd(), "src/app/admin/content/preview/route.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /POST\(request: NextRequest\)/u);
+  assert.match(
+    source,
+    /requireMemberRequestCapability\(\s*request,\s*"content:read",\s*demoIds\.workspace,?\s*\)/u,
+  );
+  assert.doesNotMatch(source, /requireMemberCapability\(/u);
+});
+
 test("the administrator runtime maps capability denial to a concealed not-found response", () => {
   const source = readFileSync(
     path.join(process.cwd(), "src/auth/admin.ts"),
@@ -319,7 +370,7 @@ test("every protected entry point requests its exact capability", () => {
   for (const [file, expected] of Object.entries(expectedCapabilities)) {
     const source = readFileSync(path.join(process.cwd(), file), "utf8");
     const actual = [...source.matchAll(
-      /requireMemberCapability\(\s*"([^"]+)"\s*,\s*demoIds\.workspace\s*\)/gu,
+      /requireMember(?:Request)?Capability\(\s*(?:request\s*,\s*)?"([^"]+)"\s*,\s*demoIds\.workspace,?\s*\)/gu,
     )].map((match) => match[1]);
     assert.deepEqual(actual, expected, file);
     assert.doesNotMatch(source, /requireAdmin/u, file);
