@@ -23,7 +23,7 @@ import {
 import { resolveSiteOrigin } from "@/site";
 
 export const mcpProtocolVersion = "2026-07-28";
-export const opasProductVersion = "0.2.0";
+export const opasProductVersion = "0.3.0";
 export const maximumMcpRequestUtf8Bytes = 16 * 1024;
 
 type McpErrorDetails = Readonly<{ type: string }>;

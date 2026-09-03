@@ -276,7 +276,7 @@ test("MCP lists only deterministic read-only search and read tools", async () =>
   assert.equal(response.headers.get("mcp-session-id"), null);
   assert.deepEqual(
     body.result._meta["io.modelcontextprotocol/serverInfo"],
-    { name: "opas-public-help", version: "0.2.0" },
+    { name: "opas-public-help", version: "0.3.0" },
   );
   assert.equal(body.result.resultType, "complete");
   assert.equal(body.result.ttlMs, 0);
@@ -302,7 +302,7 @@ test("MCP product metadata matches the OPAS Answers package version", async () =
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as { version?: unknown };
 
-  assert.equal(opasProductVersion, "0.2.0");
+  assert.equal(opasProductVersion, "0.3.0");
   assert.equal(packageJson.version, opasProductVersion);
 });
 
